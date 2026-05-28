@@ -1,0 +1,23 @@
+{
+  "name": "@aux/dsp-limiter",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Look-ahead brick-wall peak limiter — Rust DSP compiled to WASM, exposed as ES module.",
+  "type": "module",
+  "main": "./wasm/limiter.js",
+  "types": "./wasm/limiter.d.ts",
+  "files": ["wasm"],
+  "exports": {
+    ".": {
+      "types": "./wasm/limiter.d.ts",
+      "default": "./wasm/limiter.js"
+    },
+    "./limiter_bg.wasm": "./wasm/limiter_bg.wasm",
+    "./package.json": "./package.json"
+  },
+  "scripts": {
+    "build": "wasm-pack build --release --target web --out-dir wasm --out-name limiter && rm -f wasm/.gitignore wasm/package.json",
+    "test:rust": "cargo test --release",
+    "clean": "rm -rf wasm target"
+  }
+}

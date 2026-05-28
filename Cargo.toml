@@ -1,6 +1,11 @@
 [workspace]
 resolver = "2"
-members = ["packages/dsp-eq8", "packages/dsp-comp-clean", "packages/dsp-comp-color"]
+members = [
+  "packages/dsp-eq8",
+  "packages/dsp-comp-clean",
+  "packages/dsp-comp-color",
+  "packages/dsp-limiter",
+]
 
 # Optimize WASM size + perf for release builds.
 [profile.release]

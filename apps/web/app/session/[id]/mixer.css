@@ -217,6 +217,68 @@
   text-transform: uppercase;
 }
 
+/* ─── Master limiter (only rendered on the Master bus strip) ───────── */
+
+.bus-limiter {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px 6px;
+  border-bottom: 1px solid #0a0c10;
+  background: rgba(46, 95, 168, 0.06);
+}
+
+.bus-limiter-toggle {
+  width: 100%;
+  height: 18px;
+  font-family: var(--font-mono);
+  font-size: 9px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  background: linear-gradient(180deg, #2a3038, #14171c);
+  border: 1px solid #0a0c10;
+  border-radius: 2px;
+  color: #6b7280;
+  cursor: pointer;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.06);
+  transition: color 100ms ease, background 100ms ease;
+}
+
+.bus-limiter-toggle:hover:not(.on) {
+  color: #c5d5ec;
+}
+
+.bus-limiter-toggle.on {
+  background: linear-gradient(180deg, #3a4860, #1c2638);
+  color: #dce7f5;
+  border-color: rgba(46, 95, 168, 0.45);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.14), 0 0 6px rgba(46, 95, 168, 0.3);
+}
+
+.bus-limiter-knobs {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 4px;
+}
+
+.bus-limiter .knob-wrap {
+  gap: 3px;
+}
+
+.bus-limiter .knob {
+  width: 22px;
+  height: 22px;
+}
+
+.bus-limiter .knob-label {
+  font-size: 7px;
+}
+
+.bus-limiter .knob-readout {
+  font-size: 8px;
+  color: #939aa5;
+}
+
 .mixer.mixer-fullscreen .ch-strip {
   min-height: 0;
   height: 100%;

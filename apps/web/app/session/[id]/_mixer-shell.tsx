@@ -11,8 +11,12 @@ import {
   DEFAULT_CHANNEL_COMP,
   DEFAULT_CHANNEL_EQ,
   DEFAULT_COMP_TYPE,
+  DEFAULT_LIMITER_STATE,
   DEFAULT_MASTER_BUS,
+  DEFAULT_MASTER_CHAIN,
+  type LimiterState,
   MIX_STATE_VERSION,
+  type MasterChain,
   MixStateSchema,
 } from '@aux/session-doc';
 import Link from 'next/link';
@@ -81,6 +85,7 @@ function formatTime(seconds: number): string {
 interface HydratedMix {
   channels: Record<string, ChannelState>;
   buses: Record<string, BusState>;
+  masterChain: MasterChain;
 }
 
 /**
@@ -95,23 +100,28 @@ function hydrateMixState(raw: unknown): HydratedMix {
   const empty: HydratedMix = {
     channels: {},
     buses: { [MASTER_BUS_ID]: { ...DEFAULT_MASTER_BUS } },
+    masterChain: { limiter: { ...DEFAULT_LIMITER_STATE } },
   };
 
   if (raw == null) return empty;
 
   const current = MixStateSchema.safeParse(raw);
   if (current.success) {
-    // Ensure Master exists even if a malformed v5 doc dropped it.
+    // Ensure Master exists even if a malformed v7 doc dropped it.
     const buses = { ...current.data.buses };
     if (!buses[MASTER_BUS_ID]) buses[MASTER_BUS_ID] = { ...DEFAULT_MASTER_BUS };
-    return { channels: current.data.channels, buses };
+    return {
+      channels: current.data.channels,
+      buses,
+      masterChain: current.data.masterChain,
+    };
   }
 
   if (typeof raw !== 'object' || raw === null || !('version' in raw) || !('channels' in raw)) {
     return empty;
   }
   const ver = (raw as { version: unknown }).version;
-  if (typeof ver !== 'number' || ver < 1 || ver > 5) return empty;
+  if (typeof ver !== 'number' || ver < 1 || ver > 6) return empty;
 
   const channels = (raw as { channels: Record<string, unknown> }).channels;
   const upgradedChannels: Record<string, ChannelState> = {};
@@ -138,7 +148,11 @@ function hydrateMixState(raw: unknown): HydratedMix {
       sends: c.sends ?? {},
     };
   }
-  return { channels: upgradedChannels, buses: { [MASTER_BUS_ID]: { ...DEFAULT_MASTER_BUS } } };
+  return {
+    channels: upgradedChannels,
+    buses: { [MASTER_BUS_ID]: { ...DEFAULT_MASTER_BUS } },
+    masterChain: { ...DEFAULT_MASTER_CHAIN, limiter: { ...DEFAULT_LIMITER_STATE } },
+  };
 }
 
 /**
@@ -204,6 +218,7 @@ export function MixerShell({
     () => hydrated.channels
   );
   const [busState, setBusState] = useState<Record<string, BusState>>(() => hydrated.buses);
+  const [masterChain, setMasterChain] = useState<MasterChain>(() => hydrated.masterChain);
   const [loadedIds, setLoadedIds] = useState<Set<string>>(new Set());
   const [stemsOpen, setStemsOpen] = useState(initialStems.length === 0);
   const [saveStatus, setSaveStatus] = useState<SaveStatus>('idle');
@@ -230,6 +245,10 @@ export function MixerShell({
   useEffect(() => {
     busStateRef.current = busState;
   }, [busState]);
+  const masterChainRef = useRef(masterChain);
+  useEffect(() => {
+    masterChainRef.current = masterChain;
+  }, [masterChain]);
 
   // Tear down on unmount.
   useEffect(() => {
@@ -273,6 +292,7 @@ export function MixerShell({
             version: MIX_STATE_VERSION,
             channels: channelStateRef.current,
             buses: busStateRef.current,
+            masterChain: masterChainRef.current,
           }),
         });
         if (!res.ok) throw new Error(`save failed (${res.status})`);
@@ -289,7 +309,7 @@ export function MixerShell({
         saveTimer.current = null;
       }
     };
-  }, [channelState, busState, sessionId]);
+  }, [channelState, busState, masterChain, sessionId]);
 
   // Flush any pending debounced save before the page unloads. `pagehide` is
   // more reliable than `beforeunload` (especially on Safari / mobile). The
@@ -312,6 +332,7 @@ export function MixerShell({
             version: MIX_STATE_VERSION,
             channels: channelStateRef.current,
             buses: busStateRef.current,
+            masterChain: masterChainRef.current,
           }),
         });
       } catch {
@@ -363,6 +384,8 @@ export function MixerShell({
       compCleanWasmUrl: '/comp_clean_bg.wasm',
       compColorWorkletUrl: '/comp-color-worklet.js',
       compColorWasmUrl: '/comp_color_bg.wasm',
+      limiterWorkletUrl: '/limiter-worklet.js',
+      limiterWasmUrl: '/limiter_bg.wasm',
     });
     await host.start();
     hostRef.current = host;
@@ -441,6 +464,11 @@ export function MixerShell({
       host.setBusGain(bus.id, bus.gain, 0);
       host.setBusMute(bus.id, bus.muted, 0);
     }
+
+    // Master limiter — push saved params + bypass flag.
+    const lim = masterChainRef.current.limiter;
+    host.setMasterLimiter(lim.thresholdDb, lim.releaseMs, lim.makeupDb);
+    host.setMasterLimiterBypassed(lim.bypassed);
 
     // Route channels to their saved bus. The host's addChannel defaults to
     // Master, so this only does work for non-Master targets — but it's safe
@@ -555,6 +583,25 @@ export function MixerShell({
       const muted = !current.muted;
       hostRef.current?.setBusMute(busId, muted);
       return { ...prev, [busId]: { ...current, muted } };
+    });
+  }, []);
+
+  const setLimiter = useCallback(
+    (field: 'thresholdDb' | 'releaseMs' | 'makeupDb', value: number) => {
+      setMasterChain((prev) => {
+        const next: LimiterState = { ...prev.limiter, [field]: value };
+        hostRef.current?.setMasterLimiter(next.thresholdDb, next.releaseMs, next.makeupDb);
+        return { ...prev, limiter: next };
+      });
+    },
+    []
+  );
+
+  const toggleLimiterBypass = useCallback(() => {
+    setMasterChain((prev) => {
+      const bypassed = !prev.limiter.bypassed;
+      hostRef.current?.setMasterLimiterBypassed(bypassed);
+      return { ...prev, limiter: { ...prev.limiter, bypassed } };
     });
   }, []);
 
@@ -834,6 +881,9 @@ export function MixerShell({
                 active={transport === 'playing'}
                 onGain={(v) => setBusGain(MASTER_BUS_ID, v)}
                 onMute={() => toggleBusMute(MASTER_BUS_ID)}
+                limiter={masterChain.limiter}
+                onLimiter={setLimiter}
+                onLimiterBypass={toggleLimiterBypass}
               />
             )}
           </div>

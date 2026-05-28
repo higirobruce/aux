@@ -1,9 +1,10 @@
 'use client';
 
 import type { AudioHost } from '@aux/audio-engine';
-import type { BusState } from '@aux/session-doc';
+import type { BusState, LimiterState } from '@aux/session-doc';
 import { useEffect, useRef, useState } from 'react';
 import { Fader } from './_fader';
+import { Knob } from './_knob';
 import { Meter } from './_meter';
 
 interface Props {
@@ -16,6 +17,10 @@ interface Props {
   onDelete?: () => void;
   /** Provided only for user buses — Master's name is fixed. */
   onRename?: (name: string) => void;
+  /** Master-only — limiter on the Master chain. */
+  limiter?: LimiterState;
+  onLimiter?: (field: 'thresholdDb' | 'releaseMs' | 'makeupDb', value: number) => void;
+  onLimiterBypass?: () => void;
 }
 
 // Same dB ↔ position mapping as the channel fader.
@@ -53,13 +58,30 @@ function formatDb(gain: number): string {
   return `${sign}${Math.abs(db).toFixed(1)}`;
 }
 
+function formatLimiterDb(db: number): string {
+  if (Math.abs(db) < 0.05) return '0';
+  const sign = db > 0 ? '+' : '−';
+  return `${sign}${Math.abs(db).toFixed(1)}`;
+}
+
 /**
  * Bus strip — same visual language as ChannelStrip but stripped down to
  * the essentials. No EQ / comp / pan, just fader + meter + mute + dB
  * readout. Used today for the Master bus; will host user-created buses
  * once the routing UI lands.
  */
-export function BusStrip({ bus, host, active, onGain, onMute, onDelete, onRename }: Props) {
+export function BusStrip({
+  bus,
+  host,
+  active,
+  onGain,
+  onMute,
+  onDelete,
+  onRename,
+  limiter,
+  onLimiter,
+  onLimiterBypass,
+}: Props) {
   const [editing, setEditing] = useState(false);
   const [draftName, setDraftName] = useState(bus.name);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -130,6 +152,46 @@ export function BusStrip({ bus, host, active, onGain, onMute, onDelete, onRename
         </div>
       )}
       <div className="ch-meta">bus</div>
+
+      {limiter && onLimiter && onLimiterBypass && (
+        <div className="bus-limiter">
+          <button
+            type="button"
+            className={`bus-limiter-toggle ${limiter.bypassed ? '' : 'on'}`}
+            onClick={onLimiterBypass}
+            aria-pressed={!limiter.bypassed}
+            title={limiter.bypassed ? 'Limiter bypassed — click to engage' : 'Limiter active'}
+          >
+            Limiter
+          </button>
+          <div className="bus-limiter-knobs">
+            <div className="knob-wrap">
+              <Knob
+                value={limiter.thresholdDb}
+                min={-24}
+                max={0}
+                defaultValue={-1}
+                ariaLabel="Limiter threshold"
+                onChange={(v) => onLimiter('thresholdDb', v)}
+              />
+              <span className="knob-label">Th</span>
+              <span className="knob-readout">{formatLimiterDb(limiter.thresholdDb)}</span>
+            </div>
+            <div className="knob-wrap">
+              <Knob
+                value={limiter.makeupDb}
+                min={-12}
+                max={24}
+                defaultValue={0}
+                ariaLabel="Limiter makeup"
+                onChange={(v) => onLimiter('makeupDb', v)}
+              />
+              <span className="knob-label">Mk</span>
+              <span className="knob-readout">{formatLimiterDb(limiter.makeupDb)}</span>
+            </div>
+          </div>
+        </div>
+      )}
 
       <div className="ch-fader-meter">
         <Meter host={host} stemId={bus.id} active={active} variant="bus" />

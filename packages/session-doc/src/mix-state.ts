@@ -13,10 +13,12 @@ import { z } from 'zod';
  * v3 — adds Comp-Clean state per channel.
  * v4 — adds compType ∈ { 'clean', 'color' }.
  * v5 — adds buses + channel.outputBusId.
- * v6 — adds channel.sends — a map of post-fader send levels keyed by bus id.
+ * v6 — adds channel.sends.
+ * v7 — adds masterChain: a brick-wall limiter on the Master bus
+ *      (threshold + release + makeup, plus a bypass flag).
  */
 
-export const MIX_STATE_VERSION = 6;
+export const MIX_STATE_VERSION = 7;
 
 /** Stable id for the always-present Master bus. Sessions can omit it from
  *  their `buses` record; the client treats it as if explicitly present. */
@@ -66,17 +68,49 @@ export const ChannelStateSchema = z.object({
   sends: ChannelSendsSchema,
 });
 
+export const LimiterStateSchema = z.object({
+  /** Brick-wall threshold in dBFS (typically −1.0 for true-peak safety). */
+  thresholdDb: z.number().min(-24).max(0),
+  /** Release time in ms. */
+  releaseMs: z.number().min(5).max(2000),
+  /** Pre-limit makeup gain in dB. */
+  makeupDb: z.number().min(-12).max(24),
+  bypassed: z.boolean(),
+});
+
+export const MasterChainSchema = z.object({
+  limiter: LimiterStateSchema,
+});
+
 export const MixStateSchema = z.object({
   version: z.literal(MIX_STATE_VERSION),
   channels: z.record(z.string(), ChannelStateSchema),
   buses: BusesSchema,
+  masterChain: MasterChainSchema,
 });
 
 export type ChannelEq = z.infer<typeof ChannelEqSchema>;
 export type ChannelComp = z.infer<typeof ChannelCompSchema>;
 export type ChannelStateDoc = z.infer<typeof ChannelStateSchema>;
 export type BusState = z.infer<typeof BusStateSchema>;
+export type LimiterState = z.infer<typeof LimiterStateSchema>;
+export type MasterChain = z.infer<typeof MasterChainSchema>;
 export type MixState = z.infer<typeof MixStateSchema>;
+
+/**
+ * Sensible Master limiter defaults. −1 dBFS threshold protects against
+ * inter-sample peaks on consumer playback even without true-peak detection.
+ */
+export const DEFAULT_LIMITER_STATE: LimiterState = {
+  thresholdDb: -1,
+  releaseMs: 100,
+  makeupDb: 0,
+  bypassed: false,
+};
+
+export const DEFAULT_MASTER_CHAIN: MasterChain = {
+  limiter: { ...DEFAULT_LIMITER_STATE },
+};
 
 /** Default Master bus, added in hydration when absent. */
 export const DEFAULT_MASTER_BUS: BusState = {
@@ -122,5 +156,6 @@ export function emptyMixState(): MixState {
     version: MIX_STATE_VERSION,
     channels: {},
     buses: { [MASTER_BUS_ID]: { ...DEFAULT_MASTER_BUS } },
+    masterChain: { limiter: { ...DEFAULT_LIMITER_STATE } },
   };
 }

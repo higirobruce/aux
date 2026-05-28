@@ -54,6 +54,15 @@ export interface AudioHostOptions {
   compColorWorkletUrl?: string | URL;
   /** URL to comp_color_bg.wasm. */
   compColorWasmUrl?: string | URL;
+  /**
+   * URL to the Limiter worklet (true-peak protection). When provided
+   * alongside `limiterWasmUrl`, the Master bus inserts a Limiter node
+   * between its gain stage and the final analyser. No effect on user buses
+   * (yet) — those gain plugin chains in a later slice.
+   */
+  limiterWorkletUrl?: string | URL;
+  /** URL to limiter_bg.wasm. */
+  limiterWasmUrl?: string | URL;
   /** Sample rate (default: AudioContext default). */
   sampleRate?: number;
 }
@@ -99,8 +108,15 @@ interface BusInternals {
   name: string;
   /** Summing junction — channels and other buses connect here. */
   input: GainNode;
-  /** Bus-level gain (fader). input → gainNode → outputTarget. */
+  /** Bus-level gain (fader). input → gainNode → [chain] → analyser. */
   gainNode: GainNode;
+  /** True-peak limiter — populated only on the Master bus, and only when
+   *  the host was started with limiter URLs. Sits between gainNode and
+   *  analyser so the meter shows the post-limit signal. */
+  limiter: AudioWorkletNode | null;
+  /** Latest gain reduction (≥ 0) from the limiter — used to drive the
+   *  Master strip's GR display. */
+  limiterGrDb: number;
   analyser: AnalyserNode;
   meterBuffer: Float32Array<ArrayBuffer>;
   gain: number;
@@ -160,6 +176,8 @@ export class AudioHost {
   private compWasmModule: WebAssembly.Module | null = null;
   /** Same again for Comp-Color (FET). */
   private compColorWasmModule: WebAssembly.Module | null = null;
+  /** Limiter — currently only used on the Master bus. */
+  private limiterWasmModule: WebAssembly.Module | null = null;
 
   private channels = new Map<string, ChannelInternals>();
   private buses = new Map<string, BusInternals>();
@@ -217,6 +235,17 @@ export class AudioHost {
       );
     }
 
+    if (this.options.limiterWorkletUrl && this.options.limiterWasmUrl) {
+      await this.ctx.audioWorklet.addModule(this.options.limiterWorkletUrl);
+      const res = await fetch(this.options.limiterWasmUrl);
+      if (!res.ok) throw new Error(`limiter wasm fetch failed (${res.status})`);
+      this.limiterWasmModule = await WebAssembly.compileStreaming(
+        new Response(await res.arrayBuffer(), {
+          headers: { 'Content-Type': 'application/wasm' },
+        })
+      );
+    }
+
     this.workletNode = new AudioWorkletNode(this.ctx, 'aux-processor', {
       numberOfInputs: 1,
       numberOfOutputs: 1,
@@ -256,6 +285,7 @@ export class AudioHost {
     for (const bus of this.buses.values()) {
       bus.input.disconnect();
       bus.gainNode.disconnect();
+      if (bus.limiter) bus.limiter.disconnect();
       bus.analyser.disconnect();
     }
     this.buses.clear();
@@ -572,9 +602,25 @@ export class AudioHost {
     gainNode.gain.value = gain;
 
     input.connect(gainNode);
-    gainNode.connect(analyser);
 
+    // Master gets a true-peak limiter inserted between its gain stage and
+    // the analyser, so the post-limit signal is what the meter shows. User
+    // buses skip this until the bus-chain support slice lands.
     const isMaster = init.id === MASTER_BUS_ID;
+    let limiter: AudioWorkletNode | null = null;
+    if (isMaster && this.limiterWasmModule) {
+      limiter = new AudioWorkletNode(this.ctx, 'aux-limiter-processor', {
+        numberOfInputs: 1,
+        numberOfOutputs: 1,
+        outputChannelCount: [2],
+        processorOptions: { wasmModule: this.limiterWasmModule },
+      });
+      gainNode.connect(limiter);
+      limiter.connect(analyser);
+    } else {
+      gainNode.connect(analyser);
+    }
+
     if (isMaster) {
       analyser.connect(this.masterGain);
     } else {
@@ -583,17 +629,27 @@ export class AudioHost {
       analyser.connect(master.input);
     }
 
-    this.buses.set(init.id, {
+    const busInternals: BusInternals = {
       id: init.id,
       name: init.name ?? init.id,
       input,
       gainNode,
+      limiter,
+      limiterGrDb: 0,
       analyser,
       meterBuffer: new Float32Array(analyser.fftSize),
       gain,
       muted: false,
       outputBusId: isMaster ? null : MASTER_BUS_ID,
-    });
+    };
+
+    if (limiter) {
+      limiter.port.onmessage = (e: MessageEvent<{ type: string; db: number }>) => {
+        if (e.data?.type === 'gr') busInternals.limiterGrDb = e.data.db;
+      };
+    }
+
+    this.buses.set(init.id, busInternals);
   }
 
   removeBus(busId: string): void {
@@ -612,8 +668,39 @@ export class AudioHost {
     }
     bus.input.disconnect();
     bus.gainNode.disconnect();
+    if (bus.limiter) bus.limiter.disconnect();
     bus.analyser.disconnect();
     this.buses.delete(busId);
+  }
+
+  // ────────────────────────────────────────────────────────────────────
+  // Master-bus limiter
+  // ────────────────────────────────────────────────────────────────────
+
+  /**
+   * Set the master limiter's three params. No-op if the host wasn't started
+   * with limiter URLs (no limiter node was inserted).
+   */
+  setMasterLimiter(thresholdDb: number, releaseMs: number, makeupDb: number): void {
+    const master = this.buses.get(MASTER_BUS_ID);
+    if (!master?.limiter) return;
+    master.limiter.port.postMessage({
+      type: 'set-params',
+      thresholdDb,
+      releaseMs,
+      makeupDb,
+    });
+  }
+
+  setMasterLimiterBypassed(bypassed: boolean): void {
+    const master = this.buses.get(MASTER_BUS_ID);
+    if (!master?.limiter) return;
+    master.limiter.port.postMessage({ type: 'set-bypassed', bypassed });
+  }
+
+  /** Most recent gain-reduction in dB from the master limiter (≥ 0). */
+  getMasterLimiterGr(): number {
+    return this.buses.get(MASTER_BUS_ID)?.limiterGrDb ?? 0;
   }
 
   setBusGain(busId: string, value: number, rampSec = 0.01): void {
