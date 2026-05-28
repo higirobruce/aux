@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { readAtom, writeAtom } from './atoms.js';
-import { SessionDocSchema, type SessionDoc } from './schema.js';
+import { type SessionDoc, SessionDocSchema } from './schema.js';
 
 function makeDoc(): SessionDoc {
   return SessionDocSchema.parse({

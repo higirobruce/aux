@@ -1,6 +1,6 @@
 import { Body, Controller, Get, Post, Req, UseGuards } from '@nestjs/common';
 import { z } from 'zod';
-import { type AuthenticatedRequest, AuthGuard } from '../auth/auth.guard.js';
+import { AuthGuard, type AuthenticatedRequest } from '../auth/auth.guard.js';
 import { SessionsService } from './sessions.service.js';
 
 const CreateSessionSchema = z.object({

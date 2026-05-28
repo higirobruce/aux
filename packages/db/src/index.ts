@@ -6,7 +6,6 @@
  * happened.
  */
 
-// biome-ignore lint/style/noExportedImports: re-export pattern
 export {
   PrismaClient,
   Prisma,

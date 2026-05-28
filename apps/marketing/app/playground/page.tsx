@@ -6,11 +6,13 @@ export default function PlaygroundPage() {
       </p>
       <h1 className="font-display text-4xl tracking-tight mb-8">Components</h1>
       <p className="text-ink-2 mb-12 max-w-2xl">
-        This route is a live showcase of the @aux/ui components — once they exist.
-        For now, this is a stub. Add components to <code>@aux/ui</code> via{' '}
+        This route is a live showcase of the @aux/ui components — once they exist. For now, this is
+        a stub. Add components to <code>@aux/ui</code> via{' '}
         <code>pnpm dlx shadcn add &lt;name&gt;</code> from <code>apps/web</code>.
       </p>
-      <div className="font-mono text-xs text-ink-3">// TODO: render every component, every state</div>
+      <div className="font-mono text-xs text-ink-3">
+        {/* TODO: render every component, every state */}
+      </div>
     </main>
   );
 }

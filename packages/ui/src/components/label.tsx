@@ -5,6 +5,7 @@ export type LabelProps = React.LabelHTMLAttributes<HTMLLabelElement>;
 
 export const Label = React.forwardRef<HTMLLabelElement, LabelProps>(
   ({ className, ...props }, ref) => (
+    // biome-ignore lint/a11y/noLabelWithoutControl: htmlFor is supplied by the caller (shadcn pattern)
     <label
       ref={ref}
       className={cn(

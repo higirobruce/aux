@@ -17,8 +17,6 @@ describe('AudioHost', () => {
 
   it('send() throws before start() is called', () => {
     const host = new AudioHost({ workletUrl: 'about:blank' });
-    expect(() => host.send({ type: 'transport', action: 'stop' })).toThrow(
-      /AudioHost not started/
-    );
+    expect(() => host.send({ type: 'transport', action: 'stop' })).toThrow(/AudioHost not started/);
   });
 });

@@ -25,7 +25,7 @@ async function getServerSession(): Promise<AuthSession | null> {
 
   if (!res.ok) return null;
   const data = (await res.json()) as AuthSession | null;
-  return data && data.user ? data : null;
+  return data?.user ? data : null;
 }
 
 export default async function MixerPage() {
@@ -39,8 +39,8 @@ export default async function MixerPage() {
         </p>
         <h1 className="font-display text-6xl tracking-tight mb-4">Mixer.</h1>
         <p className="text-ink-2 leading-relaxed mb-6">
-          The session lives here. This route will host the mixer console once the
-          audio engine, channel strips, and session document are wired up.
+          The session lives here. This route will host the mixer console once the audio engine,
+          channel strips, and session document are wired up.
         </p>
 
         {session ? (

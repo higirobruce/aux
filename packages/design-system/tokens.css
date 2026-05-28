@@ -24,10 +24,9 @@
   --ring: var(--azure); /* focus-visible ring, per docs/implementation.html §21 */
 
   /* Type */
-  --font-display: 'Tiempos', 'Iowan Old Style', 'Georgia', serif;
-  --font-sans: 'Söhne', 'Inter', -apple-system, BlinkMacSystemFont, 'Helvetica Neue',
-    sans-serif;
-  --font-mono: 'JetBrains Mono', 'SF Mono', 'Menlo', monospace;
+  --font-display: "Tiempos", "Iowan Old Style", "Georgia", serif;
+  --font-sans: "Söhne", "Inter", -apple-system, BlinkMacSystemFont, "Helvetica Neue", sans-serif;
+  --font-mono: "JetBrains Mono", "SF Mono", "Menlo", monospace;
 
   /* Scale (modular, 1.25 minor third) */
   --t-12: 0.75rem;
