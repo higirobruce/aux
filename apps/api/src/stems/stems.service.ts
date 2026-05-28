@@ -1,5 +1,5 @@
 import { getPrismaClient } from '@aux/db';
-import { ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
+import { Injectable, NotFoundException } from '@nestjs/common';
 import { SessionsService } from '../sessions/sessions.service.js';
 import { StorageService } from '../storage/storage.service.js';
 
@@ -55,12 +55,28 @@ export class StemsService {
     });
   }
 
+  /** Plain list — no signed URLs. */
   async listForSession(userId: string, sessionId: string) {
     await this.sessions.assertOwnership(userId, sessionId);
     return this.db.stem.findMany({
       where: { sessionId },
       orderBy: { createdAt: 'asc' },
     });
+  }
+
+  /** List + a 1-hour signed download URL per stem, for browser playback. */
+  async listForSessionWithUrls(userId: string, sessionId: string) {
+    await this.sessions.assertOwnership(userId, sessionId);
+    const stems = await this.db.stem.findMany({
+      where: { sessionId },
+      orderBy: { createdAt: 'asc' },
+    });
+    return Promise.all(
+      stems.map(async (stem) => ({
+        ...stem,
+        downloadUrl: stem.s3Key ? await this.storage.signGetUrl(stem.s3Key, 3600) : null,
+      }))
+    );
   }
 
   async delete(userId: string, sessionId: string, stemId: string) {

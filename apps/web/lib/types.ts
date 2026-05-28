@@ -32,6 +32,10 @@ export interface Stem {
   createdAt: string;
 }
 
+export interface StemWithUrl extends Stem {
+  downloadUrl: string | null;
+}
+
 export interface SessionDetail extends SessionSummary {
   stems: Stem[];
 }

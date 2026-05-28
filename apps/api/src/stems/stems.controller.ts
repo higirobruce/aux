@@ -40,10 +40,10 @@ export class StemsController {
     });
   }
 
-  /** List stems in a session. */
+  /** List stems in a session, with short-lived signed download URLs. */
   @Get('sessions/:id/stems')
   async list(@Req() req: AuthenticatedRequest, @Param('id') sessionId: string) {
-    return this.stems.listForSession(req.user.id, sessionId);
+    return this.stems.listForSessionWithUrls(req.user.id, sessionId);
   }
 
   /** Register a stem after the client has uploaded to S3. */

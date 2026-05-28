@@ -26,7 +26,10 @@ const nextConfig = {
         source: '/(.*)',
         headers: [
           { key: 'Cross-Origin-Opener-Policy', value: 'same-origin' },
-          { key: 'Cross-Origin-Embedder-Policy', value: 'require-corp' },
+          // credentialless (not require-corp) so cross-origin audio fetches
+          // from R2 / MinIO work without requiring CORP headers on every
+          // response. Still enables SharedArrayBuffer in Chrome/Edge.
+          { key: 'Cross-Origin-Embedder-Policy', value: 'credentialless' },
         ],
       },
     ];

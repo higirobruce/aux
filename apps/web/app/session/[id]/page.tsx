@@ -3,6 +3,7 @@ import type { SessionDetail } from '@/lib/types';
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
 import { StemDropZone } from './_stem-drop-zone';
+import { Transport } from './_transport';
 
 export default async function SessionPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
@@ -30,6 +31,8 @@ export default async function SessionPage({ params }: { params: Promise<{ id: st
           {new Date(session.createdAt).toLocaleString()}
         </p>
       </header>
+
+      <Transport sessionId={session.id} />
 
       <StemDropZone sessionId={session.id} initialStems={session.stems} />
 
