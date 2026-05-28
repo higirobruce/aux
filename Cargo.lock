@@ -10,6 +10,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "aux-dsp-comp-color"
+version = "0.1.0"
+dependencies = [
+ "wasm-bindgen",
+]
+
+[[package]]
 name = "aux-dsp-eq8"
 version = "0.1.0"
 dependencies = [

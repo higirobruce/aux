@@ -1,0 +1,2 @@
+# Wasm output is committed in wasm/ so JS-only devs don't need Rust to typecheck.
+# target/ is the cargo cache — already gitignored at the repo root.

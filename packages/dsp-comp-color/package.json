@@ -1,0 +1,23 @@
+{
+  "name": "@aux/dsp-comp-color",
+  "version": "0.1.0",
+  "private": true,
+  "description": "FET-style compressor — Rust DSP compiled to WASM, exposed as ES module.",
+  "type": "module",
+  "main": "./wasm/comp_color.js",
+  "types": "./wasm/comp_color.d.ts",
+  "files": ["wasm"],
+  "exports": {
+    ".": {
+      "types": "./wasm/comp_color.d.ts",
+      "default": "./wasm/comp_color.js"
+    },
+    "./comp_color_bg.wasm": "./wasm/comp_color_bg.wasm",
+    "./package.json": "./package.json"
+  },
+  "scripts": {
+    "build": "wasm-pack build --release --target web --out-dir wasm --out-name comp_color && rm -f wasm/.gitignore wasm/package.json",
+    "test:rust": "cargo test --release",
+    "clean": "rm -rf wasm target"
+  }
+}
