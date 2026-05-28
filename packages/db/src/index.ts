@@ -1,27 +1,43 @@
 /**
- * @aux/db — Prisma client wrapper.
+ * @aux/db — Prisma client singleton + re-exports of generated types.
  *
- * Re-exports the generated Prisma client so consumers import from one place.
- * Run `pnpm --filter @aux/db generate` after installing dependencies to
- * produce the client in ./prisma/generated.
+ * Run `pnpm --filter @aux/db generate` once after `pnpm install` to produce
+ * the client at ./prisma/generated. The exports below assume that step has
+ * happened.
  */
 
-// The generated client only exists after `prisma generate`.
-// Until then, this is a stub that other packages can still type against.
+// biome-ignore lint/style/noExportedImports: re-export pattern
+export {
+  PrismaClient,
+  Prisma,
+  type User,
+  type Session,
+  type Stem,
+  type Snapshot,
+  type Collaborator,
+  type Render,
+  type ShareLink,
+  type UserPreset,
+  type ChainPreset,
+  type AuthSession,
+  type Account,
+  type Verification,
+  StorageMode,
+  CollaboratorRole,
+  RenderFormat,
+  RenderStatus,
+} from '../prisma/generated/index.js';
 
-export type PrismaClient = unknown;
+import { PrismaClient } from '../prisma/generated/index.js';
 
 let cached: PrismaClient | null = null;
 
-export async function getPrismaClient(): Promise<PrismaClient> {
+/**
+ * Single PrismaClient per process. Re-use across requests to avoid exhausting
+ * the connection pool.
+ */
+export function getPrismaClient(): PrismaClient {
   if (cached) return cached;
-  // Dynamic import so the package builds even before `prisma generate` has run.
-  const mod = (await import('../prisma/generated/index.js' as string).catch(() => null)) as
-    | { PrismaClient: new () => PrismaClient }
-    | null;
-  if (!mod) {
-    throw new Error('Prisma client not generated. Run: pnpm --filter @aux/db generate');
-  }
-  cached = new mod.PrismaClient();
+  cached = new PrismaClient();
   return cached;
 }
