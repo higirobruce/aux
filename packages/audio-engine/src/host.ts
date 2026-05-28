@@ -81,9 +81,9 @@ export class AudioHost {
   private masterGain: GainNode | null = null;
   private workletNode: AudioWorkletNode | null = null;
   private listeners = new Set<(e: WorkletEvent) => void>();
-  /** WASM bytes cached after first fetch; cloned per worklet (ArrayBuffer is
-   *  consumed by structured-clone into processorOptions). Null until start(). */
-  private eq8WasmBytes: ArrayBuffer | null = null;
+  /** Compiled WASM module shared across worklets via structured clone. Null
+   *  until start() loads the EQ-8 module (or if EQ-8 URLs weren't supplied). */
+  private eq8WasmModule: WebAssembly.Module | null = null;
 
   private channels = new Map<string, ChannelInternals>();
 
@@ -100,11 +100,22 @@ export class AudioHost {
 
     // EQ-8 worklet + wasm. Both must be present to enable per-channel EQ —
     // otherwise the engine still works, just without the EQ stage.
+    //
+    // The WASM is compiled here on the main thread (where async compile is
+    // unrestricted) and then structured-cloned into each per-channel worklet
+    // via processorOptions. Browsers since 2023 support transferring
+    // WebAssembly.Module across worklet boundaries; sync `new
+    // WebAssembly.Module(bytes)` inside the worklet was the failure mode
+    // surfaced as "Failed to construct 'AudioWorkletNode'" on first play.
     if (this.options.eq8WorkletUrl && this.options.eq8WasmUrl) {
       await this.ctx.audioWorklet.addModule(this.options.eq8WorkletUrl);
       const res = await fetch(this.options.eq8WasmUrl);
       if (!res.ok) throw new Error(`eq8 wasm fetch failed (${res.status})`);
-      this.eq8WasmBytes = await res.arrayBuffer();
+      this.eq8WasmModule = await WebAssembly.compileStreaming(
+        new Response(await res.arrayBuffer(), {
+          headers: { 'Content-Type': 'application/wasm' },
+        })
+      );
     }
 
     this.workletNode = new AudioWorkletNode(this.ctx, 'aux-processor', {
@@ -166,20 +177,20 @@ export class AudioHost {
     gain.gain.value = volume;
     panner.pan.value = pan;
 
-    // Optional EQ-8: if WASM was loaded at start(), each channel gets its
-    // own worklet running an 8-band EQ. Routing becomes:
+    // Optional EQ-8: if the WASM module was compiled at start(), each channel
+    // gets its own worklet running an 8-band EQ. Routing becomes:
     //   source → eq8 → gain → panner → analyser → master
     // Otherwise the EQ stage is skipped and source connects directly to gain.
     let eq8: AudioWorkletNode | null = null;
-    if (this.eq8WasmBytes) {
-      // Clone the bytes — structured-clone transfers ownership of the
-      // ArrayBuffer the first time, so each worklet needs its own copy.
-      const wasmBytes = this.eq8WasmBytes.slice(0);
+    if (this.eq8WasmModule) {
+      // WebAssembly.Module is structured-cloneable and reusable, so we share
+      // the same compiled module across all per-channel worklets — they each
+      // instantiate it locally inside their constructor.
       eq8 = new AudioWorkletNode(this.ctx, 'aux-eq8-processor', {
         numberOfInputs: 1,
         numberOfOutputs: 1,
         outputChannelCount: [2],
-        processorOptions: { wasmBytes },
+        processorOptions: { wasmModule: this.eq8WasmModule },
       });
       eq8.connect(gain);
     }
