@@ -21,6 +21,7 @@
   --line: #d3dce7;
   --line-strong: #b5c2d2;
   --highlight: #dce7f5;
+  --ring: var(--azure); /* focus-visible ring, per docs/implementation.html §21 */
 
   /* Type */
   --font-display: 'Tiempos', 'Iowan Old Style', 'Georgia', serif;
