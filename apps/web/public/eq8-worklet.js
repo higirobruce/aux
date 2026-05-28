@@ -25,6 +25,61 @@
  */
 
 // ──────────────────────────────────────────────────────────────────────────
+// TextDecoder polyfill.
+//
+// AudioWorkletGlobalScope does NOT inherit from WorkerGlobalScope, so the
+// usual `TextDecoder` constructor isn't defined here. wasm-bindgen's
+// generated helpers construct one at module evaluation time; without this
+// shim the file throws ReferenceError before the processor is registered.
+//
+// Coverage: enough UTF-8 to round-trip the error strings wasm-bindgen
+// produces. No streaming, no encoding sniffing — just bytes → string.
+// ──────────────────────────────────────────────────────────────────────────
+
+if (typeof globalThis.TextDecoder === 'undefined') {
+  globalThis.TextDecoder = class TextDecoder {
+    constructor() {
+      /* options ignored — we only support utf-8, ignoreBOM, fatal */
+    }
+    decode(buf) {
+      if (!buf || buf.byteLength === 0) return '';
+      const bytes =
+        buf instanceof Uint8Array
+          ? buf
+          : new Uint8Array(buf.buffer ?? buf, buf.byteOffset ?? 0, buf.byteLength);
+      let s = '';
+      let i = 0;
+      while (i < bytes.length) {
+        const b1 = bytes[i++];
+        if (b1 < 0x80) {
+          s += String.fromCharCode(b1);
+          continue;
+        }
+        if (b1 < 0xc0) continue; // stray continuation byte
+        if (b1 < 0xe0) {
+          const b2 = bytes[i++] & 0x3f;
+          s += String.fromCharCode(((b1 & 0x1f) << 6) | b2);
+          continue;
+        }
+        if (b1 < 0xf0) {
+          const b2 = bytes[i++] & 0x3f;
+          const b3 = bytes[i++] & 0x3f;
+          s += String.fromCharCode(((b1 & 0x0f) << 12) | (b2 << 6) | b3);
+          continue;
+        }
+        const b2 = bytes[i++] & 0x3f;
+        const b3 = bytes[i++] & 0x3f;
+        const b4 = bytes[i++] & 0x3f;
+        const cp = (((b1 & 0x07) << 18) | (b2 << 12) | (b3 << 6) | b4) - 0x10000;
+        s += String.fromCharCode(0xd800 + (cp >> 10));
+        s += String.fromCharCode(0xdc00 + (cp & 0x3ff));
+      }
+      return s;
+    }
+  };
+}
+
+// ──────────────────────────────────────────────────────────────────────────
 // Inlined from packages/dsp-eq8/wasm/eq8.js — wasm-bindgen 0.2.122 output.
 // `export` keywords stripped; ES default-export line removed. Everything
 // else is verbatim. DO NOT EDIT BY HAND — re-bundle from wasm/eq8.js.
