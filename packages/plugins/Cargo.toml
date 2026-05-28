@@ -1,0 +1,30 @@
+# Rust workspace for the native DSP plugins.
+# Per docs/implementation.html §07 — twelve plugins ship in v1.
+# Each member compiles to a self-contained WASM module via wasm-pack.
+
+[workspace]
+resolver = "2"
+members = [
+    # "eq-8",
+    # "comp-clean",
+    # "comp-color",
+    # "deess",
+    # "mb-comp",
+    # "reverb-plate",
+    # "reverb-hall",
+    # "saturation-tape",
+    # "saturation-console",
+    # "transient",
+    # "limiter",
+    # "imager",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+license = "AGPL-3.0-only"
+
+[workspace.dependencies]
+wasm-bindgen = "0.2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"

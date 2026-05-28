@@ -1,0 +1,11 @@
+{
+  "name": "@aux/plugins",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Native DSP plugins — Rust → WASM. Placeholder workspace until Rust is installed.",
+  "scripts": {
+    "build": "echo 'Run via cargo / wasm-pack — see README.md'",
+    "lint": "echo 'Rust lint via cargo clippy'",
+    "typecheck": "echo 'no-op'"
+  }
+}

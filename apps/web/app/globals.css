@@ -1,0 +1,37 @@
+@import 'tailwindcss';
+@import '@aux/design-system/tokens.css';
+
+/* Tailwind 4 theme bridge — wire design-system tokens into Tailwind utilities. */
+@theme inline {
+  --color-paper: var(--paper);
+  --color-paper-2: var(--paper-2);
+  --color-paper-3: var(--paper-3);
+  --color-ink: var(--ink);
+  --color-ink-2: var(--ink-2);
+  --color-ink-3: var(--ink-3);
+  --color-ink-4: var(--ink-4);
+  --color-azure: var(--azure);
+  --color-azure-soft: var(--azure-soft);
+  --color-azure-deep: var(--azure-deep);
+  --color-line: var(--line);
+
+  --font-display: var(--font-display);
+  --font-sans: var(--font-sans);
+  --font-mono: var(--font-mono);
+
+  --radius-sm: var(--r-1);
+  --radius-md: var(--r-2);
+  --radius-lg: var(--r-3);
+}
+
+html,
+body {
+  height: 100%;
+}
+
+body {
+  background: var(--paper);
+  color: var(--ink);
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+}

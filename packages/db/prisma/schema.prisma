@@ -1,0 +1,197 @@
+// Prisma schema for aux.
+// Mirrors docs/implementation.html §03 + §19 (presets) + §05 (share links).
+
+generator client {
+  provider = "prisma-client-js"
+  output   = "./generated"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id          String   @id @default(uuid())
+  email       String   @unique
+  createdAt   DateTime @default(now())
+  lastSeenAt  DateTime?
+
+  sessions       Session[]
+  collaborators  Collaborator[]
+  userPresets    UserPreset[]
+  chainPresets   ChainPreset[]
+
+  @@map("users")
+}
+
+enum StorageMode {
+  cloud
+  local
+
+  @@map("storage_mode")
+}
+
+model Session {
+  id            String       @id @default(uuid())
+  ownerId       String       @map("owner_id")
+  name          String
+  storageMode   StorageMode  @map("storage_mode")
+  byoBucket     Json?        @map("byo_bucket")            // v2 — encrypted creds
+  lastOpenedAt  DateTime?    @map("last_opened_at")
+  archivedAt    DateTime?    @map("archived_at")
+  createdAt     DateTime     @default(now()) @map("created_at")
+
+  owner          User           @relation(fields: [ownerId], references: [id])
+  stems          Stem[]
+  snapshots      Snapshot[]
+  collaborators  Collaborator[]
+  renders        Render[]
+  shareLinks     ShareLink[]
+
+  @@index([ownerId])
+  @@map("sessions")
+}
+
+model Stem {
+  id              String   @id @default(uuid())
+  sessionId       String   @map("session_id")
+  name            String
+  s3Key           String?  @map("s3_key")                  // null in local mode
+  lengthMs        Int      @map("length_ms")
+  channels        Int      @db.SmallInt
+  sampleRate      Int      @map("sample_rate")
+  peakDb          Float    @map("peak_db")
+  lufsI           Float    @map("lufs_i")
+  fingerprintV1   Bytes?   @map("fingerprint_v1")
+  createdAt       DateTime @default(now()) @map("created_at")
+
+  session  Session  @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+
+  @@index([sessionId])
+  @@map("stems")
+}
+
+model Snapshot {
+  id          String     @id @default(uuid())
+  sessionId   String     @map("session_id")
+  parentId    String?    @map("parent_id")
+  docState    Bytes      @map("doc_state")                 // serialized session doc
+  message     String?
+  createdAt   DateTime   @default(now()) @map("created_at")
+
+  session     Session    @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  parent      Snapshot?  @relation("SnapshotLineage", fields: [parentId], references: [id])
+  children    Snapshot[] @relation("SnapshotLineage")
+  shareLinks  ShareLink[]
+
+  @@index([sessionId])
+  @@index([parentId])
+  @@map("snapshots")
+}
+
+enum CollaboratorRole {
+  owner
+  editor
+  listener
+
+  @@map("collaborator_role")
+}
+
+model Collaborator {
+  sessionId String           @map("session_id")
+  userId    String           @map("user_id")
+  role      CollaboratorRole
+  addedAt   DateTime         @default(now()) @map("added_at")
+
+  session   Session  @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  user      User     @relation(fields: [userId],    references: [id], onDelete: Cascade)
+
+  @@id([sessionId, userId])
+  @@map("collaborators")
+}
+
+enum RenderFormat {
+  wav
+  flac
+  mp3
+  aac
+
+  @@map("render_format")
+}
+
+enum RenderStatus {
+  queued
+  running
+  done
+  failed
+
+  @@map("render_status")
+}
+
+model Render {
+  id          String        @id @default(uuid())
+  sessionId   String        @map("session_id")
+  snapshotId  String        @map("snapshot_id")
+  format      RenderFormat
+  targetLufs  Float?        @map("target_lufs")
+  s3Key       String?       @map("s3_key")
+  status      RenderStatus  @default(queued)
+  createdAt   DateTime      @default(now()) @map("created_at")
+  finishedAt  DateTime?     @map("finished_at")
+
+  session     Session   @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+
+  @@index([sessionId])
+  @@map("renders")
+}
+
+// Async sharing — per docs/implementation.html §05.
+model ShareLink {
+  id          String   @id @default(uuid())
+  sessionId   String   @map("session_id")
+  snapshotId  String   @map("snapshot_id")
+  createdBy   String   @map("created_by")
+  expiresAt   DateTime? @map("expires_at")
+  revokedAt   DateTime? @map("revoked_at")
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  session   Session  @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  snapshot  Snapshot @relation(fields: [snapshotId], references: [id], onDelete: Cascade)
+
+  @@index([sessionId])
+  @@index([snapshotId])
+  @@map("share_links")
+}
+
+// Plugin presets — per docs/implementation.html §19.
+model UserPreset {
+  id              String   @id @default(uuid())
+  ownerId         String   @map("owner_id")
+  plugin          String                                    // 'EQ-8', 'Comp-A', etc.
+  schemaVersion   Int      @map("schema_version")
+  label           String
+  state           Json
+  createdAt       DateTime @default(now()) @map("created_at")
+  updatedAt       DateTime @updatedAt @map("updated_at")
+
+  owner   User @relation(fields: [ownerId], references: [id], onDelete: Cascade)
+
+  @@index([ownerId])
+  @@index([plugin])
+  @@map("user_presets")
+}
+
+model ChainPreset {
+  id          String   @id @default(uuid())
+  ownerId     String   @map("owner_id")
+  label       String
+  chain       Json                                          // [{ plugin, schemaVersion, state }, ...]
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  owner   User @relation(fields: [ownerId], references: [id], onDelete: Cascade)
+
+  @@index([ownerId])
+  @@map("chain_presets")
+}

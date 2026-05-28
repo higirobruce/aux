@@ -1,0 +1,1864 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>aux — Implementation plan</title>
+<style>
+  /* Design system — same tokens as brainstorm.html */
+  :root {
+    --paper:        #EEF2F7;
+    --paper-2:      #E3EAF3;
+    --paper-3:      #D2DCE8;
+    --ink:          #16181D;
+    --ink-2:        #353A43;
+    --ink-3:        #626973;
+    --ink-4:        #939AA5;
+    --azure:        #2E5FA8;
+    --azure-soft:   #C5D5EC;
+    --azure-deep:   #14355F;
+    --line:         #D3DCE7;
+    --line-strong:  #B5C2D2;
+    --highlight:    #DCE7F5;
+    --font-display: "Tiempos", "Iowan Old Style", "Georgia", serif;
+    --font-sans:    "Söhne", "Inter", -apple-system, BlinkMacSystemFont, "Helvetica Neue", sans-serif;
+    --font-mono:    "JetBrains Mono", "SF Mono", "Menlo", monospace;
+    --t-12: 0.75rem; --t-14: 0.875rem; --t-16: 1rem; --t-18: 1.125rem;
+    --t-22: 1.375rem; --t-28: 1.75rem; --t-36: 2.25rem; --t-48: 3rem; --t-64: 4rem;
+    --s-1: 4px; --s-2: 8px; --s-3: 12px; --s-4: 16px; --s-5: 24px;
+    --s-6: 32px; --s-7: 48px; --s-8: 64px; --s-9: 96px;
+    --r-1: 2px; --r-2: 4px; --r-3: 8px;
+    --ease: cubic-bezier(0.2, 0, 0, 1);
+    --dur: 160ms;
+  }
+  *, *::before, *::after { box-sizing: border-box; }
+  html { -webkit-text-size-adjust: 100%; }
+  body {
+    margin: 0;
+    background: var(--paper);
+    color: var(--ink);
+    font-family: var(--font-sans);
+    font-size: var(--t-16);
+    line-height: 1.6;
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
+  }
+  .display-1 { font-family: var(--font-display); font-size: var(--t-64); line-height: 1.05; letter-spacing: -0.02em; font-weight: 400; margin: 0; }
+  .display-2 { font-family: var(--font-display); font-size: var(--t-48); line-height: 1.1;  letter-spacing: -0.02em; font-weight: 400; margin: 0; }
+  h1, .h1 { font-family: var(--font-display); font-size: var(--t-36); line-height: 1.15; letter-spacing: -0.015em; font-weight: 400; margin: 0 0 var(--s-5); }
+  h2, .h2 { font-family: var(--font-sans);    font-size: var(--t-28); line-height: 1.25; letter-spacing: -0.01em;  font-weight: 500; margin: var(--s-8) 0 var(--s-4); }
+  h3, .h3 { font-family: var(--font-sans);    font-size: var(--t-22); line-height: 1.3;  font-weight: 500;         margin: var(--s-7) 0 var(--s-3); }
+  h4, .h4 { font-family: var(--font-sans);    font-size: var(--t-18); line-height: 1.4;  font-weight: 600;         margin: var(--s-6) 0 var(--s-2); }
+  p { margin: 0 0 var(--s-4); max-width: 68ch; }
+  .lead { font-size: var(--t-18); color: var(--ink-2); max-width: 64ch; }
+  .eyebrow { font-family: var(--font-mono); font-size: var(--t-12); letter-spacing: 0.12em; text-transform: uppercase; color: var(--ink-3); margin: 0 0 var(--s-3); }
+  small, .caption { font-size: var(--t-14); color: var(--ink-3); }
+  a { color: var(--ink); text-decoration: underline; text-decoration-color: var(--line-strong); text-decoration-thickness: 1px; text-underline-offset: 3px; transition: text-decoration-color var(--dur) var(--ease); }
+  a:hover { text-decoration-color: var(--azure); }
+  ::selection { background: var(--azure-soft); color: var(--ink); }
+
+  .page { max-width: 1100px; margin: 0 auto; padding: var(--s-9) var(--s-6); }
+  .section { padding: var(--s-8) 0; border-top: 1px solid var(--line); }
+  .section:first-of-type { border-top: 0; padding-top: var(--s-5); }
+  .grid { display: grid; gap: var(--s-4); }
+  .grid-2 { grid-template-columns: repeat(2, minmax(0,1fr)); }
+  .grid-3 { grid-template-columns: repeat(3, minmax(0,1fr)); }
+  .grid-4 { grid-template-columns: repeat(4, minmax(0,1fr)); }
+  @media (max-width: 720px) {
+    .grid-3, .grid-4 { grid-template-columns: repeat(2, minmax(0,1fr)); }
+    .page { padding: var(--s-7) var(--s-5); }
+  }
+
+  .btn { display: inline-flex; align-items: center; gap: var(--s-2); font-family: var(--font-sans); font-size: var(--t-14); font-weight: 500; line-height: 1; padding: 10px 16px; border-radius: var(--r-2); border: 1px solid transparent; cursor: pointer; transition: background var(--dur) var(--ease), border-color var(--dur) var(--ease), color var(--dur) var(--ease); text-decoration: none; }
+  .btn-primary { background: var(--ink); color: var(--paper); }
+  .btn-primary:hover { background: var(--ink-2); }
+  .btn-secondary { background: transparent; color: var(--ink); border-color: var(--line-strong); }
+  .btn-secondary:hover { border-color: var(--ink); }
+
+  code { font-family: var(--font-mono); font-size: 0.9em; background: var(--paper-2); padding: 2px 6px; border-radius: var(--r-1); border: 1px solid var(--line); }
+  pre { font-family: var(--font-mono); font-size: var(--t-14); line-height: 1.5; background: #1A1A1A; color: #E8E2D4; padding: var(--s-5); border-radius: var(--r-3); overflow-x: auto; margin: var(--s-4) 0; }
+  pre code { background: transparent; border: 0; padding: 0; color: inherit; }
+  .tok-kw  { color: #7AA7E0; }
+  .tok-str { color: #C7B97A; }
+  .tok-com { color: #6B6862; font-style: italic; }
+  .tok-fn  { color: #BBD2EE; }
+  .tok-hi  { color: #E8E2D4; background: #2A2A2A; padding: 0 4px; }
+
+  .callout { display: grid; grid-template-columns: auto 1fr; gap: var(--s-3); padding: var(--s-4) var(--s-5); border-radius: var(--r-3); background: var(--paper-2); border-left: 2px solid var(--ink-3); margin: var(--s-4) 0; }
+  .callout .mark { font-family: var(--font-mono); font-size: var(--t-12); letter-spacing: 0.1em; text-transform: uppercase; color: var(--ink-3); padding-top: 2px; }
+  .callout p:last-child { margin-bottom: 0; }
+  .callout-tip { border-left-color: var(--azure); background: var(--highlight); }
+  .callout-tip .mark { color: var(--azure-deep); }
+  .callout-warn { border-left-color: #B47B2E; background: #F4E8D0; }
+  .callout-warn .mark { color: #8C5A18; }
+
+  table { width: 100%; border-collapse: collapse; font-size: var(--t-14); margin: var(--s-4) 0; }
+  th, td { text-align: left; padding: var(--s-3) var(--s-4); border-bottom: 1px solid var(--line); vertical-align: top; }
+  th { font-weight: 500; color: var(--ink-3); font-family: var(--font-mono); font-size: var(--t-12); letter-spacing: 0.08em; text-transform: uppercase; }
+  tr:hover td { background: var(--paper-2); }
+
+  .tag { display: inline-flex; align-items: center; font-family: var(--font-mono); font-size: var(--t-12); letter-spacing: 0.06em; text-transform: uppercase; padding: 4px 8px; border-radius: var(--r-1); background: var(--paper-2); color: var(--ink-2); border: 1px solid var(--line); }
+  .tag-accent { background: var(--azure-soft); border-color: var(--azure-soft); color: var(--azure-deep); }
+  .tag-ink    { background: var(--ink); color: var(--paper); border-color: var(--ink); }
+
+  .hr-rule { border: 0; border-top: 1px solid var(--line); margin: var(--s-7) 0; }
+  .mt-0 { margin-top: 0; }
+  .stack > * + * { margin-top: var(--s-3); }
+  .row { display: flex; flex-wrap: wrap; gap: var(--s-3); align-items: center; }
+  .muted { color: var(--ink-3); }
+
+  .card { border: 1px solid var(--line); border-radius: var(--r-3); padding: var(--s-5); background: #fff; }
+  .card .card-eyebrow { font-family: var(--font-mono); font-size: var(--t-12); letter-spacing: 0.1em; text-transform: uppercase; color: var(--ink-3); margin-bottom: var(--s-2); }
+  .card h4 { margin: 0 0 var(--s-2); }
+  .card p:last-child { margin-bottom: 0; }
+
+  /* Doc-specific */
+  .toc { display: grid; grid-template-columns: repeat(2, minmax(0,1fr)); gap: var(--s-2) var(--s-5); }
+  .toc a { display: block; padding: 6px 0; color: var(--ink-2); text-decoration: none; border-bottom: 1px dotted var(--line); }
+  .toc a:hover { color: var(--ink); border-bottom-color: var(--ink); }
+  .toc .n { font-family: var(--font-mono); font-size: var(--t-12); color: var(--ink-3); margin-right: var(--s-3); }
+
+  /* Stack badges row */
+  .stack-row { display: flex; flex-wrap: wrap; gap: var(--s-2); margin: var(--s-3) 0; }
+  .stack-row .tag { font-size: var(--t-12); }
+
+  /* Layer diagram block */
+  .layer {
+    background: #1A1A1A;
+    color: #E8E2D4;
+    border-radius: var(--r-3);
+    padding: var(--s-5) var(--s-6);
+    margin: var(--s-4) 0;
+    font-family: var(--font-mono);
+    font-size: var(--t-14);
+    line-height: 1.6;
+    overflow-x: auto;
+  }
+  .layer-band {
+    border: 1px solid #2A2A2A;
+    border-radius: var(--r-2);
+    padding: var(--s-3) var(--s-4);
+    margin-bottom: var(--s-3);
+    background: #14171c;
+  }
+  .layer-band .label {
+    font-size: var(--t-12);
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: #939AA5;
+    margin-bottom: 4px;
+  }
+  .layer-band .items { color: #DCE7F5; }
+  .layer-band.frontend { border-left: 3px solid #7AC3E0; }
+  .layer-band.edge     { border-left: 3px solid #7AE0A0; }
+  .layer-band.backend  { border-left: 3px solid #E07A40; }
+  .layer-band.audio    { border-left: 3px solid #E55C7A; }
+  .layer-band.storage  { border-left: 3px solid #B47EE0; }
+  .layer-band.infra    { border-left: 3px solid #C9B453; }
+  .layer-arrow {
+    text-align: center;
+    color: #6B6862;
+    font-size: var(--t-14);
+    margin: 4px 0;
+  }
+
+  /* Phases timeline */
+  .timeline {
+    display: grid;
+    grid-template-columns: repeat(6, 1fr);
+    gap: 4px;
+    margin: var(--s-5) 0;
+    font-family: var(--font-mono);
+    font-size: var(--t-12);
+  }
+  .phase {
+    background: #fff;
+    border: 1px solid var(--line);
+    border-radius: var(--r-2);
+    padding: var(--s-3);
+    position: relative;
+  }
+  .phase .ver {
+    font-weight: 600;
+    color: var(--azure);
+    font-size: var(--t-14);
+    margin-bottom: 4px;
+    letter-spacing: 0.04em;
+  }
+  .phase .months {
+    font-size: 10px;
+    color: var(--ink-3);
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+    margin-bottom: var(--s-3);
+  }
+  .phase .name {
+    font-family: var(--font-sans);
+    font-size: var(--t-14);
+    font-weight: 500;
+    margin-bottom: var(--s-2);
+    color: var(--ink);
+  }
+  .phase ul {
+    margin: 0;
+    padding: 0 0 0 var(--s-4);
+    list-style: none;
+  }
+  .phase ul li {
+    font-size: 11px;
+    color: var(--ink-2);
+    margin-bottom: 2px;
+    position: relative;
+    padding-left: 8px;
+  }
+  .phase ul li::before {
+    content: "·";
+    position: absolute;
+    left: 0;
+    color: var(--ink-3);
+  }
+  .phase.future {
+    background: var(--paper-2);
+    border-style: dashed;
+  }
+  @media (max-width: 900px) {
+    .timeline { grid-template-columns: repeat(3, 1fr); }
+  }
+
+  /* Tech choice rows */
+  .choice {
+    display: grid;
+    grid-template-columns: 180px 1fr;
+    gap: var(--s-5);
+    padding: var(--s-4) 0;
+    border-bottom: 1px solid var(--line);
+  }
+  .choice:last-child { border-bottom: 0; }
+  .choice .who {
+    font-family: var(--font-mono);
+    font-size: var(--t-14);
+    letter-spacing: 0.04em;
+    color: var(--ink);
+  }
+  .choice .who .tag {
+    margin-top: var(--s-2);
+  }
+  .choice .what p { margin-bottom: var(--s-2); font-size: var(--t-14); }
+  .choice .what .why { color: var(--ink-3); font-size: var(--t-14); font-family: var(--font-sans); font-style: italic; }
+
+  /* Schema block */
+  .schema {
+    background: #fff;
+    border: 1px solid var(--line);
+    border-radius: var(--r-3);
+    padding: var(--s-4) var(--s-5);
+    font-family: var(--font-mono);
+    font-size: var(--t-14);
+    line-height: 1.7;
+    overflow-x: auto;
+    margin: var(--s-4) 0;
+  }
+  .schema .table-name {
+    color: var(--azure);
+    font-weight: 500;
+    letter-spacing: 0.04em;
+  }
+  .schema .col-name { color: var(--ink); }
+  .schema .col-type { color: var(--ink-3); }
+  .schema .col-meta { color: var(--ink-4); font-style: italic; }
+
+  /* Team grid */
+  .team {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: var(--s-4);
+    margin: var(--s-5) 0;
+  }
+  @media (max-width: 720px) {
+    .team { grid-template-columns: 1fr; }
+  }
+  .role {
+    border: 1px solid var(--line);
+    border-radius: var(--r-3);
+    padding: var(--s-5);
+    background: #fff;
+  }
+  .role .role-name {
+    font-size: var(--t-12);
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: var(--ink-3);
+    font-family: var(--font-mono);
+    margin-bottom: var(--s-2);
+  }
+  .role h4 { margin: 0 0 var(--s-3); }
+  .role ul { margin: 0; padding-left: var(--s-4); font-size: var(--t-14); color: var(--ink-2); }
+  .role ul li { margin-bottom: 4px; }
+
+  /* Risk list */
+  .risk-list { display: grid; gap: var(--s-3); }
+  .risk {
+    border-left: 3px solid #B47B2E;
+    background: #FBF4E5;
+    padding: var(--s-3) var(--s-5);
+    border-radius: 0 var(--r-2) var(--r-2) 0;
+  }
+  .risk h4 { margin: 0 0 var(--s-2); font-size: var(--t-16); }
+  .risk p { margin: 0; font-size: var(--t-14); color: var(--ink-2); }
+  .risk .mitigation { color: var(--ink); margin-top: var(--s-2); font-family: var(--font-mono); font-size: var(--t-12); }
+  .risk .mitigation::before { content: "→ Mitigation: "; color: #8C5A18; font-weight: 500; }
+
+  /* Week-1 checklist */
+  .checklist { background: #fff; border: 1px solid var(--line); border-radius: var(--r-3); padding: var(--s-5) var(--s-6); margin: var(--s-4) 0; }
+  .checklist h4 { margin: 0 0 var(--s-3); }
+  .checklist ol { margin: 0; padding-left: var(--s-5); }
+  .checklist li { margin-bottom: var(--s-2); font-size: var(--t-14); }
+  .checklist li code { font-size: var(--t-12); }
+</style>
+</head>
+<body>
+
+<main class="page">
+
+  <!-- ============================================================
+       COVER
+       ============================================================ -->
+  <section class="section">
+    <p class="eyebrow">aux · Implementation plan · v0.3 · 2026-05-28</p>
+    <h1 class="display-1">From brainstorm to v1.</h1>
+    <p class="lead">
+      The brainstorm said <em>what</em>. The architecture commitments said
+      <em>how, structurally</em>. This plan says <em>with what, when, by whom</em> —
+      the tech stack, the monorepo, the phases, the team, and the first week of
+      work.
+    </p>
+    <div class="row" style="margin-top: var(--s-5);">
+      <span class="tag tag-accent">Next.js 15</span>
+      <span class="tag tag-accent">NestJS 10</span>
+      <span class="tag">TypeScript</span>
+      <span class="tag">shadcn/ui</span>
+      <span class="tag">Rust → WASM</span>
+      <span class="tag">PostgreSQL</span>
+      <span class="tag">Cloudflare R2</span>
+      <span class="tag tag-ink">12 months to v1</span>
+      <span class="tag">solo-mixer · collab v2+</span>
+    </div>
+  </section>
+
+  <!-- ============================================================
+       TOC
+       ============================================================ -->
+  <section class="section">
+    <p class="eyebrow">Contents</p>
+    <h2 class="mt-0">What's in this document</h2>
+    <div class="toc">
+      <a href="#stack"><span class="n">01</span>The stack at a glance</a>
+      <a href="#frontend"><span class="n">02</span>Frontend architecture</a>
+      <a href="#backend"><span class="n">03</span>Backend architecture</a>
+      <a href="#audio"><span class="n">04</span>Audio engine</a>
+      <a href="#sharing"><span class="n">05</span>Async sharing</a>
+      <a href="#storage"><span class="n">06</span>Storage layer</a>
+      <a href="#plugins"><span class="n">07</span>Native plugins</a>
+      <a href="#monorepo"><span class="n">08</span>Monorepo structure</a>
+      <a href="#cicd"><span class="n">09</span>CI/CD &amp; testing</a>
+      <a href="#observability"><span class="n">10</span>Observability</a>
+      <a href="#phases"><span class="n">11</span>Phases &amp; milestones</a>
+      <a href="#team"><span class="n">12</span>Team shape</a>
+      <a href="#cost"><span class="n">13</span>Cost envelope</a>
+      <a href="#risks"><span class="n">14</span>Risks &amp; unknowns</a>
+      <a href="#month-0"><span class="n">15</span>Month 0 — pre-implementation</a>
+      <a href="#week-one"><span class="n">16</span>Week-one tasks</a>
+      <a href="#accessibility-impl"><span class="n">17</span>Accessibility implementation</a>
+      <a href="#security-impl"><span class="n">18</span>Security implementation</a>
+      <a href="#presets-impl"><span class="n">19</span>Plugin presets implementation</a>
+      <a href="#perf-budgets"><span class="n">20</span>Performance budgets</a>
+    </div>
+  </section>
+
+  <!-- ============================================================
+       01 · STACK
+       ============================================================ -->
+  <section class="section" id="stack">
+    <p class="eyebrow">01 · Stack</p>
+    <h2 class="mt-0">The stack at a glance</h2>
+    <p>
+      Six layers, every choice locked. JavaScript / TypeScript everywhere it
+      makes sense; Rust where it doesn't (the audio inner loop). Each row maps
+      back to a commitment in <code>brainstorm.html §16</code>.
+    </p>
+
+    <div class="layer">
+      <div class="layer-band frontend">
+        <div class="label">Browser · application</div>
+        <div class="items">
+          Next.js 15 (App Router) · React 19 · TypeScript 5.5 · Tailwind 4 ·
+          shadcn/ui (+ Radix primitives) · Zustand · TanStack Query · dnd-kit · Framer Motion
+        </div>
+      </div>
+      <div class="layer-band audio">
+        <div class="label">Browser · audio</div>
+        <div class="items">
+          Web Audio API · AudioWorklet · SharedArrayBuffer · WebCodecs ·
+          OPFS + File System Access · DSP plugins (Rust → wasm-pack → WASM)
+        </div>
+      </div>
+      <div class="layer-arrow">▲ &nbsp; HTTPS &nbsp; ▼</div>
+      <div class="layer-band edge">
+        <div class="label">Edge</div>
+        <div class="items">
+          Vercel Edge (Next.js routing, marketing SSR) · Cloudflare Workers
+          (auth callbacks, signed-URL minting)
+        </div>
+      </div>
+      <div class="layer-band backend">
+        <div class="label">Backend · services</div>
+        <div class="items">
+          NestJS 10 (Fastify adapter) · BullMQ workers (server-render fallback,
+          emails, snapshot pruning) · better-auth (magic link + OAuth)
+        </div>
+      </div>
+      <div class="layer-band storage">
+        <div class="label">Data</div>
+        <div class="items">
+          PostgreSQL 16 (Neon serverless) · Redis (Upstash) ·
+          Cloudflare R2 (S3-compatible object storage, zero egress)
+        </div>
+      </div>
+      <div class="layer-band infra">
+        <div class="label">Infra · ops</div>
+        <div class="items">
+          Vercel (web + marketing) · Fly.io (api, collab) ·
+          GitHub Actions (CI) · Sentry · OpenTelemetry · PostHog ·
+          Turborepo + pnpm (monorepo)
+        </div>
+      </div>
+    </div>
+
+    <div class="callout callout-tip">
+      <span class="mark">Rationale</span>
+      <p>
+        The stack is biased toward TypeScript on both ends (same language,
+        same types end-to-end). Rust appears in one place only — the DSP plugins —
+        because there is no JS path to sample-accurate audio that doesn't compromise
+        on safety, performance, or both. Every other layer is JS/TS.
+      </p>
+    </div>
+  </section>
+
+  <!-- ============================================================
+       02 · FRONTEND
+       ============================================================ -->
+  <section class="section" id="frontend">
+    <p class="eyebrow">02 · Frontend</p>
+    <h2 class="mt-0">Frontend architecture</h2>
+    <p>
+      Next.js 15 with the App Router. Marketing pages SSR on the edge for fast
+      cold starts. The mixer itself loads as a single client-rendered surface
+      from <code>/session/[id]</code> — no server roundtrip per parameter change.
+    </p>
+
+    <h3>Stack choices</h3>
+
+    <div class="choice">
+      <div class="who">
+        <strong>Next.js 15</strong><br/>
+        <span class="tag">App Router</span>
+      </div>
+      <div class="what">
+        <p>Marketing + auth + session shell. The mixer is a client component tree mounted under <code>/session/[id]</code>.</p>
+        <p class="why">Why: best React framework, server actions for mutations, edge runtime for fast cold starts, file-based routing, free image optimization. We don't fight the framework on data flow because we already use Yjs as the source of truth.</p>
+      </div>
+    </div>
+
+    <div class="choice">
+      <div class="who">
+        <strong>React 19</strong><br/>
+        <span class="tag">concurrent</span>
+      </div>
+      <div class="what">
+        <p><code>useTransition</code> for non-blocking UI on heavy renders (waveform redraw, plugin chain rebuild). <code>useDeferredValue</code> for the spectrum analyzer reading.</p>
+        <p class="why">Why: the mixer renders 100s of components per frame at 60 fps. Concurrent React keeps the UI thread responsive while expensive renders complete.</p>
+      </div>
+    </div>
+
+    <div class="choice">
+      <div class="who">
+        <strong>Tailwind CSS 4</strong><br/>
+        <span class="tag">+ design tokens</span>
+      </div>
+      <div class="what">
+        <p>The design system tokens (paper, ink, azure, type scale, spacing) loaded as Tailwind variables. Hand-rolled CSS reserved for the mockup islands (mixer, Smart EQ, Rooms).</p>
+        <p class="why">Why: Tailwind 4 is fast and ergonomic for the 95% of the UI that's not exotic. For exotic components (knobs, faders, EQ canvas), explicit CSS gives the control we need.</p>
+      </div>
+    </div>
+
+    <div class="choice">
+      <div class="who">
+        <strong>Zustand</strong><br/>
+        <span class="tag">UI state</span>
+      </div>
+      <div class="what">
+        <p>Selected channel, panel open/closed, current Reference Room, transport state.</p>
+        <p class="why">Why: lighter than Redux, no boilerplate, plays well with React 19. Server state lives in TanStack Query; document state in Yjs.</p>
+      </div>
+    </div>
+
+    <div class="choice">
+      <div class="who">
+        <strong>SessionDoc</strong><br/>
+        <span class="tag tag-accent">source of truth</span>
+      </div>
+      <div class="what">
+        <p>The session document is a plain TypeScript object held in a Zustand-backed store with custom atom-path subscriptions. React subscribes via <code>useAtom('trk_kick.volume')</code>. Every parameter, every clip start, every plugin state is independently addressable per §16.02.</p>
+        <p class="why">Why: v1 is solo-mixer (collab is v2+), so we skip the CRDT machinery and run the doc as a regular reactive store. Autosave debounces writes to disk (Local mode) or to the API (Cloud mode) every ~2 s. When real-time collab returns in v2, swap the storage backend for a Yjs <code>Y.Doc</code> — the atom-path API stays identical.</p>
+      </div>
+    </div>
+
+    <div class="choice">
+      <div class="who">
+        <strong>shadcn/ui</strong><br/>
+        <span class="tag tag-accent">+ Radix primitives</span>
+      </div>
+      <div class="what">
+        <p>Base UI: Button, Card, Dialog, Dropdown, Select, Switch, Tabs, Tooltip, Toast, Popover, Command (⌘K palette), Sheet (drawer), Table, Skeleton, Form, Input, Slider, Avatar, Badge. Installed via CLI as copy-paste source into <code>packages/ui</code>.</p>
+        <p class="why">Why: built on Radix + Tailwind (already in our stack), so it composes without conflict. Copy-paste means we own the source — restyle once with our paper/ink/azure tokens, never fight the library again. Industry standard for new Next.js apps; new hires get zero ramp-up. The exotic mixing components (knobs, faders, meters, EQ canvas, channel strips, Reference Rooms, Stem swap, Pre-flight) stay hand-built — that's where the product's identity lives.</p>
+      </div>
+    </div>
+
+    <div class="choice">
+      <div class="who">
+        <strong>dnd-kit</strong><br/>
+        <span class="tag">timeline</span>
+      </div>
+      <div class="what">
+        <p>Clip drag/resize on the timeline. Insert reorder. Send-slot reassignment.</p>
+        <p class="why">Why: modular, accessible, modern. react-dnd is showing its age.</p>
+      </div>
+    </div>
+
+    <h3>State strategy in one diagram</h3>
+<pre><code><span class="tok-com">// The session document is the world. React reflects it.</span>
+
+<span class="tok-kw">SessionDoc</span>  ──┐  <span class="tok-com">// in-memory, autosaved to disk (Local) or API (Cloud)</span>
+                ├─→ <span class="tok-fn">useAtom('trk_kick.volume')</span>      →  knob component
+                ├─→ <span class="tok-fn">useAtom('fx_eq_1.bands.3.gain')</span> →  EQ node
+                └─→ <span class="tok-fn">useAtom('trk_vox.clips')</span>        →  timeline clips
+                       ↓
+                <span class="tok-fn">autosave(debounce 2s)</span>  →  FSA/OPFS or POST /api/sessions/:id
+
+<span class="tok-kw">Zustand</span>     ──┐  <span class="tok-com">// UI-only — not persisted, not shared</span>
+                ├─→ <span class="tok-fn">selectedChannelId</span>
+                ├─→ <span class="tok-fn">currentReferenceRoom</span>
+                └─→ <span class="tok-fn">transportPlaying</span>
+
+<span class="tok-kw">TanStack Q</span>  ──┐  <span class="tok-com">// server-derived — auth, account, share-link state</span>
+                ├─→ <span class="tok-fn">useUser()</span>
+                ├─→ <span class="tok-fn">useSessionMeta(id)</span>
+                └─→ <span class="tok-fn">useShareLinks(sessionId)</span></code></pre>
+  </section>
+
+  <!-- ============================================================
+       03 · BACKEND
+       ============================================================ -->
+  <section class="section" id="backend">
+    <p class="eyebrow">03 · Backend</p>
+    <h2 class="mt-0">Backend architecture</h2>
+    <p>
+      NestJS handles auth, session metadata, stem upload signing, the
+      server-render fallback queue, and the public API. Hocuspocus runs as a
+      separate process for Yjs sync — putting it inside Nest would couple
+      WebSocket lifecycles to HTTP, and we want them independent.
+    </p>
+
+    <h3>Stack choices</h3>
+
+    <div class="choice">
+      <div class="who">
+        <strong>NestJS 10</strong><br/>
+        <span class="tag">+ Fastify adapter</span>
+      </div>
+      <div class="what">
+        <p>Module-per-domain: <code>auth</code>, <code>sessions</code>, <code>stems</code>, <code>renders</code>, <code>billing</code>. Each module owns its controllers, services, and DTOs.</p>
+        <p class="why">Why: opinionated structure scales with the team; DI makes testing trivial; first-class TypeScript. Fastify over Express because it's 2–3× faster for our request shape (mostly signed-URL minting and JSON).</p>
+      </div>
+    </div>
+
+    <div class="choice">
+      <div class="who">
+        <strong>PostgreSQL 16</strong><br/>
+        <span class="tag">Neon serverless</span>
+      </div>
+      <div class="what">
+        <p>Source of truth for accounts, session metadata, stem records, snapshots, collaborators. Schema below.</p>
+        <p class="why">Why: Postgres is the boring correct answer. Neon's serverless model scales-to-zero, which suits the "free for everyone" cost story.</p>
+      </div>
+    </div>
+
+    <div class="choice">
+      <div class="who">
+        <strong>Prisma ORM</strong><br/>
+        <span class="tag">TS-first</span>
+      </div>
+      <div class="what">
+        <p>Type-safe queries, migrations, and seed data. Schema lives in <code>packages/db/schema.prisma</code>.</p>
+        <p class="why">Why: best DX in the TS ecosystem. Drizzle is a contender; Prisma's tooling (Studio, migrate) wins for our team size.</p>
+      </div>
+    </div>
+
+    <div class="choice">
+      <div class="who">
+        <strong>Redis</strong><br/>
+        <span class="tag">Upstash</span>
+      </div>
+      <div class="what">
+        <p>Session presence (who's in which session), rate limiting on signed-URL minting, BullMQ queue backend, cached signed URLs (5-min TTL).</p>
+        <p class="why">Why: Upstash's per-request pricing fits a low-baseline app. No idle server cost.</p>
+      </div>
+    </div>
+
+    <div class="choice">
+      <div class="who">
+        <strong>BullMQ</strong><br/>
+        <span class="tag">job queue</span>
+      </div>
+      <div class="what">
+        <p>Server-side render fallback (when the user's machine can't), email sends, scheduled tasks (stem archive after 30 days).</p>
+        <p class="why">Why: Redis-backed, NestJS module integration, battle-tested. No new infra.</p>
+      </div>
+    </div>
+
+    <div class="choice">
+      <div class="who">
+        <strong>better-auth</strong><br/>
+        <span class="tag">auth</span>
+      </div>
+      <div class="what">
+        <p>Magic-link email auth by default. OAuth (Google, Apple) added when we need them. Sessions persisted in Postgres.</p>
+        <p class="why">Why: more flexible than NextAuth, framework-agnostic, lighter than Auth0/Clerk. Hosting our own auth fits the "your data" ethos.</p>
+      </div>
+    </div>
+
+    <h3>Database schema</h3>
+
+    <div class="schema">
+<span class="table-name">users</span>
+  <span class="col-name">id</span> <span class="col-type">uuid pk</span>
+  <span class="col-name">email</span> <span class="col-type">text unique</span>
+  <span class="col-name">created_at</span> <span class="col-type">timestamptz</span>
+  <span class="col-name">last_seen_at</span> <span class="col-type">timestamptz</span>
+
+<span class="table-name">sessions</span>
+  <span class="col-name">id</span> <span class="col-type">uuid pk</span>
+  <span class="col-name">owner_id</span> <span class="col-type">uuid → users.id</span>
+  <span class="col-name">name</span> <span class="col-type">text</span>
+  <span class="col-name">storage_mode</span> <span class="col-type">enum('cloud','local','hybrid')</span>
+  <span class="col-name">byo_bucket</span> <span class="col-type">jsonb null</span>  <span class="col-meta">// v2 — encrypted creds</span>
+  <span class="col-name">last_opened_at</span> <span class="col-type">timestamptz</span>
+  <span class="col-name">archived_at</span> <span class="col-type">timestamptz null</span>
+
+<span class="table-name">stems</span>
+  <span class="col-name">id</span> <span class="col-type">uuid pk</span>
+  <span class="col-name">session_id</span> <span class="col-type">uuid → sessions.id</span>
+  <span class="col-name">name</span> <span class="col-type">text</span>
+  <span class="col-name">s3_key</span> <span class="col-type">text null</span>  <span class="col-meta">// null in local mode</span>
+  <span class="col-name">length_ms</span> <span class="col-type">int</span>
+  <span class="col-name">channels</span> <span class="col-type">smallint</span>
+  <span class="col-name">sample_rate</span> <span class="col-type">int</span>
+  <span class="col-name">peak_db</span> <span class="col-type">real</span>
+  <span class="col-name">lufs_i</span> <span class="col-type">real</span>
+  <span class="col-name">fingerprint_v1</span> <span class="col-type">bytea</span>  <span class="col-meta">// for stem swap</span>
+
+<span class="table-name">snapshots</span>
+  <span class="col-name">id</span> <span class="col-type">uuid pk</span>
+  <span class="col-name">session_id</span> <span class="col-type">uuid → sessions.id</span>
+  <span class="col-name">parent_id</span> <span class="col-type">uuid → snapshots.id null</span>
+  <span class="col-name">doc_state</span> <span class="col-type">bytea</span>  <span class="col-meta">// Yjs update vector</span>
+  <span class="col-name">message</span> <span class="col-type">text null</span>
+  <span class="col-name">created_at</span> <span class="col-type">timestamptz</span>
+
+<span class="table-name">collaborators</span>
+  <span class="col-name">session_id</span> <span class="col-type">uuid → sessions.id</span>
+  <span class="col-name">user_id</span> <span class="col-type">uuid → users.id</span>
+  <span class="col-name">role</span> <span class="col-type">enum('owner','editor','listener')</span>
+  <span class="col-name">added_at</span> <span class="col-type">timestamptz</span>
+
+<span class="table-name">renders</span>
+  <span class="col-name">id</span> <span class="col-type">uuid pk</span>
+  <span class="col-name">session_id</span> <span class="col-type">uuid → sessions.id</span>
+  <span class="col-name">snapshot_id</span> <span class="col-type">uuid → snapshots.id</span>
+  <span class="col-name">format</span> <span class="col-type">enum('wav','flac','mp3','aac')</span>
+  <span class="col-name">target_lufs</span> <span class="col-type">real null</span>
+  <span class="col-name">s3_key</span> <span class="col-type">text</span>
+  <span class="col-name">status</span> <span class="col-type">enum('queued','running','done','failed')</span>
+    </div>
+  </section>
+
+  <!-- ============================================================
+       04 · AUDIO ENGINE
+       ============================================================ -->
+  <section class="section" id="audio">
+    <p class="eyebrow">04 · Audio engine</p>
+    <h2 class="mt-0">Audio engine</h2>
+    <p>
+      The most engineering-risky piece. §16.01 specified the architecture; this
+      section maps it onto concrete code. Three threads, one source of truth for
+      the graph, lock-free communication via SharedArrayBuffer.
+    </p>
+
+    <h3>Threads &amp; responsibilities</h3>
+<pre><code><span class="tok-kw">MAIN</span>  (React, UI, Yjs)
+  └─ session edit  ─→ postMessage to worker
+
+<span class="tok-kw">WORKER</span> (graph builder)
+  ├─ deserialize session doc
+  ├─ build node DAG · resolve send/return routing · compute latency
+  ├─ shadow-render 2 blocks against new graph (validation)
+  └─ signal AudioWorklet via SAB · "new graph at offset X is ready"
+
+<span class="tok-kw">AUDIOWORKLET</span> (real-time audio)
+  ├─ on each process() call (128 samples):
+  │   1. check SAB for pending graph swap  ─→ atomic pointer swap
+  │   2. walk graph in topological order, calling plugin.process()
+  │   3. write final stereo buffer to output
+  └─ no allocations · no locks · no main-thread calls</code></pre>
+
+    <h3>Build pipeline</h3>
+<pre><code><span class="tok-com"># DSP plugins: Rust → WASM</span>
+plugins/eq-8/src/lib.rs
+  └─ cargo + wasm-pack
+      └─ eq-8.wasm  + eq-8.d.ts  + eq-8-bindings.js
+
+<span class="tok-com"># Audio host: TypeScript → bundle</span>
+packages/audio-engine/worklet.ts
+  └─ vite (worker-loader plugin)
+      └─ audio-worklet.js  (loaded via AudioContext.audioWorklet.addModule)
+
+packages/audio-engine/builder-worker.ts
+  └─ vite
+      └─ builder-worker.js  (loaded via new Worker())</code></pre>
+
+    <h3>The Plugin API contract</h3>
+    <p>Every plugin exports the same four functions. Defined once in <code>packages/audio-engine/plugin.d.ts</code>:</p>
+<pre><code><span class="tok-kw">interface</span> <span class="tok-fn">PluginModule</span> {
+  <span class="tok-fn">init</span>(sampleRate: <span class="tok-kw">number</span>, maxBlock: <span class="tok-kw">number</span>): <span class="tok-kw">number</span>;  <span class="tok-com">// pointer</span>
+  <span class="tok-fn">process</span>(
+    ptr: <span class="tok-kw">number</span>,
+    inputPtr: <span class="tok-kw">number</span>,
+    outputPtr: <span class="tok-kw">number</span>,
+    paramsPtr: <span class="tok-kw">number</span>,
+    nFrames: <span class="tok-kw">number</span>
+  ): <span class="tok-kw">void</span>;
+  <span class="tok-fn">setState</span>(ptr: <span class="tok-kw">number</span>, jsonPtr: <span class="tok-kw">number</span>, len: <span class="tok-kw">number</span>): <span class="tok-kw">void</span>;
+  <span class="tok-fn">getState</span>(ptr: <span class="tok-kw">number</span>): <span class="tok-kw">number</span>;  <span class="tok-com">// returns JSON ptr</span>
+  <span class="tok-fn">getSchema</span>(): <span class="tok-kw">number</span>;            <span class="tok-com">// returns param schema JSON ptr</span>
+  <span class="tok-fn">latencySamples</span>(ptr: <span class="tok-kw">number</span>): <span class="tok-kw">number</span>;
+}</code></pre>
+
+    <h3>Parameter smoothing</h3>
+    <p>
+      Every parameter arrives at <code>process()</code> as a 128-sample array,
+      not a scalar. The host pre-ramps from previous → target over 10 ms
+      (≈ 480 samples at 48 kHz, ≈ 3.75 blocks). The plugin reads
+      <code>params[paramId][frame]</code> for each frame, never branching on
+      "did the value change."
+    </p>
+    <p>This is what makes the design system's knob feel right: every twist is a smooth ramp, never a step.</p>
+  </section>
+
+  <!-- ============================================================
+       05 · ASYNC SHARING
+       ============================================================ -->
+  <section class="section" id="sharing">
+    <p class="eyebrow">05 · Async sharing</p>
+    <h2 class="mt-0">Async sharing</h2>
+    <p>
+      v1 is a solo-mixer. Real-time collab (Yjs, Hocuspocus, presence, WebRTC
+      audio streaming) is explicitly v2+. What ships in v1 is the asynchronous
+      version: snapshot the session, generate a share link, send it. The
+      recipient gets a read-only viewer of that exact mix state — like sending
+      a PDF of a mix.
+    </p>
+
+    <h3>What the recipient can do</h3>
+    <ul>
+      <li>Open the link without an account (anonymous, signed-token gated)</li>
+      <li>Play, pause, scrub the timeline</li>
+      <li>Switch reference rooms · view metering · view pre-flight results</li>
+      <li>Leave timestamped comments (v1.5)</li>
+    </ul>
+    <h3>What the recipient cannot do</h3>
+    <ul>
+      <li>Edit any parameter, fader, plugin, or clip</li>
+      <li>Save or export their own delivery</li>
+      <li>See the owner's other sessions</li>
+    </ul>
+
+    <h3>How it works</h3>
+<pre><code>Owner clicks <span class="tok-hi">"Share"</span> on a session
+  ↓
+<span class="tok-fn">POST /api/sessions/:id/share</span>
+  ├─ creates an immutable snapshot (full session doc, current state)
+  ├─ mints a signed JWT containing snapshot_id + share_id
+  └─ returns <span class="tok-str">https://aux.app/share/&lt;token&gt;</span>
+
+Recipient opens the link
+  ↓
+Next.js <span class="tok-fn">/share/[token]</span> route validates the JWT
+  ├─ loads the snapshot from Postgres
+  ├─ signs short-lived R2 URLs for the snapshot's stems
+  └─ renders the mixer in read-only mode (UI props gate edits)
+
+Owner revokes
+  ↓
+<span class="tok-fn">DELETE /api/share/:share_id</span>
+  └─ removes the share row · subsequent token validation fails</code></pre>
+
+    <h3>What this costs (in code and infra)</h3>
+    <p>
+      Nothing new. Snapshots already exist in the schema (§03). R2 signed URLs
+      already work. The mixer UI gains one prop: <code>readOnly</code>. The
+      <code>/share/[token]</code> route is one Next.js page. No WebSocket
+      server, no Yjs, no CRDT, no WebRTC. The collab service (<code>apps/collab</code>)
+      isn't built until v2.
+    </p>
+
+    <div class="callout callout-tip">
+      <span class="mark">v2 path is clear</span>
+      <p>When real-time collab arrives, the session document grows a Yjs layer over the same atom paths defined in §16.02. A second Fly.io app (<code>apps/collab</code>) runs Hocuspocus. Recipients of share links get an "upgrade to live session?" option. v1 sharing keeps working unchanged — it's additive.</p>
+    </div>
+  </section>
+
+  <!-- ============================================================
+       06 · STORAGE
+       ============================================================ -->
+  <section class="section" id="storage">
+    <p class="eyebrow">06 · Storage layer</p>
+    <h2 class="mt-0">Storage layer</h2>
+    <p>
+      Two storage modes per §16.06. Each is a different code path inside
+      a single abstraction — the <code>StemStore</code> interface. Hybrid
+      mode returns in v2 alongside real-time collab.
+    </p>
+
+<pre><code><span class="tok-kw">interface</span> <span class="tok-fn">StemStore</span> {
+  <span class="tok-fn">putStem</span>(file: File): <span class="tok-fn">Promise</span>&lt;StemRef&gt;;
+  <span class="tok-fn">getStem</span>(ref: StemRef): <span class="tok-fn">Promise</span>&lt;AudioBuffer&gt;;
+  <span class="tok-fn">deleteStem</span>(ref: StemRef): <span class="tok-fn">Promise</span>&lt;<span class="tok-kw">void</span>&gt;;
+  <span class="tok-fn">listStems</span>(): <span class="tok-fn">Promise</span>&lt;StemRef[]&gt;;
+}
+
+<span class="tok-com">// v1 implementations</span>
+<span class="tok-kw">class</span> <span class="tok-fn">R2StemStore</span>      <span class="tok-kw">implements</span> StemStore { <span class="tok-com">/* cloud  */</span> }
+<span class="tok-kw">class</span> <span class="tok-fn">FSAStemStore</span>     <span class="tok-kw">implements</span> StemStore { <span class="tok-com">/* local  */</span> }
+<span class="tok-kw">class</span> <span class="tok-fn">OPFSStemStore</span>    <span class="tok-kw">implements</span> StemStore { <span class="tok-com">/* safari fallback */</span> }</code></pre>
+
+    <h3>Cloud mode (R2)</h3>
+    <ul>
+      <li><strong>Upload:</strong> browser POSTs to <code>/api/stems/sign</code> → receives a presigned R2 URL → uploads directly. Multipart for &gt; 50 MB via the AWS SDK's S3 client (R2 is S3-compatible).</li>
+      <li><strong>Download:</strong> signed GET URLs cached in Redis for 5 minutes. Range requests for partial loads (waveform preview without full download).</li>
+      <li><strong>Tiering:</strong> R2 Infrequent Access after 30 days of no opens. Restore is instant (no Glacier-like wait) — R2 doesn't have a deep-archive tier, which is actually a feature for our use case.</li>
+      <li><strong>Sharing:</strong> async share-links work here per §05. Signed JWT references a snapshot; recipient gets short-lived R2 URLs for that snapshot's stems.</li>
+    </ul>
+
+    <h3>Local mode (File System Access API)</h3>
+    <ul>
+      <li><strong>Setup:</strong> on session create, <code>showDirectoryPicker()</code> asks the user to choose or create a session folder. Handle persisted in IndexedDB so it survives reloads.</li>
+      <li><strong>Read/write:</strong> stems and <code>session.json</code> live in that folder. Reads via <code>FileSystemFileHandle.getFile()</code>.</li>
+      <li><strong>Fallback:</strong> Safari/Firefox without full FSA support get OPFS — a private, persistent, sandboxed filesystem. Same code shape, different backing store.</li>
+      <li><strong>Sharing:</strong> not available. To share, export a snapshot bundle (stems + session.json zipped) or migrate the session to Cloud mode.</li>
+    </ul>
+
+    <h3>Hybrid mode (v2)</h3>
+    <p class="muted">
+      Returns alongside real-time collab. Stems stay local (FSA / OPFS) while
+      the session document syncs to the collab server. Followers receive audio
+      via WebRTC P2P from the leader. Designed in v1 but not built.
+    </p>
+
+    <h3>R2 vs. AWS S3 — why R2</h3>
+    <table>
+      <thead><tr><th>Concern</th><th>Cloudflare R2</th><th>AWS S3</th></tr></thead>
+      <tbody>
+        <tr><td>Egress fee</td><td><strong>$0</strong></td><td>$0.09/GB</td></tr>
+        <tr><td>Storage</td><td>$0.015/GB-mo</td><td>$0.023/GB-mo</td></tr>
+        <tr><td>API</td><td>S3-compatible</td><td>S3</td></tr>
+        <tr><td>Free tier</td><td>10 GB · 1M reads · 100k writes</td><td>5 GB (12 mo)</td></tr>
+      </tbody>
+    </table>
+    <p class="muted">Zero egress alone makes R2 the right choice — engineers re-download their stems constantly during a mix.</p>
+  </section>
+
+  <!-- ============================================================
+       07 · PLUGINS
+       ============================================================ -->
+  <section class="section" id="plugins">
+    <p class="eyebrow">07 · Native plugins</p>
+    <h2 class="mt-0">Native plugins</h2>
+    <p>
+      Twelve native plugins in v1, all in one Rust workspace. Each compiles to
+      a self-contained WASM module that satisfies the §16.03 contract. The host
+      knows nothing about EQ vs. compressor vs. reverb — it just calls
+      <code>process()</code>.
+    </p>
+
+    <h3>Why Rust (in an otherwise JS stack)</h3>
+    <p>
+      The audio inner loop runs 48,000 times a second. AssemblyScript leaves
+      performance on the table; hand-written C is unsafe; JS with WASM SIMD is
+      a hack. Rust gives us:
+    </p>
+    <ul>
+      <li>Predictable, deterministic memory layout (no GC pauses)</li>
+      <li>SIMD via <code>wasm32-unknown-unknown</code> with <code>simd128</code></li>
+      <li>Mature DSP crates: <code>rustfft</code>, <code>biquad</code>, <code>dasp</code></li>
+      <li>Memory safety in code that runs in everyone's browser</li>
+    </ul>
+
+    <h3>The v1 plugin suite</h3>
+    <table>
+      <thead><tr><th>Plugin</th><th>Type</th><th>v1 Status</th></tr></thead>
+      <tbody>
+        <tr><td>EQ-8</td><td>8-band dynamic + linear-phase EQ</td><td>Must ship</td></tr>
+        <tr><td>Comp-Clean</td><td>VCA-style compressor</td><td>Must ship</td></tr>
+        <tr><td>Comp-Color</td><td>FET-style compressor</td><td>Must ship</td></tr>
+        <tr><td>DeEss</td><td>De-esser (split-band)</td><td>Must ship</td></tr>
+        <tr><td>MB-Comp</td><td>Multiband compressor</td><td>Must ship</td></tr>
+        <tr><td>Plate</td><td>Plate reverb</td><td>Must ship</td></tr>
+        <tr><td>Hall</td><td>Hall reverb</td><td>Must ship</td></tr>
+        <tr><td>Spring</td><td>Spring reverb</td><td>v1.1</td></tr>
+        <tr><td>Tape</td><td>Tape saturation</td><td>Must ship</td></tr>
+        <tr><td>Console</td><td>Console saturation</td><td>Must ship</td></tr>
+        <tr><td>Transient</td><td>Transient designer</td><td>Must ship</td></tr>
+        <tr><td>Limiter</td><td>True-peak limiter</td><td>Must ship</td></tr>
+        <tr><td>Imager</td><td>M/S imager</td><td>Must ship</td></tr>
+        <tr><td>Exciter</td><td>Harmonic exciter</td><td>v1.1</td></tr>
+        <tr><td>Tuner</td><td>Pitch reference</td><td>v1.1</td></tr>
+      </tbody>
+    </table>
+
+    <h3>Plugin source shape</h3>
+<pre><code><span class="tok-com">// plugins/eq-8/src/lib.rs</span>
+<span class="tok-kw">use</span> wasm_bindgen::prelude::*;
+
+#[wasm_bindgen]
+<span class="tok-kw">pub struct</span> <span class="tok-fn">EQ8</span> {
+    sample_rate: f32,
+    bands: [Band; 8],
+    smoothed_params: ParamRamps,
+}
+
+#[wasm_bindgen]
+<span class="tok-kw">impl</span> EQ8 {
+    #[wasm_bindgen(constructor)]
+    <span class="tok-kw">pub fn</span> <span class="tok-fn">new</span>(sample_rate: f32, max_block: u32) -&gt; EQ8 { <span class="tok-com">/* ... */</span> }
+
+    <span class="tok-kw">pub fn</span> <span class="tok-fn">process</span>(&amp;<span class="tok-kw">mut self</span>, input: &amp;[f32], output: &amp;<span class="tok-kw">mut</span> [f32], params: &amp;[f32]) {
+        <span class="tok-com">// per-frame band processing with SIMD where applicable</span>
+    }
+
+    <span class="tok-kw">pub fn</span> <span class="tok-fn">set_state</span>(&amp;<span class="tok-kw">mut self</span>, json: &amp;str) { <span class="tok-com">/* ... */</span> }
+    <span class="tok-kw">pub fn</span> <span class="tok-fn">get_state</span>(&amp;<span class="tok-kw">self</span>) -&gt; String { <span class="tok-com">/* ... */</span> }
+    <span class="tok-kw">pub fn</span> <span class="tok-fn">get_schema</span>() -&gt; String { <span class="tok-com">/* declarative param schema */</span> }
+}</code></pre>
+
+    <h3>Build &amp; size</h3>
+    <p>
+      Target: each plugin under 200 KB gzipped WASM. Lazy-loaded — only plugins
+      actually inserted on a track get downloaded. The full v1 suite, if every
+      plugin were on every channel (unlikely), is ~2.5 MB.
+    </p>
+  </section>
+
+  <!-- ============================================================
+       08 · MONOREPO
+       ============================================================ -->
+  <section class="section" id="monorepo">
+    <p class="eyebrow">08 · Monorepo</p>
+    <h2 class="mt-0">Monorepo structure</h2>
+    <p>
+      One repo. Turborepo for build orchestration, pnpm workspaces for
+      package management. Apps consume packages; packages don't depend on apps.
+    </p>
+
+<pre><code>aux/
+├── apps/
+│   ├── <span class="tok-fn">web/</span>              <span class="tok-com"># Next.js — the mixer + auth + dashboard + /share/[token]</span>
+│   ├── <span class="tok-fn">marketing/</span>        <span class="tok-com"># Next.js — landing, docs, blog</span>
+│   └── <span class="tok-fn">api/</span>              <span class="tok-com"># NestJS — REST API, signed-URL minting, jobs</span>
+<span class="tok-com">#   collab/         (v2) — Hocuspocus standalone for real-time CRDT sync</span>
+│
+├── packages/
+│   ├── <span class="tok-fn">audio-engine/</span>     <span class="tok-com"># AudioWorklet + scheduler + builder worker (TS)</span>
+│   ├── <span class="tok-fn">plugins/</span>          <span class="tok-com"># Rust workspace — all native DSP modules</span>
+│   │   ├── eq-8/
+│   │   ├── comp-clean/
+│   │   ├── comp-color/
+│   │   └── ... (12 total)
+│   ├── <span class="tok-fn">ui/</span>               <span class="tok-com"># shadcn/ui (base) + custom: knob, fader, meter, channel strip</span>
+│   ├── <span class="tok-fn">design-system/</span>    <span class="tok-com"># Tokens, base CSS, Tailwind preset, shadcn CSS vars</span>
+│   ├── <span class="tok-fn">session-doc/</span>      <span class="tok-com"># Yjs schema, doc types, atom paths</span>
+│   ├── <span class="tok-fn">analysis/</span>         <span class="tok-com"># LUFS, peak, FFT, fingerprint (Rust → WASM)</span>
+│   ├── <span class="tok-fn">storage/</span>          <span class="tok-com"># StemStore + impls (R2, FSA, OPFS)</span>
+│   ├── <span class="tok-fn">db/</span>               <span class="tok-com"># Prisma schema + generated client</span>
+│   └── <span class="tok-fn">shared/</span>           <span class="tok-com"># Utils, types, hooks shared everywhere</span>
+│
+├── tooling/
+│   ├── eslint-config/      <span class="tok-com"># Biome configs actually — we use Biome</span>
+│   ├── tsconfig/
+│   ├── biome.json
+│   └── docker/
+│
+├── pnpm-workspace.yaml
+├── turbo.json
+└── package.json</code></pre>
+
+    <h3>Build orchestration</h3>
+    <p>
+      Turborepo caches every task. <code>turbo build</code> only rebuilds what
+      changed. WASM builds are cached separately from TS builds. CI hits the
+      remote Turbo cache; local dev hits the local one.
+    </p>
+  </section>
+
+  <!-- ============================================================
+       09 · CI/CD
+       ============================================================ -->
+  <section class="section" id="cicd">
+    <p class="eyebrow">09 · CI/CD &amp; testing</p>
+    <h2 class="mt-0">CI/CD &amp; testing</h2>
+
+    <h3>The pipeline</h3>
+<pre><code>PR opened
+  ↓
+<span class="tok-kw">CI</span> (GitHub Actions)
+  ├─ Biome lint + format check
+  ├─ tsc --noEmit (per package)
+  ├─ Snyk + Socket.dev (dependency scan)
+  ├─ GitHub CodeQL (SAST)
+  ├─ Vitest unit tests (70% coverage gate per package)
+  ├─ Integration tests (db + api via Docker compose)
+  ├─ Playwright E2E (the 5 canonical UX-flow suites)
+  ├─ @axe-core/playwright (a11y scan on every E2E)
+  ├─ Chromatic visual regression (design system playground)
+  ├─ Rust tests (cargo test --workspace)
+  ├─ DSP property tests + golden-output hashes
+  ├─ WASM build + size check (200 KB gate per plugin)
+  ├─ Lighthouse CI per route (§20 perf budgets)
+  └─ <span class="tok-hi">Audio render benchmark</span> — the §16.07 ship gate
+
+PR merged to main
+  ↓
+<span class="tok-kw">Deploy</span> (auto)
+  ├─ web · marketing → Vercel
+  ├─ api → Fly.io
+  └─ Sentry release tag
+
+Manual promote to prod
+  ↓
+Same artifacts, prod environment</code></pre>
+
+    <h3>The ship-gate benchmark</h3>
+    <p>
+      A headless Chrome process opens a synthetic 64-track session, runs 30 s
+      of audio with full plugin chains, measures: audio-thread CPU %, UI thread
+      frame time, total memory. If it regresses past the §16.07 threshold,
+      merge blocks.
+    </p>
+    <p>
+      This is the single most important piece of CI infrastructure. Without it,
+      we'd ship a bloated 32-track DAW by mistake.
+    </p>
+
+    <h3>The test pyramid</h3>
+    <table>
+      <thead><tr><th>Layer</th><th>Tool</th><th>Target</th></tr></thead>
+      <tbody>
+        <tr><td>Unit</td><td>Vitest (per package)</td><td>70% line coverage · &lt; 30 s full run</td></tr>
+        <tr><td>Integration</td><td>Vitest + Docker (Postgres + Redis)</td><td>API endpoints hit real DB · auth, signed URLs, snapshots</td></tr>
+        <tr><td>E2E</td><td>Playwright (5 UX-flow suites)</td><td>One per brainstorm §20 flow · real browser, synthetic stems</td></tr>
+        <tr><td>Visual regression</td><td>Chromatic on the playground route</td><td>Every component, every state · baseline reviewed per PR</td></tr>
+        <tr><td>Accessibility</td><td>@axe-core/playwright</td><td>Runs on every E2E test · new violation blocks PR</td></tr>
+        <tr><td>DSP</td><td>cargo test + WASM property tests</td><td>Golden outputs, random sweeps, latency assertions</td></tr>
+        <tr><td>Performance · audio</td><td>Audio benchmark (headless Chrome)</td><td>The ship gate · §16.07</td></tr>
+        <tr><td>Performance · web</td><td>Lighthouse CI per route</td><td>Budgets per §20 · regression blocks PR</td></tr>
+      </tbody>
+    </table>
+
+    <h3>The five canonical E2E suites</h3>
+    <p>The five UX flows from brainstorm §20 become committed Playwright specs. They're the durable test of "does the product still work end-to-end after this change?"</p>
+<pre><code>apps/web/tests/e2e/
+├── <span class="tok-fn">flow-1-first-mix.spec.ts</span>          <span class="tok-com"># empty → delivered · target &lt; 2 hrs active</span>
+├── <span class="tok-fn">flow-2-quick-revision.spec.ts</span>      <span class="tok-com"># returning user · quick tweak</span>
+├── <span class="tok-fn">flow-3-stem-swap.spec.ts</span>           <span class="tok-com"># new stems · mix survives</span>
+├── <span class="tok-fn">flow-4-client-revisions.spec.ts</span>    <span class="tok-com"># snapshot + share-link round-trip</span>
+└── <span class="tok-fn">flow-5-mastering-arc.spec.ts</span>       <span class="tok-com"># single stereo bounce → mastered</span></code></pre>
+    <p>Each suite drives a real browser, real audio playback (synthetic stems for determinism), and asserts against both visible UI state <em>and</em> audio output (silence ≠ output, hash matches expected, LUFS within tolerance).</p>
+
+    <h3>DSP-specific testing</h3>
+    <p>DSP is famously hard to test — output depends on continuous-valued state. Three approaches together cover it:</p>
+    <ul>
+      <li><strong>Golden outputs.</strong> Each plugin processes a committed 30 s reference signal (impulse + sweep + pink noise + music excerpt). The output WAV's hash must match the committed golden file. Catches accidental changes to DSP math.</li>
+      <li><strong>Property-based sweeps.</strong> Random parameter values, random input — output must never <code>NaN</code>, never <code>Inf</code>, never exceed 0 dBFS by more than the plugin's declared headroom. Catches numerical bugs that golden tests miss.</li>
+      <li><strong>Latency assertion.</strong> Each plugin reports its latency via <code>latencySamples()</code>. The host sums latencies across the chain and asserts the master output is delayed by exactly that amount. Catches latency-compensation regressions, which are otherwise invisible until two engineers compare notes.</li>
+    </ul>
+
+    <h3>Tools</h3>
+    <div class="stack-row">
+      <span class="tag">GitHub Actions</span>
+      <span class="tag">Biome</span>
+      <span class="tag">Vitest</span>
+      <span class="tag">Playwright</span>
+      <span class="tag">@axe-core/playwright</span>
+      <span class="tag">Chromatic</span>
+      <span class="tag">Lighthouse CI</span>
+      <span class="tag">Snyk</span>
+      <span class="tag">Socket.dev</span>
+      <span class="tag">CodeQL</span>
+      <span class="tag">Changesets</span>
+      <span class="tag">Turbo remote cache</span>
+    </div>
+  </section>
+
+  <!-- ============================================================
+       10 · OBSERVABILITY
+       ============================================================ -->
+  <section class="section" id="observability">
+    <p class="eyebrow">10 · Observability</p>
+    <h2 class="mt-0">Observability</h2>
+
+    <table>
+      <thead><tr><th>Concern</th><th>Tool</th><th>Why</th></tr></thead>
+      <tbody>
+        <tr>
+          <td>Errors (front + back)</td>
+          <td>Sentry</td>
+          <td>Best DX, source-map support, performance traces built-in</td>
+        </tr>
+        <tr>
+          <td>Traces + metrics</td>
+          <td>OpenTelemetry → Grafana Cloud</td>
+          <td>Vendor-neutral instrumentation, free tier for our baseline</td>
+        </tr>
+        <tr>
+          <td>Product analytics</td>
+          <td>PostHog (self-hosted)</td>
+          <td>Privacy-first, event funnels, no third-party data sharing</td>
+        </tr>
+        <tr>
+          <td>Real-user audio metrics</td>
+          <td>Custom → OpenTelemetry</td>
+          <td>Per-session: audio-thread CPU, dropped frames, WASM module load times</td>
+        </tr>
+        <tr>
+          <td>Uptime</td>
+          <td>BetterStack</td>
+          <td>Synthetic checks on API + collab + auth flows</td>
+        </tr>
+      </tbody>
+    </table>
+
+    <div class="callout callout-tip">
+      <span class="mark">What we measure that nobody else does</span>
+      <p>Real-user audio thread CPU. We emit a sample every 30 s from the AudioWorklet to the main thread, batched, sent to OTEL. Engineers don't tell us when audio breaks; the meter does. This is also the ground truth for the perf envelope (§16.07) — we'll see drift before it becomes a complaint.</p>
+    </div>
+  </section>
+
+  <!-- ============================================================
+       11 · PHASES
+       ============================================================ -->
+  <section class="section" id="phases">
+    <p class="eyebrow">11 · Phases</p>
+    <h2 class="mt-0">Phases &amp; milestones</h2>
+    <p>Six phases, twelve months from kickoff to v1 — three months shorter because real-time collab moved to v2. Each phase ships something usable; nothing is half-built waiting for the next.</p>
+
+    <div class="timeline">
+      <div class="phase">
+        <div class="ver">v0.1</div>
+        <div class="months">Months 1–2</div>
+        <div class="name">Foundation</div>
+        <ul>
+          <li>Monorepo + design system</li>
+          <li>Auth (magic link)</li>
+          <li>Session doc (plain JSON)</li>
+          <li>Audio worklet skeleton</li>
+          <li>R2 + signed URLs</li>
+          <li>Stem import (no DSP)</li>
+        </ul>
+      </div>
+      <div class="phase">
+        <div class="ver">v0.2</div>
+        <div class="months">Months 3–5</div>
+        <div class="name">Minimum mix</div>
+        <ul>
+          <li>Channel strips</li>
+          <li>Fader + pan + S/M</li>
+          <li>EQ-8 plugin</li>
+          <li>Comp-Clean plugin</li>
+          <li>Autosave + local mode</li>
+          <li>Stem swap</li>
+        </ul>
+      </div>
+      <div class="phase">
+        <div class="ver">v0.3</div>
+        <div class="months">Months 6–8</div>
+        <div class="name">Real mixing</div>
+        <ul>
+          <li>All 12 native plugins</li>
+          <li>Sends + buses</li>
+          <li>Master chain</li>
+          <li>Reference Rooms</li>
+          <li>Smart EQ panel</li>
+          <li>Clip editing v1</li>
+        </ul>
+      </div>
+      <div class="phase">
+        <div class="ver">v0.4</div>
+        <div class="months">Months 9–10</div>
+        <div class="name">Delivery</div>
+        <ul>
+          <li>Pre-flight check</li>
+          <li>Multi-format export</li>
+          <li>Loudness metering</li>
+          <li>Snapshots / versions</li>
+          <li>Cloud storage mode</li>
+          <li>Automation v1 (vol/pan)</li>
+        </ul>
+      </div>
+      <div class="phase">
+        <div class="ver">v1.0</div>
+        <div class="months">Months 11–12</div>
+        <div class="name">Share &amp; ship</div>
+        <ul>
+          <li>Async share-links</li>
+          <li>Read-only viewer</li>
+          <li>Perf hardening</li>
+          <li>Public launch</li>
+          <li>Hit ship-gate (§16.07)</li>
+        </ul>
+      </div>
+      <div class="phase future">
+        <div class="ver">v2+</div>
+        <div class="months">Beyond</div>
+        <div class="name">Collab, ML, ecosystem</div>
+        <ul>
+          <li>Real-time collab (Yjs)</li>
+          <li>Hybrid mode + WebRTC</li>
+          <li>BYO bucket</li>
+          <li>Client ONNX smart engine</li>
+          <li>Third-party plugins</li>
+          <li>Mobile listening view</li>
+        </ul>
+      </div>
+    </div>
+
+    <div class="callout callout-warn">
+      <span class="mark">Reality check</span>
+      <p>Twelve months is still aggressive. Twelve native plugins is six engineer-months of focused DSP work. Plan for v1 to land in 14–15 months and ship anything in months 12–14 as v0.9 beta. The phases stay the same; the dates slip. The win from dropping collab isn't shipping faster — it's shipping <em>at all</em> instead of slipping further with a stretched scope.</p>
+    </div>
+  </section>
+
+  <!-- ============================================================
+       12 · TEAM
+       ============================================================ -->
+  <section class="section" id="team">
+    <p class="eyebrow">12 · Team</p>
+    <h2 class="mt-0">Team shape</h2>
+    <p>Smallest team that can ship v1 without breaking. Five engineers + one designer, part-time PM (or founder-as-PM).</p>
+
+    <div class="team">
+      <div class="role">
+        <div class="role-name">01 · Founder / lead</div>
+        <h4>Product, direction, decisions</h4>
+        <ul>
+          <li>Owns the brainstorm, the principles, the trade-offs</li>
+          <li>Reviews every architectural PR</li>
+          <li>Writes specs that engineers can build from</li>
+          <li>Has hands on the keyboard 30–50% of the time</li>
+        </ul>
+      </div>
+      <div class="role">
+        <div class="role-name">02 · Frontend / 2</div>
+        <h4>Mixer UI, design system, collab integration</h4>
+        <ul>
+          <li>Next.js, React, Tailwind, Radix</li>
+          <li>Yjs integration into React</li>
+          <li>The mockup-island components (channel strip, Smart EQ canvas)</li>
+        </ul>
+      </div>
+      <div class="role">
+        <div class="role-name">03 · Backend / 1</div>
+        <h4>NestJS, Postgres, infra</h4>
+        <ul>
+          <li>API service, auth, jobs, billing (later)</li>
+          <li>Hocuspocus deployment</li>
+          <li>R2 wiring, signed URL minting, tier migration</li>
+        </ul>
+      </div>
+      <div class="role">
+        <div class="role-name">04 · Audio / DSP</div>
+        <h4>Rust, WASM, audio engine</h4>
+        <ul>
+          <li>The audio worklet + builder worker + SAB protocol</li>
+          <li>The 12 native plugins</li>
+          <li>The render pipeline (browser + server)</li>
+        </ul>
+      </div>
+      <div class="role">
+        <div class="role-name">05 · Designer / part-time</div>
+        <h4>The design system, motion, illustration</h4>
+        <ul>
+          <li>Owns the visual language (this design system)</li>
+          <li>New components as they arise</li>
+          <li>Marketing site + product screenshots</li>
+        </ul>
+      </div>
+      <div class="role">
+        <div class="role-name">06 · Engineer in residence</div>
+        <h4>Real mix engineer, part-time</h4>
+        <ul>
+          <li>The test pilot — uses the tool weekly</li>
+          <li>Catches "no engineer would do this" before users do</li>
+          <li>Provides the impulse responses for Reference Rooms</li>
+        </ul>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============================================================
+       13 · COST
+       ============================================================ -->
+  <section class="section" id="cost">
+    <p class="eyebrow">13 · Cost</p>
+    <h2 class="mt-0">Cost envelope at launch</h2>
+    <p>Monthly burn for infra at 1,000 active users, ~30% on cloud mode, average 800 MB stems per cloud session, ~3 active sessions per user per month.</p>
+
+    <table>
+      <thead><tr><th>Service</th><th>Tier</th><th>Monthly</th></tr></thead>
+      <tbody>
+        <tr><td>Vercel (web + marketing)</td><td>Pro</td><td>$20</td></tr>
+        <tr><td>Fly.io (api only)</td><td>1× shared-cpu-2x</td><td>~$15</td></tr>
+        <tr><td>Neon (Postgres)</td><td>Pro / 1 GB</td><td>$20</td></tr>
+        <tr><td>Upstash (Redis)</td><td>Pay-as-you-go</td><td>~$7</td></tr>
+        <tr><td>Cloudflare R2</td><td>720 GB stored, zero egress</td><td>~$11</td></tr>
+        <tr><td>Sentry</td><td>Team</td><td>$26</td></tr>
+        <tr><td>BetterStack uptime</td><td>Starter</td><td>$10</td></tr>
+        <tr><td>Resend (email)</td><td>Pro</td><td>$20</td></tr>
+        <tr><td>Domain + misc</td><td></td><td>~$15</td></tr>
+        <tr><td><strong>Total</strong></td><td></td><td><strong>~$144/mo</strong></td></tr>
+      </tbody>
+    </table>
+
+    <p class="muted">Lower than the prior estimate because dropping collab removed the second Fly.io instance and cut Redis usage (no presence, no Yjs awareness). Scales sub-linearly because (a) Local-mode users cost us almost nothing and (b) R2 has zero egress. At 10,000 active users with the same mode mix, this becomes ~$520/mo — survivable on a small revenue base.</p>
+  </section>
+
+  <!-- ============================================================
+       14 · RISKS
+       ============================================================ -->
+  <section class="section" id="risks">
+    <p class="eyebrow">14 · Risks</p>
+    <h2 class="mt-0">Risks &amp; unknowns</h2>
+
+    <div class="risk-list">
+      <div class="risk">
+        <h4>The native plugin suite slips</h4>
+        <p>12 high-quality plugins is six engineer-months minimum. If the DSP engineer is slower than that, we either delay v1 or ship a weaker plugin suite — and v1 needs the suite to be compelling.</p>
+        <p class="mitigation">Start the DSP engineer in month 1, not month 6. Port well-known open-source DSP (Faust libraries, JSFX scripts) as starting points rather than greenfield each plugin.</p>
+      </div>
+
+      <div class="risk">
+        <h4>Audio thread regression hidden until production</h4>
+        <p>A subtle change in the worklet (allocation in a hot path, a non-SIMD branch) can drop us from "smooth" to "popping" without changing any visible behavior.</p>
+        <p class="mitigation">The ship-gate benchmark (§16.07) runs on every PR. Block merge on regression. Real-user telemetry tracks audio-thread CPU over time so we see drift before users do.</p>
+      </div>
+
+      <div class="risk">
+        <h4>Safari falls further behind on Web Audio APIs</h4>
+        <p>If Safari ships partial AudioWorklet support or doesn't catch up on SharedArrayBuffer, we lose the second-most-common browser. Macs are common in audio circles.</p>
+        <p class="mitigation">Track WebKit nightly. Maintain a "Safari-degraded" code path. If it falls too far behind, consider a thin Electron wrapper as an emergency desktop fallback.</p>
+      </div>
+
+      <div class="risk">
+        <h4>Scope creep — collab keeps trying to come back</h4>
+        <p>Every "we could let two engineers..." idea pulls the v2 collab work into v1. Each individual ask is small; cumulatively they undo the scope cut and we ship neither solo-mixer-v1 nor real-collab-v2.</p>
+        <p class="mitigation">When a feature proposal needs &gt; one open session at a time, it's v2. No exceptions in v1. Document the "v2 path" in the spec for that feature so it's clearly deferred, not lost.</p>
+      </div>
+
+      <div class="risk">
+        <h4>"Free for everyone" + storage cost spiral</h4>
+        <p>If cloud-mode usage skews higher than projected, R2 storage costs grow faster than any revenue can offset.</p>
+        <p class="mitigation">Default new sessions to Cloud (collab works) but make Hybrid + Local one click away on the import screen. Aggressive cold-tier + 1-year archive with email warning. If still unsustainable: cap free-tier active cloud sessions per user (Pro tier removes the cap).</p>
+      </div>
+
+      <div class="risk">
+        <h4>Stem swap fingerprint collisions</h4>
+        <p>If two stems sound similar (kick vs. floor tom in a sparse session), the fingerprint matcher might cross them. The blast radius is "wrong stem in wrong slot."</p>
+        <p class="mitigation">Require explicit confirmation for any match below 85%. Surface a side-by-side waveform comparison for uncertain matches. The session is reversible (snapshot pre-swap).</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============================================================
+       15 · MONTH 0 — PRE-IMPLEMENTATION
+       ============================================================ -->
+  <section class="section" id="month-0">
+    <p class="eyebrow">15 · Month 0</p>
+    <h2 class="mt-0">Before the first commit</h2>
+    <p>
+      Week one (§16) starts with <code>pnpm create turbo</code>. Five things
+      must be true <em>before</em> that command runs. Skip these and the
+      project loses a month of momentum to fixing them retroactively.
+    </p>
+
+    <h3>15.1 · Legal &amp; license</h3>
+    <ul>
+      <li><strong>Company entity.</strong> LLC or local equivalent. Holds the IP, employs hires, signs contracts.</li>
+      <li><strong>IP assignment.</strong> Founder(s) assign pre-incorporation work to the entity; every future hire signs the standard IP-assignment.</li>
+      <li><strong>Repo license · recommended split:</strong>
+        <ul>
+          <li><code>apps/*</code> · <strong>MIT</strong> — low friction for contributors</li>
+          <li><code>packages/plugins</code> · <strong>AGPL-3</strong> — encourages community contribution, protects DSP from closed forks</li>
+          <li><code>packages/design-system</code>, <code>packages/ui</code> · <strong>MIT</strong> — reusable, low friction</li>
+        </ul>
+      </li>
+      <li><strong>Trademark.</strong> Register "aux" in your jurisdiction (or accept the risk of squatters).</li>
+    </ul>
+
+    <h3>15.2 · Hiring (in lead-time order)</h3>
+    <ol>
+      <li><strong>DSP / audio engineer</strong> — longest lead time (3–6 months from search to hire). The role is most independent of the rest of the team; start the search day one of Month 0.</li>
+      <li><strong>Frontend lead</strong> — second priority. Owns the mixer UI and the design-system implementation.</li>
+      <li><strong>Backend engineer</strong> — can come a few weeks later. The API surface is small at the start (auth, signed URLs, snapshots).</li>
+      <li><strong>Engineer-in-residence (part-time, contract)</strong> — recruited from the working pro-mix community. Paid hourly. Locked in before public launch per §24 of the brainstorm.</li>
+      <li><strong>Designer (part-time, contract)</strong> — formalizes brainstorm tokens into Figma, owns ongoing visual decisions.</li>
+    </ol>
+
+    <h3>15.3 · Provider accounts</h3>
+    <p>Set up before week one — half of these have email-verification dances that take a day.</p>
+<pre><code>GitHub organization
+Vercel team
+Fly.io organization
+Cloudflare account (R2 + Workers)
+Neon project (Postgres) · dev + prod databases
+Upstash project (Redis) · dev + prod instances
+Sentry organization
+Resend account + domain verification (DNS records propagate slowly)
+1Password vault for shared secrets
+Linear (or GitHub Projects) for issue tracking
+Slack or Discord workspace for comms</code></pre>
+
+    <h3>15.4 · Design system formalization</h3>
+    <ul>
+      <li>Figma file with the brainstorm tokens (color, type, spacing) as documented variables.</li>
+      <li>Initial mockups of the v1 surfaces — mixer, master, meters, channel detail, share viewer.</li>
+      <li>Logo / wordmark (can be lo-fi for v1, refined later).</li>
+      <li>Domain registration: <code>aux.app</code> or alternative; DNS to Cloudflare.</li>
+    </ul>
+
+    <h3>15.5 · Documentation scaffold</h3>
+    <ul>
+      <li><code>ONBOARDING.md</code> at the repo root.</li>
+      <li><code>README.md</code> per package — what it is, how to develop, how to test.</li>
+      <li><code>CONTRIBUTING.md</code> — PR conventions, code review expectations, the no-list (brainstorm §19.1).</li>
+      <li>This <code>brainstorm.html</code> + <code>implementation.html</code> committed to <code>/docs</code>.</li>
+    </ul>
+
+    <div class="callout callout-tip">
+      <span class="mark">Time-box</span>
+      <p>Month 0 takes 2–4 weeks for a focused founder. Longer than that means dependencies are blocking — escalate or simplify. Goal: by the end of Month 0, week one (§16) can start without external blockers and without yak-shaving.</p>
+    </div>
+  </section>
+
+  <!-- ============================================================
+       16 · WEEK ONE
+       ============================================================ -->
+  <section class="section" id="week-one">
+    <p class="eyebrow">16 · Week one</p>
+    <h2 class="mt-0">Week-one tasks</h2>
+    <p>What to actually do on day one, in order. Each task unblocks the next.</p>
+
+    <div class="checklist">
+      <h4>Day 1 — Repo</h4>
+      <ol>
+        <li>Create the GitHub repo, private to start. Add LICENSE (TBD, probably AGPL-3 since plugins should stay open).</li>
+        <li>Init monorepo: <code>pnpm create turbo@latest aux</code></li>
+        <li>Set up workspaces in <code>pnpm-workspace.yaml</code> matching §08 structure.</li>
+        <li>Install Biome at root; configure <code>biome.json</code>.</li>
+        <li>Add base tsconfig in <code>tooling/tsconfig</code>.</li>
+      </ol>
+    </div>
+
+    <div class="checklist">
+      <h4>Day 2 — Apps scaffolding</h4>
+      <ol>
+        <li>Create <code>apps/web</code>: <code>pnpm create next-app</code> with App Router + TS + Tailwind.</li>
+        <li>Create <code>apps/api</code>: <code>nest new api</code> with Fastify adapter.</li>
+        <li>Create <code>apps/marketing</code>: separate Next.js with marketing-focused config.</li>
+        <li>Verify Turbo orchestration: <code>turbo dev</code> spins up all three.</li>
+        <li>(<code>apps/collab</code> is deferred to v2 — see §05.)</li>
+      </ol>
+    </div>
+
+    <div class="checklist">
+      <h4>Day 3 — Design system + shadcn/ui</h4>
+      <ol>
+        <li>Create <code>packages/design-system</code>.</li>
+        <li>Port the tokens from this brainstorm into a CSS module + Tailwind preset (paper, ink, azure scales).</li>
+        <li>Create <code>packages/ui</code>. Run <code>pnpm dlx shadcn@latest init</code>; point the components path at <code>packages/ui/components</code>.</li>
+        <li>Map shadcn's CSS variables to our tokens in <code>globals.css</code> — <code>--primary: var(--ink)</code>, <code>--background: var(--paper)</code>, <code>--accent: var(--azure)</code>, etc.</li>
+        <li>Install the v1 component set: <code>pnpm dlx shadcn@latest add button card dialog dropdown-menu select switch tabs tooltip toast popover command sheet table skeleton form input slider avatar badge</code>.</li>
+        <li>Add our domain-specific custom components (<code>Tag</code>, <code>Callout</code>, the eventual <code>Knob</code>, <code>Fader</code>, <code>Meter</code>) under <code>packages/ui/custom/</code> — kept separate from <code>packages/ui/components/</code> so shadcn upgrades don't touch them.</li>
+        <li>Set up a <code>/playground</code> route in <code>apps/marketing</code> showing every component side-by-side.</li>
+      </ol>
+    </div>
+
+    <div class="checklist">
+      <h4>Day 4 — Data layer</h4>
+      <ol>
+        <li>Create <code>packages/db</code> with Prisma.</li>
+        <li>Define the schema from §03 (users, sessions, stems, snapshots, collaborators, renders).</li>
+        <li>Spin up Neon free tier; connect locally.</li>
+        <li>Wire <code>packages/db</code> into <code>apps/api</code>.</li>
+        <li>First endpoint: <code>POST /api/sessions</code> creates a new session row.</li>
+      </ol>
+    </div>
+
+    <div class="checklist">
+      <h4>Day 5 — Audio worklet skeleton</h4>
+      <ol>
+        <li>Create <code>packages/audio-engine</code>.</li>
+        <li>Write a minimal <code>worklet.ts</code> that passes input → output (no DSP).</li>
+        <li>Wire it into <code>apps/web</code>: a button creates an <code>AudioContext</code> + loads the worklet + plays a 440 Hz sine.</li>
+        <li>Set up COOP+COEP headers on the dev server (vite.config.ts).</li>
+        <li>Verify <code>crossOriginIsolated === true</code> in DevTools.</li>
+        <li>Allocate a SharedArrayBuffer, write from main, read from worklet. (The first proof that the architecture works.)</li>
+      </ol>
+    </div>
+
+    <div class="callout callout-tip">
+      <span class="mark">By Friday</span>
+      <p>You have a monorepo, three running apps, a database, a design system, and a worklet playing audio. Nothing user-facing yet — but the foundation for every later phase is in place, and every architectural commitment (§16.01–07) has a corresponding line of code. Collab is a v2 problem; the v1 foundation doesn't need it.</p>
+    </div>
+  </section>
+
+  <!-- ============================================================
+       17 · ACCESSIBILITY
+       ============================================================ -->
+  <section class="section" id="accessibility-impl">
+    <p class="eyebrow">17 · Accessibility</p>
+    <h2 class="mt-0">Accessibility implementation</h2>
+    <p>
+      Brainstorm §21 commits us to WCAG 2.2 AA as a release gate. This section
+      maps that commitment onto tools, CI gates, and audit cadence — so the
+      commitment isn't just a sentence in a doc.
+    </p>
+
+    <h3>Tools</h3>
+    <div class="stack-row">
+      <span class="tag tag-accent">axe-core</span>
+      <span class="tag">@axe-core/playwright</span>
+      <span class="tag">pa11y</span>
+      <span class="tag">Lighthouse CI</span>
+      <span class="tag">Storybook a11y addon</span>
+    </div>
+
+    <h3>The CI gate</h3>
+    <ul>
+      <li>Every Playwright test ends with an <code>expect.axe()</code> assertion.</li>
+      <li>New violations block PR merge.</li>
+      <li>Existing violations live in <code>a11y-baseline.json</code> (committed) — they're known and tracked; no regression beyond baseline is allowed.</li>
+      <li>Lighthouse a11y score per route gated at <strong>≥ 95</strong>.</li>
+      <li>Nightly: <code>pa11y</code> sweep on the staging deploy, results posted to a Slack channel.</li>
+    </ul>
+
+    <h3>Manual testing matrix</h3>
+    <table>
+      <thead><tr><th>Tool</th><th>Cadence</th><th>Who</th></tr></thead>
+      <tbody>
+        <tr><td>NVDA on Windows (VM)</td><td>Spot checks per PR</td><td>Automated in CI</td></tr>
+        <tr><td>VoiceOver on macOS</td><td>Quarterly + pre-release</td><td>Frontend lead + a11y consultant</td></tr>
+        <tr><td>JAWS on Windows</td><td>Pre-launch only</td><td>External audit firm</td></tr>
+        <tr><td>Keyboard-only navigation</td><td>Every QA pass</td><td>EIR + QA</td></tr>
+      </tbody>
+    </table>
+
+    <h3>The high-contrast theme</h3>
+    <p>Implementation is a single CSS file that redefines the design-system variables at 7:1 contrast. No JS toggle — just <code>&lt;body data-theme="high-contrast"&gt;</code>. User preference persisted per account.</p>
+<pre><code><span class="tok-com">/* packages/design-system/themes/high-contrast.css */</span>
+[data-theme=<span class="tok-str">"high-contrast"</span>] {
+  --paper:    <span class="tok-str">#FFFFFF</span>;
+  --ink:      <span class="tok-str">#000000</span>;
+  --ink-3:    <span class="tok-str">#202020</span>;       <span class="tok-com">/* was #626973 */</span>
+  --azure:    <span class="tok-str">#003B9F</span>;       <span class="tok-com">/* was #2E5FA8 — darker for 7:1 on paper */</span>
+  --line:     <span class="tok-str">#404040</span>;
+  <span class="tok-com">/* ... and so on for every token */</span>
+}</code></pre>
+
+    <h3>The EQ canvas — concrete plan</h3>
+    <ul>
+      <li><strong>Numeric mode.</strong> Tab into the canvas; an overlay table appears (one row per band: freq · gain · Q · type). Edit by typing or arrow keys. <code>aria-live</code> announces band changes.</li>
+      <li><strong>Sonified mode.</strong> Optional. When the engineer tabs through bands, aux plays a tone-sweep modulated by the curve at that band's frequency — the shape becomes audible.</li>
+      <li>Both available in the channel detail view via the channel header menu. Off by default; persisted per account.</li>
+    </ul>
+
+    <h3>External audit</h3>
+    <ul>
+      <li>Pre-launch WCAG 2.2 AA audit by a specialist firm (~$5–10k).</li>
+      <li>Annual re-audit thereafter.</li>
+      <li>Findings published at <code>/accessibility</code> with status (resolved / open / by-design).</li>
+    </ul>
+  </section>
+
+  <!-- ============================================================
+       18 · SECURITY
+       ============================================================ -->
+  <section class="section" id="security-impl">
+    <p class="eyebrow">18 · Security</p>
+    <h2 class="mt-0">Security implementation</h2>
+    <p>
+      Brainstorm §22 defines the threat model. This section maps each row onto
+      a concrete control — headers, libraries, monitoring, runbooks. Nothing
+      relies on user vigilance; everything is enforced in code or in CI.
+    </p>
+
+    <h3>HTTP headers (every response)</h3>
+<pre><code><span class="tok-kw">Content-Security-Policy:</span> default-src 'self'; script-src 'self' 'sha256-...';
+                          style-src 'self' 'unsafe-hashes' 'sha256-...';
+                          connect-src 'self' https://api.aux.app wss://;
+                          worker-src 'self' blob:;
+                          frame-ancestors 'none';
+<span class="tok-kw">Strict-Transport-Security:</span> max-age=31536000; includeSubDomains; preload
+<span class="tok-kw">X-Frame-Options:</span> DENY
+<span class="tok-kw">X-Content-Type-Options:</span> nosniff
+<span class="tok-kw">Referrer-Policy:</span> strict-origin-when-cross-origin
+<span class="tok-kw">Permissions-Policy:</span> camera=(), microphone=(self), payment=(), usb=()
+<span class="tok-kw">Cross-Origin-Opener-Policy:</span> same-origin       <span class="tok-com"># required for SAB</span>
+<span class="tok-kw">Cross-Origin-Embedder-Policy:</span> require-corp     <span class="tok-com"># required for SAB</span></code></pre>
+
+    <h3>Sanitization &amp; validation</h3>
+    <ul>
+      <li><strong>DOMPurify</strong> on any user-rendered text (track names, session names, preset names, comments) before insertion as HTML.</li>
+      <li><strong>Zod schemas</strong> for every API request and response. Reject early, log structured.</li>
+      <li><strong>Audio file headers</strong> validated server-side: magic-number check, extension match, size cap. Decoded once in a sandboxed Worker before reaching the audio thread.</li>
+    </ul>
+
+    <h3>Tokens &amp; auth</h3>
+    <ul>
+      <li><strong>JWT via <code>jose</code></strong> (modern, well-audited library).</li>
+      <li><strong>Magic-link tokens:</strong> 10-min TTL, single-use, IP-bound, fingerprint-bound on suspicious geo changes.</li>
+      <li><strong>Share-link tokens:</strong> JWT with <code>snapshot_id</code> + <code>share_id</code>; <code>share_id</code> row in DB; revocation = row delete.</li>
+      <li><strong>Secrets:</strong> 256-bit per environment, rotated quarterly, stored in Fly.io secrets / Vercel encrypted env vars. Never in repo.</li>
+    </ul>
+
+    <h3>Rate limiting</h3>
+    <div class="stack-row">
+      <span class="tag">@nestjs/throttler</span>
+      <span class="tag">Redis-backed</span>
+    </div>
+    <table>
+      <thead><tr><th>Endpoint class</th><th>Per-user</th><th>Per-IP</th></tr></thead>
+      <tbody>
+        <tr><td>Authenticated API</td><td>100 req/min</td><td>—</td></tr>
+        <tr><td>Magic-link request</td><td>—</td><td>5/min</td></tr>
+        <tr><td>Magic-link verify</td><td>—</td><td>10/min</td></tr>
+        <tr><td>Signed URL mint</td><td>50/min</td><td>—</td></tr>
+        <tr><td>Share-link create</td><td>20/min</td><td>—</td></tr>
+      </tbody>
+    </table>
+
+    <h3>Audit &amp; supply chain</h3>
+    <table>
+      <thead><tr><th>Tool</th><th>Watches</th><th>When</th></tr></thead>
+      <tbody>
+        <tr><td>Snyk</td><td>Known CVEs in dependencies</td><td>Every PR</td></tr>
+        <tr><td>Socket.dev</td><td>Package risk (install scripts, typosquats)</td><td>Every PR</td></tr>
+        <tr><td>GitHub CodeQL</td><td>SAST — common vuln patterns</td><td>Every push</td></tr>
+        <tr><td>GitGuardian</td><td>Secrets in commits</td><td>Pre-commit hook + every push</td></tr>
+        <tr><td>npm audit</td><td>Lockfile audit</td><td>Every CI run</td></tr>
+        <tr><td>Dependabot + Renovate</td><td>Automated updates</td><td>Weekly</td></tr>
+      </tbody>
+    </table>
+
+    <h3>Incident response</h3>
+    <p>Two committed runbooks, rehearsed quarterly:</p>
+<pre><code><span class="tok-com">-- runbooks/revoke-user-sessions.sql</span>
+<span class="tok-com">-- Use when: account takeover suspected</span>
+<span class="tok-kw">DELETE FROM</span> auth_sessions <span class="tok-kw">WHERE</span> user_id = $1;
+<span class="tok-kw">UPDATE</span> users <span class="tok-kw">SET</span> require_reauth = <span class="tok-kw">true</span> <span class="tok-kw">WHERE</span> id = $1;
+
+<span class="tok-com">-- runbooks/revoke-share-links.sql</span>
+<span class="tok-com">-- Use when: share-link leaked or compromised</span>
+<span class="tok-kw">DELETE FROM</span> share_links <span class="tok-kw">WHERE</span> session_id = $1;</code></pre>
+
+    <ul>
+      <li><strong>Pager:</strong> Sentry critical errors → PagerDuty → on-call founder/dev.</li>
+      <li><strong>Disclosure:</strong> <code>security@aux.app</code> mailbox monitored daily; <code>/.well-known/security.txt</code> published.</li>
+      <li><strong>Bug bounty:</strong> HackerOne or Intigriti, launched alongside v1. Scope: web app, API, audio worklet, signed URLs.</li>
+    </ul>
+
+    <h3>Pre-launch security audit</h3>
+    <ul>
+      <li>External penetration test (~$10–20k for a focused engagement).</li>
+      <li>Source code review of auth + signed URL surface.</li>
+      <li>Threat-model walkthrough with the audit team using brainstorm §22 as the spec.</li>
+    </ul>
+  </section>
+
+  <!-- ============================================================
+       19 · PLUGIN PRESETS
+       ============================================================ -->
+  <section class="section" id="presets-impl">
+    <p class="eyebrow">19 · Plugin presets</p>
+    <h2 class="mt-0">Plugin presets implementation</h2>
+    <p>
+      Brainstorm §23 defines the three preset types (built-in, user, chain).
+      This section is the code shape: tables, endpoints, cache, migration,
+      and the marketplace plumbing reserved for v3.
+    </p>
+
+    <h3>Database schema</h3>
+    <div class="schema">
+<span class="table-name">user_presets</span>
+  <span class="col-name">id</span> <span class="col-type">uuid pk</span>
+  <span class="col-name">owner_id</span> <span class="col-type">uuid → users.id</span>
+  <span class="col-name">plugin</span> <span class="col-type">text</span>           <span class="col-meta">// 'EQ-8', 'Comp-A', etc.</span>
+  <span class="col-name">schema_version</span> <span class="col-type">int</span>
+  <span class="col-name">label</span> <span class="col-type">text</span>
+  <span class="col-name">state</span> <span class="col-type">jsonb</span>           <span class="col-meta">// plugin-defined</span>
+  <span class="col-name">created_at</span> <span class="col-type">timestamptz</span>
+  <span class="col-name">updated_at</span> <span class="col-type">timestamptz</span>
+
+<span class="table-name">chain_presets</span>
+  <span class="col-name">id</span> <span class="col-type">uuid pk</span>
+  <span class="col-name">owner_id</span> <span class="col-type">uuid → users.id</span>
+  <span class="col-name">label</span> <span class="col-type">text</span>
+  <span class="col-name">chain</span> <span class="col-type">jsonb</span>           <span class="col-meta">// [{ plugin, schema_version, state }, ...]</span>
+  <span class="col-name">created_at</span> <span class="col-type">timestamptz</span>
+  <span class="col-name">updated_at</span> <span class="col-type">timestamptz</span>
+
+<span class="table-name">marketplace_listings</span>           <span class="col-meta">// v3, reserved</span>
+  <span class="col-name">id</span> <span class="col-type">uuid pk</span>
+  <span class="col-name">preset_id</span> <span class="col-type">uuid → user_presets.id OR chain_presets.id</span>
+  <span class="col-name">creator_id</span> <span class="col-type">uuid → users.id</span>
+  <span class="col-name">price_usd</span> <span class="col-type">decimal</span>
+  <span class="col-name">attribution</span> <span class="col-type">text</span>
+  <span class="col-name">listed_at</span> <span class="col-type">timestamptz</span>
+    </div>
+
+    <h3>API surface</h3>
+<pre><code>GET    /api/presets/me                <span class="tok-com">// list user's presets (both types)</span>
+POST   /api/presets/plugin            <span class="tok-com">// save a plugin preset</span>
+POST   /api/presets/chain             <span class="tok-com">// save a chain preset</span>
+PUT    /api/presets/:id               <span class="tok-com">// update label or state</span>
+DELETE /api/presets/:id               <span class="tok-com">// remove</span>
+GET    /api/presets/builtin/:plugin   <span class="tok-com">// list curated built-ins for a plugin</span></code></pre>
+
+    <h3>Caching</h3>
+    <ul>
+      <li>Presets are immutable per <code>(id, updated_at)</code>. Cache forever client-side.</li>
+      <li>Server emits ETag based on <code>updated_at</code>; 304 on revalidation.</li>
+      <li>TanStack Query handles invalidation when the user saves a new preset.</li>
+      <li>Built-in presets ship inside the plugin's WASM bundle — zero network cost, cached with the plugin.</li>
+    </ul>
+
+    <h3>Plugin schema migration</h3>
+    <p>Each plugin exports two functions in its API contract (§16.03):</p>
+<pre><code><span class="tok-fn">schemaVersion</span>(): <span class="tok-kw">number</span>
+<span class="tok-fn">migrate</span>(fromVersion: <span class="tok-kw">number</span>, oldState: <span class="tok-kw">unknown</span>): <span class="tok-kw">unknown</span></code></pre>
+    <p>
+      When a preset loads, the host compares its stored <code>schema_version</code>
+      against the plugin's current. On mismatch, <code>migrate()</code> runs lazily,
+      producing the new state. The old preset row stays on disk in case the
+      migration is buggy — engineers don't lose work to a plugin upgrade.
+    </p>
+
+    <h3>UI surface (implementation)</h3>
+    <ul>
+      <li>Plugin window header: <code>DropdownMenu</code> (shadcn) with <strong>Save as · Load · Manage</strong>.</li>
+      <li>Channel header: same component, scoped to chain presets.</li>
+      <li>Command palette (<code>/</code>): fuzzy-matches across all preset types, scope-tagged in results.</li>
+    </ul>
+
+    <h3>The v3 marketplace path</h3>
+    <p>Reserved, not built in v1. When it ships:</p>
+    <ul>
+      <li><strong>Stripe Connect</strong> for engineer payouts — 70/30 split on plugin presets, similar on chains.</li>
+      <li>Listings via <code>POST /api/marketplace/listings</code> — gate on KYC for creators above a payout threshold.</li>
+      <li>Same preset data model with additive fields. No schema migration needed for v1 data when v3 turns on.</li>
+    </ul>
+  </section>
+
+  <!-- ============================================================
+       20 · PERFORMANCE BUDGETS
+       ============================================================ -->
+  <section class="section" id="perf-budgets">
+    <p class="eyebrow">20 · Performance budgets</p>
+    <h2 class="mt-0">Performance budgets per surface</h2>
+    <p>
+      §16.07 sets the audio-thread envelope. This section sets the web-thread
+      envelope — concrete byte counts and millisecond targets per route,
+      gated in CI via Lighthouse and bundle-size analysis. A PR that breaks a
+      budget for &gt; 7 days is a P1.
+    </p>
+
+    <h3>Budgets per route</h3>
+    <table>
+      <thead>
+        <tr>
+          <th>Surface</th>
+          <th>Initial (gz)</th>
+          <th>FCP (ms)</th>
+          <th>LCP (ms)</th>
+          <th>TTI (ms)</th>
+          <th>Notes</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr><td>Marketing <code>/</code></td><td>80 KB</td><td>500</td><td>800</td><td>1000</td><td>Mostly static · SSR + edge cache</td></tr>
+        <tr><td>Dashboard</td><td>200 KB</td><td>800</td><td>1200</td><td>1500</td><td>First load only · SPA after</td></tr>
+        <tr><td>Mixer <code>/session/[id]</code></td><td>600 KB</td><td>1200</td><td>2000</td><td>2500</td><td>Audio worklet load is the long pole</td></tr>
+        <tr><td>Share viewer <code>/share/[token]</code></td><td>200 KB</td><td>800</td><td>1200</td><td>1500</td><td>Slimmer than mixer (read-only)</td></tr>
+        <tr><td>EQ canvas overlay</td><td>80 KB</td><td>—</td><td>—</td><td>—</td><td>Lazy-loaded per plugin</td></tr>
+        <tr><td>Reference Rooms</td><td>80 KB + 3 MB IRs</td><td>—</td><td>—</td><td>—</td><td>IRs preloaded on session open, cached</td></tr>
+        <tr><td>Stem swap modal</td><td>40 KB</td><td>—</td><td>—</td><td>—</td><td>Sub-component</td></tr>
+        <tr><td>Pre-flight modal</td><td>40 KB</td><td>—</td><td>—</td><td>—</td><td>Sub-component</td></tr>
+        <tr><td>Master surface</td><td>100 KB</td><td>—</td><td>—</td><td>—</td><td>Reuses mixer chunks</td></tr>
+        <tr><td>Meters surface</td><td>80 KB</td><td>—</td><td>—</td><td>—</td><td>Lazy</td></tr>
+        <tr><td>Export modal</td><td>60 KB</td><td>—</td><td>—</td><td>—</td><td>Sub-component</td></tr>
+      </tbody>
+    </table>
+
+    <h3>How the budgets get enforced</h3>
+    <ul>
+      <li><strong>Lighthouse CI</strong> runs against the staging deploy on every PR · FCP / LCP / TTI gated per route.</li>
+      <li><strong>@next/bundle-analyzer</strong> reports per-route gz size · PR comment posted automatically.</li>
+      <li><strong>Real-user monitoring</strong> via PostHog + custom OTEL spans tracks p50 / p95 / p99 of the metrics per route in production.</li>
+      <li><strong>Monthly perf review</strong> — p95 of each metric checked against budget. Anything off-budget &gt; 7 days is P1.</li>
+    </ul>
+
+    <h3>The mixer page — the long pole</h3>
+    <p>
+      600 KB gz initial is generous and intentional. The mixer carries: the
+      design system, shadcn components, audio-engine bootstrap, the session-doc
+      layer, the channel-strip components, and a handful of native plugins for
+      "first session." Most of the page is code-split:
+    </p>
+    <ul>
+      <li>Plugins load lazily as the engineer inserts them.</li>
+      <li>Reference Room IRs preload during stem import, in parallel with audio decoding.</li>
+      <li>Smart EQ canvas, Stem swap, Pre-flight, Export — all lazy chunks.</li>
+      <li>WASM modules cached at the SW level — second-visit mixer FCP drops to ~400 ms.</li>
+    </ul>
+
+    <div class="callout callout-warn">
+      <span class="mark">The honest constraint</span>
+      <p>These budgets assume modern desktop hardware (the §16.07 reference machines). We don't optimize for old laptops or low-bandwidth mobile — brainstorm §02 commits us to desktop-only mixing. Don't quote these budgets as universal; quote the audience.</p>
+    </div>
+
+    <hr class="hr-rule" />
+    <p class="caption">aux · implementation plan v0.3 · 2026-05-28 · Bruce Higiro</p>
+  </section>
+
+</main>
+
+</body>
+</html>

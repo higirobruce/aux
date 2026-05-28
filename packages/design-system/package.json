@@ -1,0 +1,22 @@
+{
+  "name": "@aux/design-system",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "exports": {
+    ".": "./src/index.ts",
+    "./tokens.css": "./tokens.css",
+    "./themes/high-contrast.css": "./themes/high-contrast.css"
+  },
+  "files": ["src", "tokens.css", "themes"],
+  "scripts": {
+    "lint": "biome check .",
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "@aux/tsconfig": "workspace:*",
+    "typescript": "^5.7.2"
+  }
+}

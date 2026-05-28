@@ -1,0 +1,61 @@
+/**
+ * aux design system tokens — paper & ink, azure accent.
+ * Sourced from docs/brainstorm.html. Edit there first, then mirror here.
+ */
+:root {
+  /* Color · paper & ink */
+  --paper: #eef2f7;
+  --paper-2: #e3eaf3;
+  --paper-3: #d2dce8;
+  --ink: #16181d;
+  --ink-2: #353a43;
+  --ink-3: #626973;
+  --ink-4: #939aa5;
+
+  /* Color · azure accent */
+  --azure: #2e5fa8;
+  --azure-soft: #c5d5ec;
+  --azure-deep: #14355f;
+
+  /* Color · semantic */
+  --line: #d3dce7;
+  --line-strong: #b5c2d2;
+  --highlight: #dce7f5;
+
+  /* Type */
+  --font-display: 'Tiempos', 'Iowan Old Style', 'Georgia', serif;
+  --font-sans: 'Söhne', 'Inter', -apple-system, BlinkMacSystemFont, 'Helvetica Neue',
+    sans-serif;
+  --font-mono: 'JetBrains Mono', 'SF Mono', 'Menlo', monospace;
+
+  /* Scale (modular, 1.25 minor third) */
+  --t-12: 0.75rem;
+  --t-14: 0.875rem;
+  --t-16: 1rem;
+  --t-18: 1.125rem;
+  --t-22: 1.375rem;
+  --t-28: 1.75rem;
+  --t-36: 2.25rem;
+  --t-48: 3rem;
+  --t-64: 4rem;
+
+  /* Space (4pt grid) */
+  --s-1: 4px;
+  --s-2: 8px;
+  --s-3: 12px;
+  --s-4: 16px;
+  --s-5: 24px;
+  --s-6: 32px;
+  --s-7: 48px;
+  --s-8: 64px;
+  --s-9: 96px;
+
+  /* Radius — subtle, never round */
+  --r-1: 2px;
+  --r-2: 4px;
+  --r-3: 8px;
+
+  /* Motion */
+  --ease: cubic-bezier(0.2, 0, 0, 1);
+  --dur: 160ms;
+}

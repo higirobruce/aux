@@ -1,0 +1,2 @@
+# Custom domain components — knob, fader, meter, channel strip, etc.
+# These are kept separate from shadcn so upgrades don't touch them.
