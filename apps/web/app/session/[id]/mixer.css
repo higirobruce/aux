@@ -205,6 +205,7 @@
 }
 
 .bus-strip .ch-name {
+  position: relative;
   background: linear-gradient(180deg, #344058, #1c2638);
   color: #dce7f5;
   letter-spacing: 0.18em;
@@ -956,4 +957,116 @@
   letter-spacing: 0.04em;
   font-weight: 500;
   tab-size: 4;
+}
+
+/* ─── Channel output picker (routes to a bus) ──────────────────────── */
+
+.ch-output {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 6px 6px;
+  background: linear-gradient(180deg, #14171c, #0a0c10);
+  border-top: 1px solid #0a0c10;
+}
+
+.ch-output-arrow {
+  font-size: 9px;
+  color: #6b7280;
+  font-family: var(--font-mono);
+}
+
+.ch-output-select {
+  flex: 1;
+  min-width: 0;
+  font-family: var(--font-mono);
+  font-size: 9px;
+  letter-spacing: 0.04em;
+  padding: 2px 4px;
+  background: #1a1d22;
+  border: 1px solid #0a0c10;
+  border-radius: 2px;
+  color: #c5d5ec;
+  cursor: pointer;
+  appearance: none;
+  -webkit-appearance: none;
+}
+
+.ch-output-select:hover {
+  background: #232831;
+  color: #dce7f5;
+}
+
+.ch-output-select:focus-visible {
+  outline: 1px solid var(--azure, #2e5fa8);
+  outline-offset: 1px;
+}
+
+/* ─── Bus rail extras (add / delete / rename) ──────────────────────── */
+
+.bus-add-btn {
+  align-self: stretch;
+  width: 32px;
+  margin: 0 6px;
+  background: linear-gradient(180deg, #1c2028, #14171c);
+  border: 1px dashed rgba(197, 213, 236, 0.18);
+  border-radius: 3px;
+  color: #939aa5;
+  font-family: var(--font-mono);
+  font-size: 16px;
+  cursor: pointer;
+  transition: color 100ms ease, border-color 100ms ease, background 100ms ease;
+}
+
+.bus-add-btn:hover {
+  color: #dce7f5;
+  border-color: rgba(197, 213, 236, 0.4);
+  background: linear-gradient(180deg, #232831, #14171c);
+}
+
+.bus-delete-btn {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  width: 14px;
+  height: 14px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  border: 0;
+  color: #6b7280;
+  font-size: 12px;
+  line-height: 1;
+  cursor: pointer;
+  border-radius: 2px;
+  opacity: 0;
+  transition: opacity 100ms ease, color 100ms ease;
+}
+
+.bus-strip:hover .bus-delete-btn {
+  opacity: 1;
+}
+
+.bus-delete-btn:hover {
+  color: #e55c4c;
+}
+
+.bus-name-edit {
+  width: 100%;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  padding: 7px 4px;
+  text-align: center;
+  background: #14171c;
+  border: 1px solid rgba(46, 95, 168, 0.45);
+  border-radius: 0;
+  color: #dce7f5;
+}
+
+.bus-name-edit:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 1px var(--azure, #2e5fa8);
 }

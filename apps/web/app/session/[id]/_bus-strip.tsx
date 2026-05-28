@@ -2,6 +2,7 @@
 
 import type { AudioHost } from '@aux/audio-engine';
 import type { BusState } from '@aux/session-doc';
+import { useEffect, useRef, useState } from 'react';
 import { Fader } from './_fader';
 import { Meter } from './_meter';
 
@@ -11,6 +12,10 @@ interface Props {
   active: boolean;
   onGain: (value: number) => void;
   onMute: () => void;
+  /** Provided only for user buses — Master is undeletable. */
+  onDelete?: () => void;
+  /** Provided only for user buses — Master's name is fixed. */
+  onRename?: (name: string) => void;
 }
 
 // Same dB ↔ position mapping as the channel fader.
@@ -54,12 +59,76 @@ function formatDb(gain: number): string {
  * readout. Used today for the Master bus; will host user-created buses
  * once the routing UI lands.
  */
-export function BusStrip({ bus, host, active, onGain, onMute }: Props) {
+export function BusStrip({ bus, host, active, onGain, onMute, onDelete, onRename }: Props) {
+  const [editing, setEditing] = useState(false);
+  const [draftName, setDraftName] = useState(bus.name);
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  // When the parent renames externally (or another tab autosaves), keep the
+  // draft in sync.
+  useEffect(() => {
+    if (!editing) setDraftName(bus.name);
+  }, [bus.name, editing]);
+
+  useEffect(() => {
+    if (editing) inputRef.current?.select();
+  }, [editing]);
+
+  function commit() {
+    setEditing(false);
+    if (onRename && draftName.trim() && draftName.trim() !== bus.name) {
+      onRename(draftName);
+    } else {
+      setDraftName(bus.name);
+    }
+  }
+
+  function cancel() {
+    setEditing(false);
+    setDraftName(bus.name);
+  }
+
   return (
     <div className={`ch-strip bus-strip ${bus.muted ? 'muted' : ''}`}>
-      <div className="ch-name" title={bus.name}>
-        {bus.name}
-      </div>
+      {editing && onRename ? (
+        <input
+          ref={inputRef}
+          className="ch-name bus-name-edit"
+          value={draftName}
+          onChange={(e) => setDraftName(e.target.value)}
+          onBlur={commit}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') commit();
+            else if (e.key === 'Escape') cancel();
+          }}
+          maxLength={32}
+          aria-label="Bus name"
+        />
+      ) : (
+        <div
+          className="ch-name"
+          title={onRename ? 'Double-click to rename' : bus.name}
+          onDoubleClick={() => onRename && setEditing(true)}
+        >
+          {bus.name}
+          {onDelete && (
+            <button
+              type="button"
+              className="bus-delete-btn"
+              aria-label={`Delete ${bus.name}`}
+              title="Delete bus"
+              onClick={(e) => {
+                e.stopPropagation();
+                if (confirm(`Remove ${bus.name}? Channels routed here will return to Master.`)) {
+                  onDelete();
+                }
+              }}
+            >
+              ×
+            </button>
+          )}
+        </div>
+      )}
       <div className="ch-meta">bus</div>
 
       <div className="ch-fader-meter">

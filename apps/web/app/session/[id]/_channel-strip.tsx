@@ -2,7 +2,7 @@
 
 import type { Stem } from '@/lib/types';
 import type { AudioHost } from '@aux/audio-engine';
-import type { CompType } from '@aux/session-doc';
+import type { BusState, CompType } from '@aux/session-doc';
 import { Fader } from './_fader';
 import { Knob } from './_knob';
 import { Meter } from './_meter';
@@ -22,6 +22,9 @@ interface Props {
   onEq: (band: EqBand, gainDb: number) => void;
   onComp: (field: 'threshold' | 'ratio', value: number) => void;
   onCompType: (type: CompType) => void;
+  /** Bus directory — used to populate the strip's output picker. */
+  buses: Record<string, BusState>;
+  onOutput: (busId: string) => void;
 }
 
 const EQ_KNOB_MIN_DB = -12;
@@ -110,6 +113,8 @@ export function ChannelStrip({
   onEq,
   onComp,
   onCompType,
+  buses,
+  onOutput,
 }: Props) {
   const effectivelyMuted = state.muted || (anySoloed && !state.soloed);
 
@@ -265,6 +270,24 @@ export function ChannelStrip({
 
       <div className="ch-readout">
         <div className="ch-db">{formatDb(state.volume)} dB</div>
+      </div>
+
+      <div className="ch-output">
+        <span className="ch-output-arrow" aria-hidden="true">
+          →
+        </span>
+        <select
+          aria-label={`${stem.name} output bus`}
+          className="ch-output-select"
+          value={state.outputBusId in buses ? state.outputBusId : 'master'}
+          onChange={(e) => onOutput(e.target.value)}
+        >
+          {Object.values(buses).map((b) => (
+            <option key={b.id} value={b.id}>
+              {b.name}
+            </option>
+          ))}
+        </select>
       </div>
     </div>
   );

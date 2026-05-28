@@ -428,11 +428,23 @@ export function MixerShell({
       applyCompToHost(host, stem.id, ch.comp.threshold, ch.comp.ratio, ch.compType);
     }
 
-    // Apply bus state (gain + mute) to the host. The Master bus always
-    // exists; user-created buses (slice #77) will also flow through here.
+    // Ensure user-defined buses exist on the host (Master is auto-created)
+    // and apply gain + mute. addBus is idempotent — safe to call every load.
     for (const bus of Object.values(busStateRef.current)) {
+      if (bus.id !== MASTER_BUS_ID) {
+        host.addBus({ id: bus.id, name: bus.name, gain: bus.gain });
+      }
       host.setBusGain(bus.id, bus.gain, 0);
       host.setBusMute(bus.id, bus.muted, 0);
+    }
+
+    // Route channels to their saved bus. The host's addChannel defaults to
+    // Master, so this only does work for non-Master targets — but it's safe
+    // to call across the board (no-op on a same-bus reconnect).
+    for (const stem of loadable) {
+      const ch = latest[stem.id];
+      if (!ch || ch.outputBusId === MASTER_BUS_ID) continue;
+      host.setChannelOutput(stem.id, ch.outputBusId);
     }
   }
 
@@ -533,6 +545,65 @@ export function MixerShell({
       const muted = !current.muted;
       hostRef.current?.setBusMute(busId, muted);
       return { ...prev, [busId]: { ...current, muted } };
+    });
+  }, []);
+
+  const createBus = useCallback(() => {
+    const id = crypto.randomUUID();
+    setBusState((prev) => {
+      // Auto-name: "Bus 1", "Bus 2", ... — counts only the non-Master buses
+      // that are already in state, so naming is stable across renames later.
+      const userCount = Object.values(prev).filter((b) => b.id !== MASTER_BUS_ID).length;
+      const next: BusState = {
+        id,
+        name: `Bus ${userCount + 1}`,
+        gain: 1,
+        muted: false,
+      };
+      hostRef.current?.addBus({ id: next.id, name: next.name, gain: next.gain });
+      return { ...prev, [id]: next };
+    });
+  }, []);
+
+  const deleteBus = useCallback((busId: string) => {
+    if (busId === MASTER_BUS_ID) return;
+    hostRef.current?.removeBus(busId);
+    setBusState((prev) => {
+      const next = { ...prev };
+      delete next[busId];
+      return next;
+    });
+    // Any channels routed to this bus fall back to Master in the host's
+    // removeBus() — mirror that in React state so the autosave reflects it.
+    setChannelState((prev) => {
+      let dirty = false;
+      const next = { ...prev };
+      for (const [stemId, ch] of Object.entries(next)) {
+        if (ch.outputBusId === busId) {
+          next[stemId] = { ...ch, outputBusId: MASTER_BUS_ID };
+          dirty = true;
+        }
+      }
+      return dirty ? next : prev;
+    });
+  }, []);
+
+  const renameBus = useCallback((busId: string, name: string) => {
+    const trimmed = name.trim();
+    if (!trimmed) return;
+    setBusState((prev) => {
+      const current = prev[busId];
+      if (!current || current.name === trimmed) return prev;
+      return { ...prev, [busId]: { ...current, name: trimmed } };
+    });
+  }, []);
+
+  const setChannelOutput = useCallback((stemId: string, busId: string) => {
+    hostRef.current?.setChannelOutput(stemId, busId);
+    setChannelState((prev) => {
+      const current = prev[stemId] ?? DEFAULT_CHANNEL;
+      if (current.outputBusId === busId) return prev;
+      return { ...prev, [stemId]: { ...current, outputBusId: busId } };
     });
   }, []);
 
@@ -667,6 +738,8 @@ export function MixerShell({
                     onEq={(band, db) => setEq(stem.id, band, db)}
                     onComp={(field, value) => setComp(stem.id, field, value)}
                     onCompType={(type) => setCompType(stem.id, type)}
+                    buses={busState}
+                    onOutput={(busId) => setChannelOutput(stem.id, busId)}
                   />
                 );
               })
@@ -684,10 +757,33 @@ export function MixerShell({
             )}
           </div>
           {/* Buses on the right of the console — separated by a thin divider.
-              Today this is just Master; user-created buses land beside it in
-              the next slice. */}
-          {busState[MASTER_BUS_ID] && (
-            <div className="mixer-buses">
+              User-created buses live to the left of Master so Master always
+              sits last in the chain. */}
+          <div className="mixer-buses">
+            {Object.values(busState)
+              .filter((b) => b.id !== MASTER_BUS_ID)
+              .map((bus) => (
+                <BusStrip
+                  key={bus.id}
+                  bus={bus}
+                  host={hostRef.current}
+                  active={transport === 'playing'}
+                  onGain={(v) => setBusGain(bus.id, v)}
+                  onMute={() => toggleBusMute(bus.id)}
+                  onDelete={() => deleteBus(bus.id)}
+                  onRename={(name) => renameBus(bus.id, name)}
+                />
+              ))}
+            <button
+              type="button"
+              className="bus-add-btn"
+              onClick={createBus}
+              aria-label="Add bus"
+              title="Add bus"
+            >
+              +
+            </button>
+            {busState[MASTER_BUS_ID] && (
               <BusStrip
                 bus={busState[MASTER_BUS_ID]}
                 host={hostRef.current}
@@ -695,8 +791,8 @@ export function MixerShell({
                 onGain={(v) => setBusGain(MASTER_BUS_ID, v)}
                 onMute={() => toggleBusMute(MASTER_BUS_ID)}
               />
-            </div>
-          )}
+            )}
+          </div>
         </div>
       </div>
 
