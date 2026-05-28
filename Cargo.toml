@@ -5,6 +5,7 @@ members = [
   "packages/dsp-comp-clean",
   "packages/dsp-comp-color",
   "packages/dsp-limiter",
+  "packages/dsp-plate",
 ]
 
 # Optimize WASM size + perf for release builds.

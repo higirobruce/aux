@@ -17,7 +17,8 @@
       "**/public/aux-worklet.js",
       "**/public/comp-clean-worklet.js",
       "**/public/comp-color-worklet.js",
-      "**/public/limiter-worklet.js"
+      "**/public/limiter-worklet.js",
+      "**/public/plate-worklet.js"
     ]
   },
   "vcs": {

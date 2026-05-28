@@ -1,7 +1,7 @@
 'use client';
 
 import type { AudioHost } from '@aux/audio-engine';
-import type { BusState, LimiterState } from '@aux/session-doc';
+import type { BusState, LimiterState, PlateState } from '@aux/session-doc';
 import { useEffect, useRef, useState } from 'react';
 import { Fader } from './_fader';
 import { Knob } from './_knob';
@@ -21,6 +21,12 @@ interface Props {
   limiter?: LimiterState;
   onLimiter?: (field: 'thresholdDb' | 'releaseMs' | 'makeupDb', value: number) => void;
   onLimiterBypass?: () => void;
+  /** User-bus-only — optional Plate reverb insert. */
+  plate?: PlateState;
+  onAddPlate?: () => void;
+  onRemovePlate?: () => void;
+  onPlate?: (field: 'decay' | 'damping' | 'preDelayMs' | 'mix', value: number) => void;
+  onPlateBypass?: () => void;
 }
 
 // Same dB ↔ position mapping as the channel fader.
@@ -81,6 +87,11 @@ export function BusStrip({
   limiter,
   onLimiter,
   onLimiterBypass,
+  plate,
+  onAddPlate,
+  onRemovePlate,
+  onPlate,
+  onPlateBypass,
 }: Props) {
   const [editing, setEditing] = useState(false);
   const [draftName, setDraftName] = useState(bus.name);
@@ -190,6 +201,72 @@ export function BusStrip({
               <span className="knob-readout">{formatLimiterDb(limiter.makeupDb)}</span>
             </div>
           </div>
+        </div>
+      )}
+
+      {onAddPlate && (
+        <div className="bus-plate">
+          {plate ? (
+            <>
+              <div className="bus-plate-header">
+                <button
+                  type="button"
+                  className={`bus-limiter-toggle ${plate.bypassed ? '' : 'on'}`}
+                  onClick={onPlateBypass}
+                  aria-pressed={!plate.bypassed}
+                  title={plate.bypassed ? 'Plate bypassed — click to engage' : 'Plate active'}
+                >
+                  Plate
+                </button>
+                {onRemovePlate && (
+                  <button
+                    type="button"
+                    className="bus-plate-remove"
+                    aria-label="Remove plate"
+                    title="Remove plate"
+                    onClick={onRemovePlate}
+                  >
+                    ×
+                  </button>
+                )}
+              </div>
+              <div className="bus-limiter-knobs">
+                <div className="knob-wrap">
+                  <Knob
+                    value={plate.decay}
+                    min={0}
+                    max={0.95}
+                    defaultValue={0.55}
+                    ariaLabel="Plate decay"
+                    onChange={(v) => onPlate?.('decay', v)}
+                  />
+                  <span className="knob-label">Dcy</span>
+                  <span className="knob-readout">{Math.round(plate.decay * 100)}</span>
+                </div>
+                <div className="knob-wrap">
+                  <Knob
+                    value={plate.damping}
+                    min={0}
+                    max={1}
+                    defaultValue={0.4}
+                    ariaLabel="Plate damping"
+                    onChange={(v) => onPlate?.('damping', v)}
+                  />
+                  <span className="knob-label">Dmp</span>
+                  <span className="knob-readout">{Math.round(plate.damping * 100)}</span>
+                </div>
+              </div>
+            </>
+          ) : (
+            <button
+              type="button"
+              className="bus-add-plate-btn"
+              onClick={onAddPlate}
+              title="Add a Plate reverb to this bus"
+            >
+              + Plate
+            </button>
+          )}
         </div>
       )}
 

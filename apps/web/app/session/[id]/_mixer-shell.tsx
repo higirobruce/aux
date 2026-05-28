@@ -14,10 +14,12 @@ import {
   DEFAULT_LIMITER_STATE,
   DEFAULT_MASTER_BUS,
   DEFAULT_MASTER_CHAIN,
+  DEFAULT_PLATE_STATE,
   type LimiterState,
   MIX_STATE_VERSION,
   type MasterChain,
   MixStateSchema,
+  type PlateState,
 } from '@aux/session-doc';
 import Link from 'next/link';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
@@ -121,7 +123,7 @@ function hydrateMixState(raw: unknown): HydratedMix {
     return empty;
   }
   const ver = (raw as { version: unknown }).version;
-  if (typeof ver !== 'number' || ver < 1 || ver > 6) return empty;
+  if (typeof ver !== 'number' || ver < 1 || ver > 7) return empty;
 
   const channels = (raw as { channels: Record<string, unknown> }).channels;
   const upgradedChannels: Record<string, ChannelState> = {};
@@ -386,6 +388,8 @@ export function MixerShell({
       compColorWasmUrl: '/comp_color_bg.wasm',
       limiterWorkletUrl: '/limiter-worklet.js',
       limiterWasmUrl: '/limiter_bg.wasm',
+      plateWorkletUrl: '/plate-worklet.js',
+      plateWasmUrl: '/plate_bg.wasm',
     });
     await host.start();
     hostRef.current = host;
@@ -463,6 +467,18 @@ export function MixerShell({
       }
       host.setBusGain(bus.id, bus.gain, 0);
       host.setBusMute(bus.id, bus.muted, 0);
+      // Restore any bus-level Plate insert and its saved params.
+      if (bus.plate && bus.id !== MASTER_BUS_ID) {
+        if (!host.hasBusPlate(bus.id)) host.addBusPlate(bus.id);
+        host.setBusPlateParams(
+          bus.id,
+          bus.plate.decay,
+          bus.plate.damping,
+          bus.plate.preDelayMs,
+          bus.plate.mix
+        );
+        host.setBusPlateBypassed(bus.id, bus.plate.bypassed);
+      }
     }
 
     // Master limiter — push saved params + bypass flag.
@@ -602,6 +618,65 @@ export function MixerShell({
       const bypassed = !prev.limiter.bypassed;
       hostRef.current?.setMasterLimiterBypassed(bypassed);
       return { ...prev, limiter: { ...prev.limiter, bypassed } };
+    });
+  }, []);
+
+  const addBusPlate = useCallback((busId: string) => {
+    if (busId === MASTER_BUS_ID) return;
+    setBusState((prev) => {
+      const current = prev[busId];
+      if (!current || current.plate) return prev;
+      const plate: PlateState = { ...DEFAULT_PLATE_STATE };
+      const host = hostRef.current;
+      if (host) {
+        host.addBusPlate(busId);
+        host.setBusPlateParams(busId, plate.decay, plate.damping, plate.preDelayMs, plate.mix);
+        host.setBusPlateBypassed(busId, plate.bypassed);
+      }
+      return { ...prev, [busId]: { ...current, plate } };
+    });
+  }, []);
+
+  const removeBusPlate = useCallback((busId: string) => {
+    hostRef.current?.removeBusPlate(busId);
+    setBusState((prev) => {
+      const current = prev[busId];
+      if (!current?.plate) return prev;
+      const { plate: _, ...rest } = current;
+      void _;
+      return { ...prev, [busId]: rest };
+    });
+  }, []);
+
+  const setBusPlate = useCallback(
+    (busId: string, field: 'decay' | 'damping' | 'preDelayMs' | 'mix', value: number) => {
+      setBusState((prev) => {
+        const current = prev[busId];
+        if (!current?.plate) return prev;
+        const nextPlate: PlateState = { ...current.plate, [field]: value };
+        hostRef.current?.setBusPlateParams(
+          busId,
+          nextPlate.decay,
+          nextPlate.damping,
+          nextPlate.preDelayMs,
+          nextPlate.mix
+        );
+        return { ...prev, [busId]: { ...current, plate: nextPlate } };
+      });
+    },
+    []
+  );
+
+  const toggleBusPlateBypass = useCallback((busId: string) => {
+    setBusState((prev) => {
+      const current = prev[busId];
+      if (!current?.plate) return prev;
+      const bypassed = !current.plate.bypassed;
+      hostRef.current?.setBusPlateBypassed(busId, bypassed);
+      return {
+        ...prev,
+        [busId]: { ...current, plate: { ...current.plate, bypassed } },
+      };
     });
   }, []);
 
@@ -863,6 +938,11 @@ export function MixerShell({
                   onMute={() => toggleBusMute(bus.id)}
                   onDelete={() => deleteBus(bus.id)}
                   onRename={(name) => renameBus(bus.id, name)}
+                  plate={bus.plate}
+                  onAddPlate={() => addBusPlate(bus.id)}
+                  onRemovePlate={() => removeBusPlate(bus.id)}
+                  onPlate={(field, value) => setBusPlate(bus.id, field, value)}
+                  onPlateBypass={() => toggleBusPlateBypass(bus.id)}
                 />
               ))}
             <button

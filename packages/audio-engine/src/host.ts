@@ -63,6 +63,14 @@ export interface AudioHostOptions {
   limiterWorkletUrl?: string | URL;
   /** URL to limiter_bg.wasm. */
   limiterWasmUrl?: string | URL;
+  /**
+   * URL to the Plate-reverb worklet (Dattorro-style). When both URLs are
+   * present, any user bus can host one optional Plate insert via
+   * addBusPlate(busId). The Master bus does not host a Plate.
+   */
+  plateWorkletUrl?: string | URL;
+  /** URL to plate_bg.wasm. */
+  plateWasmUrl?: string | URL;
   /** Sample rate (default: AudioContext default). */
   sampleRate?: number;
 }
@@ -117,6 +125,9 @@ interface BusInternals {
   /** Latest gain reduction (≥ 0) from the limiter — used to drive the
    *  Master strip's GR display. */
   limiterGrDb: number;
+  /** Optional Plate reverb on a user bus. Inserted between `gainNode` (or
+   *  the limiter if present) and `analyser`. Master never hosts a Plate. */
+  plate: AudioWorkletNode | null;
   analyser: AnalyserNode;
   meterBuffer: Float32Array<ArrayBuffer>;
   gain: number;
@@ -178,6 +189,8 @@ export class AudioHost {
   private compColorWasmModule: WebAssembly.Module | null = null;
   /** Limiter — currently only used on the Master bus. */
   private limiterWasmModule: WebAssembly.Module | null = null;
+  /** Plate — optional, per user bus. */
+  private plateWasmModule: WebAssembly.Module | null = null;
 
   private channels = new Map<string, ChannelInternals>();
   private buses = new Map<string, BusInternals>();
@@ -246,6 +259,17 @@ export class AudioHost {
       );
     }
 
+    if (this.options.plateWorkletUrl && this.options.plateWasmUrl) {
+      await this.ctx.audioWorklet.addModule(this.options.plateWorkletUrl);
+      const res = await fetch(this.options.plateWasmUrl);
+      if (!res.ok) throw new Error(`plate wasm fetch failed (${res.status})`);
+      this.plateWasmModule = await WebAssembly.compileStreaming(
+        new Response(await res.arrayBuffer(), {
+          headers: { 'Content-Type': 'application/wasm' },
+        })
+      );
+    }
+
     this.workletNode = new AudioWorkletNode(this.ctx, 'aux-processor', {
       numberOfInputs: 1,
       numberOfOutputs: 1,
@@ -286,6 +310,7 @@ export class AudioHost {
       bus.input.disconnect();
       bus.gainNode.disconnect();
       if (bus.limiter) bus.limiter.disconnect();
+      if (bus.plate) bus.plate.disconnect();
       bus.analyser.disconnect();
     }
     this.buses.clear();
@@ -636,6 +661,7 @@ export class AudioHost {
       gainNode,
       limiter,
       limiterGrDb: 0,
+      plate: null,
       analyser,
       meterBuffer: new Float32Array(analyser.fftSize),
       gain,
@@ -669,6 +695,7 @@ export class AudioHost {
     bus.input.disconnect();
     bus.gainNode.disconnect();
     if (bus.limiter) bus.limiter.disconnect();
+    if (bus.plate) bus.plate.disconnect();
     bus.analyser.disconnect();
     this.buses.delete(busId);
   }
@@ -701,6 +728,80 @@ export class AudioHost {
   /** Most recent gain-reduction in dB from the master limiter (≥ 0). */
   getMasterLimiterGr(): number {
     return this.buses.get(MASTER_BUS_ID)?.limiterGrDb ?? 0;
+  }
+
+  // ────────────────────────────────────────────────────────────────────
+  // Per-bus Plate (user buses only)
+  // ────────────────────────────────────────────────────────────────────
+
+  /** True iff a bus has a Plate currently inserted. */
+  hasBusPlate(busId: string): boolean {
+    return this.buses.get(busId)?.plate != null;
+  }
+
+  /**
+   * Insert a Plate reverb on the given user bus. No-op if the bus is
+   * Master, the bus is unknown, the Plate WASM wasn't loaded at start(),
+   * or a Plate is already present.
+   *
+   * Wiring: the existing analyser is unhooked from gainNode, the plate
+   * is spliced in between, and the analyser hangs off the plate so the
+   * meter shows the wet output.
+   */
+  addBusPlate(busId: string): void {
+    if (!this.ctx || busId === MASTER_BUS_ID) return;
+    const bus = this.buses.get(busId);
+    if (!bus || bus.plate || !this.plateWasmModule) return;
+
+    const plate = new AudioWorkletNode(this.ctx, 'aux-plate-processor', {
+      numberOfInputs: 1,
+      numberOfOutputs: 1,
+      outputChannelCount: [2],
+      processorOptions: { wasmModule: this.plateWasmModule },
+    });
+
+    // Splice plate between gainNode and analyser. (User buses don't have
+    // a limiter, so gainNode is the only upstream node to disconnect.)
+    try {
+      bus.gainNode.disconnect(bus.analyser);
+    } catch {
+      // Already broken — repair below.
+    }
+    bus.gainNode.connect(plate);
+    plate.connect(bus.analyser);
+    bus.plate = plate;
+  }
+
+  /** Remove the Plate insert on a user bus and re-bridge gainNode → analyser. */
+  removeBusPlate(busId: string): void {
+    const bus = this.buses.get(busId);
+    if (!bus || !bus.plate) return;
+    try {
+      bus.gainNode.disconnect(bus.plate);
+    } catch {
+      // Was never wired; nothing to undo.
+    }
+    bus.plate.disconnect();
+    bus.plate = null;
+    bus.gainNode.connect(bus.analyser);
+  }
+
+  setBusPlateParams(
+    busId: string,
+    decay: number,
+    damping: number,
+    preDelayMs: number,
+    mix: number
+  ): void {
+    const plate = this.buses.get(busId)?.plate;
+    if (!plate) return;
+    plate.port.postMessage({ type: 'set-params', decay, damping, preDelayMs, mix });
+  }
+
+  setBusPlateBypassed(busId: string, bypassed: boolean): void {
+    const plate = this.buses.get(busId)?.plate;
+    if (!plate) return;
+    plate.port.postMessage({ type: 'set-bypassed', bypassed });
   }
 
   setBusGain(busId: string, value: number, rampSec = 0.01): void {

@@ -279,6 +279,82 @@
   color: #939aa5;
 }
 
+/* ─── Per-bus Plate insert ─────────────────────────────────────────── */
+
+.bus-plate {
+  padding: 8px 6px;
+  border-bottom: 1px solid #0a0c10;
+  background: rgba(95, 174, 107, 0.05);
+}
+
+.bus-plate-header {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-bottom: 6px;
+}
+
+.bus-plate-header .bus-limiter-toggle {
+  flex: 1;
+}
+
+.bus-plate-remove {
+  width: 16px;
+  height: 16px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  border: 0;
+  color: #6b7280;
+  font-size: 12px;
+  line-height: 1;
+  cursor: pointer;
+  border-radius: 2px;
+}
+
+.bus-plate-remove:hover {
+  color: #e55c4c;
+}
+
+.bus-add-plate-btn {
+  width: 100%;
+  padding: 4px 6px;
+  font-family: var(--font-mono);
+  font-size: 9px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  background: rgba(0, 0, 0, 0.25);
+  border: 1px dashed rgba(95, 174, 107, 0.4);
+  border-radius: 2px;
+  color: #6b7280;
+  cursor: pointer;
+  transition: color 100ms ease, border-color 100ms ease;
+}
+
+.bus-add-plate-btn:hover {
+  color: #c5d5ec;
+  border-color: rgba(95, 174, 107, 0.7);
+}
+
+.bus-plate .knob-wrap {
+  gap: 3px;
+}
+
+.bus-plate .knob {
+  width: 22px;
+  height: 22px;
+}
+
+.bus-plate .knob-label {
+  font-size: 7px;
+}
+
+.bus-plate .knob-readout {
+  font-size: 8px;
+  color: #939aa5;
+}
+
 .mixer.mixer-fullscreen .ch-strip {
   min-height: 0;
   height: 100%;

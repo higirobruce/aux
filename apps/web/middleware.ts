@@ -21,6 +21,8 @@ const PUBLIC_PATHS = [
   '/comp_color_bg.wasm',
   '/limiter-worklet.js',
   '/limiter_bg.wasm',
+  '/plate-worklet.js',
+  '/plate_bg.wasm',
 ];
 
 export function middleware(req: NextRequest) {

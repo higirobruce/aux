@@ -1,0 +1,23 @@
+{
+  "name": "@aux/dsp-plate",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Dattorro-style plate reverb — Rust DSP compiled to WASM, exposed as ES module.",
+  "type": "module",
+  "main": "./wasm/plate.js",
+  "types": "./wasm/plate.d.ts",
+  "files": ["wasm"],
+  "exports": {
+    ".": {
+      "types": "./wasm/plate.d.ts",
+      "default": "./wasm/plate.js"
+    },
+    "./plate_bg.wasm": "./wasm/plate_bg.wasm",
+    "./package.json": "./package.json"
+  },
+  "scripts": {
+    "build": "wasm-pack build --release --target web --out-dir wasm --out-name plate && rm -f wasm/.gitignore wasm/package.json",
+    "test:rust": "cargo test --release",
+    "clean": "rm -rf wasm target"
+  }
+}

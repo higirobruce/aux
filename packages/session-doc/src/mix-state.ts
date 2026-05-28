@@ -11,18 +11,31 @@ import { z } from 'zod';
  * v1 — volume / pan / mute / solo  (autosave slice, 5d36165).
  * v2 — adds EQ state per channel.
  * v3 — adds Comp-Clean state per channel.
- * v4 — adds compType ∈ { 'clean', 'color' }.
+ * v4 — adds compType.
  * v5 — adds buses + channel.outputBusId.
  * v6 — adds channel.sends.
- * v7 — adds masterChain: a brick-wall limiter on the Master bus
- *      (threshold + release + makeup, plus a bypass flag).
+ * v7 — adds masterChain (limiter on Master).
+ * v8 — buses gain an optional `plate` field — Dattorro plate reverb on the
+ *      bus, designed for the classic send-return wet workflow.
  */
 
-export const MIX_STATE_VERSION = 7;
+export const MIX_STATE_VERSION = 8;
 
 /** Stable id for the always-present Master bus. Sessions can omit it from
  *  their `buses` record; the client treats it as if explicitly present. */
 export const MASTER_BUS_ID = 'master';
+
+export const PlateStateSchema = z.object({
+  /** Feedback amount around the tank loop, 0..0.95. */
+  decay: z.number().min(0).max(0.95),
+  /** High-freq damping inside the tank, 0..1. */
+  damping: z.number().min(0).max(1),
+  /** Pre-delay in ms, 0..200. */
+  preDelayMs: z.number().min(0).max(200),
+  /** Dry/wet mix, 0..1. Typically 1.0 on a send-return bus. */
+  mix: z.number().min(0).max(1),
+  bypassed: z.boolean(),
+});
 
 export const BusStateSchema = z.object({
   id: z.string().min(1),
@@ -30,6 +43,8 @@ export const BusStateSchema = z.object({
   /** Linear gain 0..2; 1 = 0 dB. */
   gain: z.number().min(0).max(4),
   muted: z.boolean(),
+  /** Optional Plate reverb insert. Absent (or undefined) = no plate. */
+  plate: PlateStateSchema.optional(),
 });
 
 export const BusesSchema = z.record(z.string(), BusStateSchema);
@@ -93,6 +108,16 @@ export type ChannelEq = z.infer<typeof ChannelEqSchema>;
 export type ChannelComp = z.infer<typeof ChannelCompSchema>;
 export type ChannelStateDoc = z.infer<typeof ChannelStateSchema>;
 export type BusState = z.infer<typeof BusStateSchema>;
+export type PlateState = z.infer<typeof PlateStateSchema>;
+
+/** Sensible Plate defaults — medium tail, slightly damped, full wet. */
+export const DEFAULT_PLATE_STATE: PlateState = {
+  decay: 0.55,
+  damping: 0.4,
+  preDelayMs: 10,
+  mix: 1.0,
+  bypassed: false,
+};
 export type LimiterState = z.infer<typeof LimiterStateSchema>;
 export type MasterChain = z.infer<typeof MasterChainSchema>;
 export type MixState = z.infer<typeof MixStateSchema>;
