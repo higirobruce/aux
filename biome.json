@@ -10,7 +10,11 @@
       "**/.turbo",
       "**/coverage",
       "**/*.tsbuildinfo",
-      "**/prisma/migrations"
+      "**/prisma/migrations",
+      "**/wasm/**",
+      "**/public/eq8.js",
+      "**/public/eq8-worklet.js",
+      "**/public/aux-worklet.js"
     ]
   },
   "vcs": {

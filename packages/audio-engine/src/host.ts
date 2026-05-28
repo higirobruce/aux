@@ -26,11 +26,30 @@
 import type { AudioGraph, WorkletEvent, WorkletMessage } from './types';
 
 export interface AudioHostOptions {
-  /** URL to the compiled worklet module. */
+  /** URL to the master pass-through worklet module. */
   workletUrl: string | URL;
+  /**
+   * URL to the EQ-8 worklet processor. When set together with `eq8WasmUrl`,
+   * every channel gets a per-channel 8-band EQ inserted between source and
+   * gain. Omit both to skip the EQ chain entirely (engine tests).
+   */
+  eq8WorkletUrl?: string | URL;
+  /** URL to eq8_bg.wasm — fetched once and cloned into each worklet. */
+  eq8WasmUrl?: string | URL;
   /** Sample rate (default: AudioContext default). */
   sampleRate?: number;
 }
+
+/** Numeric band-type enum, mirrors @aux/dsp-eq8's BandType. */
+export const Eq8BandType = {
+  Bypass: 0,
+  HighPass: 1,
+  LowShelf: 2,
+  Peak: 3,
+  HighShelf: 4,
+  LowPass: 5,
+} as const;
+export type Eq8BandType = (typeof Eq8BandType)[keyof typeof Eq8BandType];
 
 export interface ChannelInit {
   stemId: string;
@@ -43,6 +62,9 @@ export interface ChannelInit {
 interface ChannelInternals {
   stemId: string;
   buffer: AudioBuffer | null;
+  /** EQ-8 worklet — receives the source, output feeds into `gain`. Null when
+   *  the host was started without eq8WorkletUrl / eq8WasmUrl. */
+  eq8: AudioWorkletNode | null;
   gain: GainNode;
   panner: StereoPannerNode;
   analyser: AnalyserNode;
@@ -59,6 +81,9 @@ export class AudioHost {
   private masterGain: GainNode | null = null;
   private workletNode: AudioWorkletNode | null = null;
   private listeners = new Set<(e: WorkletEvent) => void>();
+  /** WASM bytes cached after first fetch; cloned per worklet (ArrayBuffer is
+   *  consumed by structured-clone into processorOptions). Null until start(). */
+  private eq8WasmBytes: ArrayBuffer | null = null;
 
   private channels = new Map<string, ChannelInternals>();
 
@@ -72,6 +97,15 @@ export class AudioHost {
     });
 
     await this.ctx.audioWorklet.addModule(this.options.workletUrl);
+
+    // EQ-8 worklet + wasm. Both must be present to enable per-channel EQ —
+    // otherwise the engine still works, just without the EQ stage.
+    if (this.options.eq8WorkletUrl && this.options.eq8WasmUrl) {
+      await this.ctx.audioWorklet.addModule(this.options.eq8WorkletUrl);
+      const res = await fetch(this.options.eq8WasmUrl);
+      if (!res.ok) throw new Error(`eq8 wasm fetch failed (${res.status})`);
+      this.eq8WasmBytes = await res.arrayBuffer();
+    }
 
     this.workletNode = new AudioWorkletNode(this.ctx, 'aux-processor', {
       numberOfInputs: 1,
@@ -92,6 +126,7 @@ export class AudioHost {
   async stop(): Promise<void> {
     this.stopAll();
     for (const channel of this.channels.values()) {
+      if (channel.eq8) channel.eq8.disconnect();
       channel.gain.disconnect();
       channel.panner.disconnect();
       channel.analyser.disconnect();
@@ -131,6 +166,24 @@ export class AudioHost {
     gain.gain.value = volume;
     panner.pan.value = pan;
 
+    // Optional EQ-8: if WASM was loaded at start(), each channel gets its
+    // own worklet running an 8-band EQ. Routing becomes:
+    //   source → eq8 → gain → panner → analyser → master
+    // Otherwise the EQ stage is skipped and source connects directly to gain.
+    let eq8: AudioWorkletNode | null = null;
+    if (this.eq8WasmBytes) {
+      // Clone the bytes — structured-clone transfers ownership of the
+      // ArrayBuffer the first time, so each worklet needs its own copy.
+      const wasmBytes = this.eq8WasmBytes.slice(0);
+      eq8 = new AudioWorkletNode(this.ctx, 'aux-eq8-processor', {
+        numberOfInputs: 1,
+        numberOfOutputs: 1,
+        outputChannelCount: [2],
+        processorOptions: { wasmBytes },
+      });
+      eq8.connect(gain);
+    }
+
     // gain → panner → analyser → master
     gain.connect(panner);
     panner.connect(analyser);
@@ -139,6 +192,7 @@ export class AudioHost {
     this.channels.set(init.stemId, {
       stemId: init.stemId,
       buffer: null,
+      eq8,
       gain,
       panner,
       analyser,
@@ -178,10 +232,51 @@ export class AudioHost {
       channel.source.disconnect();
       channel.source = null;
     }
+    if (channel.eq8) channel.eq8.disconnect();
     channel.gain.disconnect();
     channel.panner.disconnect();
     channel.analyser.disconnect();
     this.channels.delete(stemId);
+  }
+
+  // ────────────────────────────────────────────────────────────────────
+  // EQ-8 parameters
+  // ────────────────────────────────────────────────────────────────────
+
+  /**
+   * Configure one band of the channel's EQ-8. No-op if the host was started
+   * without EQ-8 worklet URLs.
+   *
+   * @param idx       band index 0..7 (see docs — typically 0=HP, 1=LS,
+   *                  2..5=Peak, 6=HS, 7=LP)
+   * @param bandType  numeric BandType (mirror of @aux/dsp-eq8)
+   * @param freq      Hz, clamped server-side to (10, Nyquist−1)
+   * @param gainDb    dB, used by shelves + peaks; ignored by HP/LP
+   * @param q         resonance (peaks) or slope (shelves / HP / LP)
+   */
+  setChannelEqBand(
+    stemId: string,
+    idx: number,
+    bandType: Eq8BandType,
+    freq: number,
+    gainDb: number,
+    q: number
+  ): void {
+    const channel = this.channels.get(stemId);
+    if (!channel?.eq8) return;
+    channel.eq8.port.postMessage({ type: 'set-band', idx, bandType, freq, gainDb, q });
+  }
+
+  setChannelEqBypassed(stemId: string, bypassed: boolean): void {
+    const channel = this.channels.get(stemId);
+    if (!channel?.eq8) return;
+    channel.eq8.port.postMessage({ type: 'set-bypassed', bypassed });
+  }
+
+  resetChannelEq(stemId: string): void {
+    const channel = this.channels.get(stemId);
+    if (!channel?.eq8) return;
+    channel.eq8.port.postMessage({ type: 'reset' });
   }
 
   /**
@@ -265,7 +360,8 @@ export class AudioHost {
       if (!channel.buffer) continue;
       const src = this.ctx.createBufferSource();
       src.buffer = channel.buffer;
-      src.connect(channel.gain);
+      // With EQ-8 enabled: source → eq8 → gain; without: source → gain.
+      src.connect(channel.eq8 ?? channel.gain);
       src.onended = () => {
         if (channel.source === src) channel.source = null;
       };

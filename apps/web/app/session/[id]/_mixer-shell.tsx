@@ -211,7 +211,11 @@ export function MixerShell({
 
   async function ensureHost(): Promise<AudioHost> {
     if (hostRef.current) return hostRef.current;
-    const host = new AudioHost({ workletUrl: '/aux-worklet.js' });
+    const host = new AudioHost({
+      workletUrl: '/aux-worklet.js',
+      eq8WorkletUrl: '/eq8-worklet.js',
+      eq8WasmUrl: '/eq8_bg.wasm',
+    });
     await host.start();
     hostRef.current = host;
     return host;
