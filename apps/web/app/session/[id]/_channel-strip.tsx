@@ -25,6 +25,10 @@ interface Props {
   /** Bus directory — used to populate the strip's output picker. */
   buses: Record<string, BusState>;
   onOutput: (busId: string) => void;
+  /** Set a post-fader aux send level (creates the send if absent). */
+  onSend: (busId: string, level: number) => void;
+  /** Remove a post-fader aux send. */
+  onRemoveSend: (busId: string) => void;
 }
 
 const EQ_KNOB_MIN_DB = -12;
@@ -115,6 +119,8 @@ export function ChannelStrip({
   onCompType,
   buses,
   onOutput,
+  onSend,
+  onRemoveSend,
 }: Props) {
   const effectivelyMuted = state.muted || (anySoloed && !state.soloed);
 
@@ -221,6 +227,15 @@ export function ChannelStrip({
         </div>
       </div>
 
+      <SendsSection
+        stemName={stem.name}
+        buses={buses}
+        outputBusId={state.outputBusId}
+        sends={state.sends}
+        onSend={onSend}
+        onRemoveSend={onRemoveSend}
+      />
+
       <div className="ch-pan-row">
         <div className="knob-wrap">
           <Knob
@@ -289,6 +304,99 @@ export function ChannelStrip({
           ))}
         </select>
       </div>
+    </div>
+  );
+}
+
+/* ──────────────────────────────────────────────────────────────────────
+ * Sends — post-fader aux routing
+ * ──────────────────────────────────────────────────────────────────── */
+
+interface SendsSectionProps {
+  stemName: string;
+  buses: Record<string, BusState>;
+  outputBusId: string;
+  sends: Record<string, number>;
+  onSend: (busId: string, level: number) => void;
+  onRemoveSend: (busId: string) => void;
+}
+
+const SEND_DEFAULT_LEVEL = 0.5;
+
+/**
+ * Compact sends sub-section. Hidden entirely when no candidate destination
+ * buses exist (i.e. only Master, since sending to your own output bus is
+ * usually a footgun). One row per active send; below the rows, a `+`
+ * picker to add a new send.
+ */
+function SendsSection({
+  stemName,
+  buses,
+  outputBusId,
+  sends,
+  onSend,
+  onRemoveSend,
+}: SendsSectionProps) {
+  // Candidates = every bus except the channel's main output. (Master is
+  // commonly the main output; sending back to it would double-route.)
+  const candidates = Object.values(buses).filter((b) => b.id !== outputBusId);
+  const activeSendIds = Object.keys(sends);
+  const unusedCandidates = candidates.filter((b) => !activeSendIds.includes(b.id));
+
+  if (candidates.length === 0 && activeSendIds.length === 0) return null;
+
+  return (
+    <div className="ch-sends">
+      <div className="ch-sends-label">Sends</div>
+      {activeSendIds.map((busId) => {
+        const bus = buses[busId];
+        if (!bus) return null;
+        const level = sends[busId] ?? 0;
+        return (
+          <div key={busId} className="ch-send-row">
+            <span className="ch-send-name" title={bus.name}>
+              {bus.name}
+            </span>
+            <input
+              type="range"
+              min={0}
+              max={1.5}
+              step={0.01}
+              value={level}
+              onChange={(e) => onSend(busId, Number.parseFloat(e.target.value))}
+              aria-label={`${stemName} send to ${bus.name}`}
+              className="ch-send-slider"
+            />
+            <button
+              type="button"
+              className="ch-send-remove"
+              onClick={() => onRemoveSend(busId)}
+              aria-label={`Remove send to ${bus.name}`}
+              title="Remove send"
+            >
+              ×
+            </button>
+          </div>
+        );
+      })}
+      {unusedCandidates.length > 0 && (
+        <select
+          className="ch-send-add"
+          value=""
+          aria-label={`Add send for ${stemName}`}
+          onChange={(e) => {
+            const busId = e.target.value;
+            if (busId) onSend(busId, SEND_DEFAULT_LEVEL);
+          }}
+        >
+          <option value="">+ send…</option>
+          {unusedCandidates.map((b) => (
+            <option key={b.id} value={b.id}>
+              {b.name}
+            </option>
+          ))}
+        </select>
+      )}
     </div>
   );
 }

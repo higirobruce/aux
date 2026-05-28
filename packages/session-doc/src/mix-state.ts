@@ -10,14 +10,13 @@ import { z } from 'zod';
  * ----------
  * v1 — volume / pan / mute / solo  (autosave slice, 5d36165).
  * v2 — adds EQ state per channel.
- * v3 — adds Comp-Clean state: { threshold, ratio } per channel.
+ * v3 — adds Comp-Clean state per channel.
  * v4 — adds compType ∈ { 'clean', 'color' }.
- * v5 — adds buses (a record of bus rows) + channel.outputBusId. The Master
- *      bus is implicit — sessions don't need to list it, the client adds
- *      a default Master in hydration so older docs round-trip cleanly.
+ * v5 — adds buses + channel.outputBusId.
+ * v6 — adds channel.sends — a map of post-fader send levels keyed by bus id.
  */
 
-export const MIX_STATE_VERSION = 5;
+export const MIX_STATE_VERSION = 6;
 
 /** Stable id for the always-present Master bus. Sessions can omit it from
  *  their `buses` record; the client treats it as if explicitly present. */
@@ -52,6 +51,9 @@ export const ChannelCompSchema = z.object({
   ratio: z.number().min(1).max(20),
 });
 
+/** Post-fader aux sends keyed by destination bus id; value = linear gain. */
+export const ChannelSendsSchema = z.record(z.string(), z.number().min(0).max(2));
+
 export const ChannelStateSchema = z.object({
   volume: z.number().min(0).max(8),
   pan: z.number().min(-1).max(1),
@@ -61,6 +63,7 @@ export const ChannelStateSchema = z.object({
   comp: ChannelCompSchema,
   compType: CompTypeSchema,
   outputBusId: z.string().min(1),
+  sends: ChannelSendsSchema,
 });
 
 export const MixStateSchema = z.object({

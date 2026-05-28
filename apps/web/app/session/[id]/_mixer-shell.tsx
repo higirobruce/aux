@@ -42,6 +42,8 @@ export interface ChannelState {
   comp: { threshold: number; ratio: number }; // dB threshold + n:1 ratio
   compType: CompType; // 'clean' (VCA) or 'color' (FET)
   outputBusId: string;
+  /** Post-fader aux sends keyed by destination bus id (linear 0..2). */
+  sends: Record<string, number>;
 }
 
 const DEFAULT_CHANNEL: ChannelState = {
@@ -53,6 +55,7 @@ const DEFAULT_CHANNEL: ChannelState = {
   comp: { ...DEFAULT_CHANNEL_COMP },
   compType: DEFAULT_COMP_TYPE,
   outputBusId: MASTER_BUS_ID,
+  sends: {},
 };
 const AUTOSAVE_DEBOUNCE_MS = 600;
 
@@ -108,7 +111,7 @@ function hydrateMixState(raw: unknown): HydratedMix {
     return empty;
   }
   const ver = (raw as { version: unknown }).version;
-  if (typeof ver !== 'number' || ver < 1 || ver > 4) return empty;
+  if (typeof ver !== 'number' || ver < 1 || ver > 5) return empty;
 
   const channels = (raw as { channels: Record<string, unknown> }).channels;
   const upgradedChannels: Record<string, ChannelState> = {};
@@ -132,6 +135,7 @@ function hydrateMixState(raw: unknown): HydratedMix {
       comp: c.comp ?? { ...DEFAULT_CHANNEL_COMP },
       compType: c.compType ?? DEFAULT_COMP_TYPE,
       outputBusId: c.outputBusId ?? MASTER_BUS_ID,
+      sends: c.sends ?? {},
     };
   }
   return { channels: upgradedChannels, buses: { [MASTER_BUS_ID]: { ...DEFAULT_MASTER_BUS } } };
@@ -443,8 +447,14 @@ export function MixerShell({
     // to call across the board (no-op on a same-bus reconnect).
     for (const stem of loadable) {
       const ch = latest[stem.id];
-      if (!ch || ch.outputBusId === MASTER_BUS_ID) continue;
-      host.setChannelOutput(stem.id, ch.outputBusId);
+      if (!ch) continue;
+      if (ch.outputBusId !== MASTER_BUS_ID) host.setChannelOutput(stem.id, ch.outputBusId);
+      // Restore any post-fader aux sends to buses that still exist.
+      for (const [busId, level] of Object.entries(ch.sends)) {
+        if (busStateRef.current[busId]) {
+          host.setChannelSend(stem.id, busId, level, 0);
+        }
+      }
     }
   }
 
@@ -574,13 +584,23 @@ export function MixerShell({
       return next;
     });
     // Any channels routed to this bus fall back to Master in the host's
-    // removeBus() — mirror that in React state so the autosave reflects it.
+    // removeBus(); any channel sending to this bus has its send dropped.
+    // Mirror both in React state so autosave reflects the cleanup.
     setChannelState((prev) => {
       let dirty = false;
       const next = { ...prev };
       for (const [stemId, ch] of Object.entries(next)) {
+        let updated: ChannelState | null = null;
         if (ch.outputBusId === busId) {
-          next[stemId] = { ...ch, outputBusId: MASTER_BUS_ID };
+          updated = { ...ch, outputBusId: MASTER_BUS_ID };
+        }
+        if (ch.sends[busId] !== undefined) {
+          const sends = { ...(updated ?? ch).sends };
+          delete sends[busId];
+          updated = { ...(updated ?? ch), sends };
+        }
+        if (updated) {
+          next[stemId] = updated;
           dirty = true;
         }
       }
@@ -604,6 +624,28 @@ export function MixerShell({
       const current = prev[stemId] ?? DEFAULT_CHANNEL;
       if (current.outputBusId === busId) return prev;
       return { ...prev, [stemId]: { ...current, outputBusId: busId } };
+    });
+  }, []);
+
+  const setChannelSend = useCallback((stemId: string, busId: string, level: number) => {
+    hostRef.current?.setChannelSend(stemId, busId, level);
+    setChannelState((prev) => {
+      const current = prev[stemId] ?? DEFAULT_CHANNEL;
+      return {
+        ...prev,
+        [stemId]: { ...current, sends: { ...current.sends, [busId]: level } },
+      };
+    });
+  }, []);
+
+  const removeChannelSend = useCallback((stemId: string, busId: string) => {
+    hostRef.current?.removeChannelSend(stemId, busId);
+    setChannelState((prev) => {
+      const current = prev[stemId] ?? DEFAULT_CHANNEL;
+      if (current.sends[busId] === undefined) return prev;
+      const sends = { ...current.sends };
+      delete sends[busId];
+      return { ...prev, [stemId]: { ...current, sends } };
     });
   }, []);
 
@@ -740,6 +782,8 @@ export function MixerShell({
                     onCompType={(type) => setCompType(stem.id, type)}
                     buses={busState}
                     onOutput={(busId) => setChannelOutput(stem.id, busId)}
+                    onSend={(busId, level) => setChannelSend(stem.id, busId, level)}
+                    onRemoveSend={(busId) => removeChannelSend(stem.id, busId)}
                   />
                 );
               })

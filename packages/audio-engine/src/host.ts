@@ -139,6 +139,12 @@ interface ChannelInternals {
   /** Id of the bus this channel routes to. Reconnections happen through
    *  reroute(), which disconnects from the prior bus's input and reattaches. */
   outputBusId: string;
+  /**
+   * Post-fader aux sends, keyed by destination bus id. Each send is a
+   * GainNode tapped from `gain.output` and routed to the destination bus's
+   * `input`. Live changes to the level write to the node's gain param.
+   */
+  sends: Map<string, GainNode>;
   source: AudioBufferSourceNode | null;
 }
 
@@ -240,6 +246,8 @@ export class AudioHost {
       if (channel.eq8) channel.eq8.disconnect();
       if (channel.comp) channel.comp.disconnect();
       if (channel.compColor) channel.compColor.disconnect();
+      for (const send of channel.sends.values()) send.disconnect();
+      channel.sends.clear();
       channel.gain.disconnect();
       channel.panner.disconnect();
       channel.analyser.disconnect();
@@ -353,6 +361,7 @@ export class AudioHost {
       muted: false,
       soloed: false,
       outputBusId: outputBus.id,
+      sends: new Map(),
       source: null,
     };
 
@@ -400,6 +409,8 @@ export class AudioHost {
     if (channel.eq8) channel.eq8.disconnect();
     if (channel.comp) channel.comp.disconnect();
     if (channel.compColor) channel.compColor.disconnect();
+    for (const send of channel.sends.values()) send.disconnect();
+    channel.sends.clear();
     channel.gain.disconnect();
     channel.panner.disconnect();
     channel.analyser.disconnect();
@@ -592,6 +603,12 @@ export class AudioHost {
     // Reroute any channels pointing here back to Master before tearing down.
     for (const channel of this.channels.values()) {
       if (channel.outputBusId === busId) this.setChannelOutput(channel.stemId, MASTER_BUS_ID);
+      // Drop any aux sends pointing at this bus.
+      const send = channel.sends.get(busId);
+      if (send) {
+        send.disconnect();
+        channel.sends.delete(busId);
+      }
     }
     bus.input.disconnect();
     bus.gainNode.disconnect();
@@ -633,6 +650,41 @@ export class AudioHost {
     }
     channel.analyser.connect(target.input);
     channel.outputBusId = busId;
+  }
+
+  /**
+   * Set the level of a post-fader aux send from `stemId` to `busId`. Creates
+   * the send node on first call. `level` is linear gain (0..2; 1 = unity).
+   * A non-existent destination bus or non-existent channel is a no-op.
+   * Master is a valid send target but unusual — sends are typically to
+   * effect-return buses, not the main mix.
+   */
+  setChannelSend(stemId: string, busId: string, level: number, rampSec = 0.01): void {
+    const channel = this.channels.get(stemId);
+    const target = this.buses.get(busId);
+    if (!channel || !target || !this.ctx) return;
+    let send = channel.sends.get(busId);
+    if (!send) {
+      send = this.ctx.createGain();
+      send.gain.value = 0;
+      // Post-fader tap: channel.gain → send → target.input.
+      channel.gain.connect(send);
+      send.connect(target.input);
+      channel.sends.set(busId, send);
+    }
+    const clamped = Math.max(0, Math.min(2, level));
+    send.gain.cancelScheduledValues(this.ctx.currentTime);
+    send.gain.linearRampToValueAtTime(clamped, this.ctx.currentTime + rampSec);
+  }
+
+  /** Tear down a single send from `stemId` to `busId`. Idempotent. */
+  removeChannelSend(stemId: string, busId: string): void {
+    const channel = this.channels.get(stemId);
+    if (!channel) return;
+    const send = channel.sends.get(busId);
+    if (!send) return;
+    send.disconnect();
+    channel.sends.delete(busId);
   }
 
   /** Peak amplitude (0..1) at the bus output — for the bus's live meter. */

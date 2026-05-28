@@ -660,6 +660,112 @@
   color: #939aa5;
 }
 
+/* ─── Sends row (post-fader aux) ───────────────────────────────────── */
+
+.ch-sends {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 6px 6px 8px;
+  border-bottom: 1px solid #0a0c10;
+  background: rgba(0, 0, 0, 0.18);
+}
+
+.ch-sends-label {
+  font-family: var(--font-mono);
+  font-size: 8px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: #6b7280;
+  margin-bottom: 2px;
+}
+
+.ch-send-row {
+  display: grid;
+  grid-template-columns: 28px 1fr 12px;
+  gap: 3px;
+  align-items: center;
+}
+
+.ch-send-name {
+  font-family: var(--font-mono);
+  font-size: 8px;
+  letter-spacing: 0.04em;
+  color: #c5d5ec;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ch-send-slider {
+  width: 100%;
+  height: 6px;
+  appearance: none;
+  -webkit-appearance: none;
+  background: linear-gradient(to right, #1a5a2a, #5fae6b 66%, #c9b453 100%);
+  border: 1px solid #0a0c10;
+  border-radius: 2px;
+  cursor: pointer;
+}
+
+.ch-send-slider::-webkit-slider-thumb {
+  appearance: none;
+  -webkit-appearance: none;
+  width: 8px;
+  height: 12px;
+  background: linear-gradient(180deg, #dce7f5, #6a7a90);
+  border: 1px solid #000;
+  border-radius: 1px;
+  cursor: ns-resize;
+}
+
+.ch-send-slider::-moz-range-thumb {
+  width: 8px;
+  height: 12px;
+  background: linear-gradient(180deg, #dce7f5, #6a7a90);
+  border: 1px solid #000;
+  border-radius: 1px;
+  cursor: ns-resize;
+}
+
+.ch-send-remove {
+  width: 12px;
+  height: 12px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  border: 0;
+  color: #6b7280;
+  font-size: 11px;
+  line-height: 1;
+  cursor: pointer;
+  border-radius: 2px;
+}
+
+.ch-send-remove:hover {
+  color: #e55c4c;
+}
+
+.ch-send-add {
+  font-family: var(--font-mono);
+  font-size: 8px;
+  letter-spacing: 0.05em;
+  padding: 2px 4px;
+  background: #1a1d22;
+  border: 1px dashed rgba(197, 213, 236, 0.18);
+  border-radius: 2px;
+  color: #939aa5;
+  cursor: pointer;
+  appearance: none;
+  -webkit-appearance: none;
+}
+
+.ch-send-add:hover {
+  color: #dce7f5;
+  border-color: rgba(197, 213, 236, 0.4);
+}
+
 /* ─── Pan row (knob) ───────────────────────────────────────────────── */
 
 .ch-pan-row {
