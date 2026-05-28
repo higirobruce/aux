@@ -270,6 +270,8 @@ export function MixerShell({
       workletUrl: '/aux-worklet.js',
       eq8WorkletUrl: '/eq8-worklet.js',
       eq8WasmUrl: '/eq8_bg.wasm',
+      compCleanWorkletUrl: '/comp-clean-worklet.js',
+      compCleanWasmUrl: '/comp_clean_bg.wasm',
     });
     await host.start();
     hostRef.current = host;

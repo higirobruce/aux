@@ -36,6 +36,14 @@ export interface AudioHostOptions {
   eq8WorkletUrl?: string | URL;
   /** URL to eq8_bg.wasm — fetched once and cloned into each worklet. */
   eq8WasmUrl?: string | URL;
+  /**
+   * URL to the Comp-Clean worklet processor. With `compCleanWasmUrl`, every
+   * channel gets a per-channel VCA compressor inserted between the EQ and
+   * the gain node. Insert order: source → eq8 → comp → gain → panner → ...
+   */
+  compCleanWorkletUrl?: string | URL;
+  /** URL to comp_clean_bg.wasm. */
+  compCleanWasmUrl?: string | URL;
   /** Sample rate (default: AudioContext default). */
   sampleRate?: number;
 }
@@ -62,9 +70,14 @@ export interface ChannelInit {
 interface ChannelInternals {
   stemId: string;
   buffer: AudioBuffer | null;
-  /** EQ-8 worklet — receives the source, output feeds into `gain`. Null when
-   *  the host was started without eq8WorkletUrl / eq8WasmUrl. */
+  /** EQ-8 worklet — receives the source, output feeds into `comp` (or `gain`
+   *  if comp is null). Null when the host was started without EQ-8 URLs. */
   eq8: AudioWorkletNode | null;
+  /** Comp-Clean worklet — receives `eq8` output (or source if no EQ).
+   *  Output feeds `gain`. Null when started without comp URLs. */
+  comp: AudioWorkletNode | null;
+  /** Latest gain reduction in dB (≥ 0) reported by the comp worklet. */
+  compGrDb: number;
   gain: GainNode;
   panner: StereoPannerNode;
   analyser: AnalyserNode;
@@ -84,6 +97,8 @@ export class AudioHost {
   /** Compiled WASM module shared across worklets via structured clone. Null
    *  until start() loads the EQ-8 module (or if EQ-8 URLs weren't supplied). */
   private eq8WasmModule: WebAssembly.Module | null = null;
+  /** Same pattern as eq8WasmModule, but for Comp-Clean. */
+  private compWasmModule: WebAssembly.Module | null = null;
 
   private channels = new Map<string, ChannelInternals>();
 
@@ -118,6 +133,17 @@ export class AudioHost {
       );
     }
 
+    if (this.options.compCleanWorkletUrl && this.options.compCleanWasmUrl) {
+      await this.ctx.audioWorklet.addModule(this.options.compCleanWorkletUrl);
+      const res = await fetch(this.options.compCleanWasmUrl);
+      if (!res.ok) throw new Error(`comp-clean wasm fetch failed (${res.status})`);
+      this.compWasmModule = await WebAssembly.compileStreaming(
+        new Response(await res.arrayBuffer(), {
+          headers: { 'Content-Type': 'application/wasm' },
+        })
+      );
+    }
+
     this.workletNode = new AudioWorkletNode(this.ctx, 'aux-processor', {
       numberOfInputs: 1,
       numberOfOutputs: 1,
@@ -138,6 +164,7 @@ export class AudioHost {
     this.stopAll();
     for (const channel of this.channels.values()) {
       if (channel.eq8) channel.eq8.disconnect();
+      if (channel.comp) channel.comp.disconnect();
       channel.gain.disconnect();
       channel.panner.disconnect();
       channel.analyser.disconnect();
@@ -177,22 +204,35 @@ export class AudioHost {
     gain.gain.value = volume;
     panner.pan.value = pan;
 
-    // Optional EQ-8: if the WASM module was compiled at start(), each channel
-    // gets its own worklet running an 8-band EQ. Routing becomes:
-    //   source → eq8 → gain → panner → analyser → master
-    // Otherwise the EQ stage is skipped and source connects directly to gain.
+    // Per-channel inserts. Built from gain back to source so wiring is
+    // straightforward: each new node connects to the previous "front" and
+    // becomes the new front; the source ultimately connects to `front`.
+    //
+    //   source → [eq8] → [comp] → gain → panner → analyser → master
+    //
+    // Bracketed nodes are conditional: they only exist if the corresponding
+    // WASM module was loaded at start(). With both off, the routing reduces
+    // to source → gain → ... as before.
+    let comp: AudioWorkletNode | null = null;
+    if (this.compWasmModule) {
+      comp = new AudioWorkletNode(this.ctx, 'aux-comp-clean-processor', {
+        numberOfInputs: 1,
+        numberOfOutputs: 1,
+        outputChannelCount: [2],
+        processorOptions: { wasmModule: this.compWasmModule },
+      });
+      comp.connect(gain);
+    }
+
     let eq8: AudioWorkletNode | null = null;
     if (this.eq8WasmModule) {
-      // WebAssembly.Module is structured-cloneable and reusable, so we share
-      // the same compiled module across all per-channel worklets — they each
-      // instantiate it locally inside their constructor.
       eq8 = new AudioWorkletNode(this.ctx, 'aux-eq8-processor', {
         numberOfInputs: 1,
         numberOfOutputs: 1,
         outputChannelCount: [2],
         processorOptions: { wasmModule: this.eq8WasmModule },
       });
-      eq8.connect(gain);
+      eq8.connect(comp ?? gain);
     }
 
     // gain → panner → analyser → master
@@ -200,10 +240,12 @@ export class AudioHost {
     panner.connect(analyser);
     analyser.connect(this.masterGain);
 
-    this.channels.set(init.stemId, {
+    const channelInternals: ChannelInternals = {
       stemId: init.stemId,
       buffer: null,
       eq8,
+      comp,
+      compGrDb: 0,
       gain,
       panner,
       analyser,
@@ -213,7 +255,15 @@ export class AudioHost {
       muted: false,
       soloed: false,
       source: null,
-    });
+    };
+
+    if (comp) {
+      comp.port.onmessage = (e: MessageEvent<{ type: string; db: number }>) => {
+        if (e.data?.type === 'gr') channelInternals.compGrDb = e.data.db;
+      };
+    }
+
+    this.channels.set(init.stemId, channelInternals);
   }
 
   /** Decode and attach an audio buffer to its channel. Auto-creates the channel. */
@@ -244,6 +294,7 @@ export class AudioHost {
       channel.source = null;
     }
     if (channel.eq8) channel.eq8.disconnect();
+    if (channel.comp) channel.comp.disconnect();
     channel.gain.disconnect();
     channel.panner.disconnect();
     channel.analyser.disconnect();
@@ -288,6 +339,50 @@ export class AudioHost {
     const channel = this.channels.get(stemId);
     if (!channel?.eq8) return;
     channel.eq8.port.postMessage({ type: 'reset' });
+  }
+
+  // ────────────────────────────────────────────────────────────────────
+  // Comp-Clean parameters
+  // ────────────────────────────────────────────────────────────────────
+
+  /**
+   * Push all six compressor params at once. No-op if the host was started
+   * without Comp-Clean URLs.
+   *
+   * The DSP fast-paths ratio = 1 (passes input through), so callers can
+   * "bypass" a channel just by setting ratio = 1 without flipping bypass.
+   */
+  setChannelComp(
+    stemId: string,
+    thresholdDb: number,
+    ratio: number,
+    attackMs: number,
+    releaseMs: number,
+    makeupDb: number,
+    mix: number
+  ): void {
+    const channel = this.channels.get(stemId);
+    if (!channel?.comp) return;
+    channel.comp.port.postMessage({
+      type: 'set-params',
+      thresholdDb,
+      ratio,
+      attackMs,
+      releaseMs,
+      makeupDb,
+      mix,
+    });
+  }
+
+  setChannelCompBypassed(stemId: string, bypassed: boolean): void {
+    const channel = this.channels.get(stemId);
+    if (!channel?.comp) return;
+    channel.comp.port.postMessage({ type: 'set-bypassed', bypassed });
+  }
+
+  /** Most recent gain-reduction in dB for the channel's compressor (≥ 0). */
+  getChannelCompGr(stemId: string): number {
+    return this.channels.get(stemId)?.compGrDb ?? 0;
   }
 
   /**
@@ -371,8 +466,9 @@ export class AudioHost {
       if (!channel.buffer) continue;
       const src = this.ctx.createBufferSource();
       src.buffer = channel.buffer;
-      // With EQ-8 enabled: source → eq8 → gain; without: source → gain.
-      src.connect(channel.eq8 ?? channel.gain);
+      // Routing front: prefer eq8 if present, else comp, else gain.
+      // addChannel() chains eq8 → comp → gain when both inserts exist.
+      src.connect(channel.eq8 ?? channel.comp ?? channel.gain);
       src.onended = () => {
         if (channel.source === src) channel.source = null;
       };
