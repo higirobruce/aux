@@ -97,6 +97,10 @@ export async function sendMagicLinkMail(opts: MagicLinkMail): Promise<void> {
       html,
     });
     console.log(`[auth] magic link emailed to ${email} via SMTP`);
+    if (process.env.NODE_ENV !== 'production') {
+      // Dev convenience: also log the URL so curl-based smoke tests can grab it.
+      console.log(`[auth]   url:   ${url}`);
+    }
     return;
   }
 

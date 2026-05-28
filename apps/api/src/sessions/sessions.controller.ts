@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Post, Req, UseGuards } from '@nestjs/common';
+import { Body, Controller, Get, Param, Post, Req, UseGuards } from '@nestjs/common';
 import { z } from 'zod';
 import { AuthGuard, type AuthenticatedRequest } from '../auth/auth.guard.js';
 import { SessionsService } from './sessions.service.js';
@@ -16,6 +16,14 @@ export class SessionsController {
   @Get()
   async list(@Req() req: AuthenticatedRequest) {
     return this.sessions.list(req.user.id);
+  }
+
+  @Get(':id')
+  async getOne(@Req() req: AuthenticatedRequest, @Param('id') id: string) {
+    const session = await this.sessions.getById(req.user.id, id);
+    // Touch — non-blocking. last_opened_at moves forward.
+    void this.sessions.touch(req.user.id, id);
+    return session;
   }
 
   @Post()

@@ -16,6 +16,8 @@
     "@aux/db": "workspace:*",
     "@aux/session-doc": "workspace:*",
     "@aux/shared": "workspace:*",
+    "@aws-sdk/client-s3": "^3.717.0",
+    "@aws-sdk/s3-request-presigner": "^3.717.0",
     "@fastify/helmet": "^13.0.1",
     "@nestjs/common": "^10.4.15",
     "better-auth": "^1.1.13",
