@@ -1,5 +1,6 @@
 import { Body, Controller, Get, Post } from '@nestjs/common';
 import { z } from 'zod';
+import { requireDevUser } from '../common/dev-user.js';
 import { SessionsService } from './sessions.service.js';
 
 const CreateSessionSchema = z.object({
@@ -13,15 +14,15 @@ export class SessionsController {
 
   @Get()
   async list() {
-    // TODO: pull user_id from auth context.
-    return this.sessions.list('placeholder-user-id');
+    // TODO: pull userId from auth context once better-auth lands.
+    return this.sessions.list(requireDevUser());
   }
 
   @Post()
   async create(@Body() body: unknown) {
     const parsed = CreateSessionSchema.parse(body);
     return this.sessions.create({
-      ownerId: 'placeholder-user-id',
+      ownerId: requireDevUser(),
       name: parsed.name,
       storageMode: parsed.storageMode,
     });
