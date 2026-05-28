@@ -45,6 +45,8 @@ interface ChannelInternals {
   buffer: AudioBuffer | null;
   gain: GainNode;
   panner: StereoPannerNode;
+  analyser: AnalyserNode;
+  meterBuffer: Float32Array<ArrayBuffer>;
   volume: number;
   pan: number;
   muted: boolean;
@@ -92,6 +94,7 @@ export class AudioHost {
     for (const channel of this.channels.values()) {
       channel.gain.disconnect();
       channel.panner.disconnect();
+      channel.analyser.disconnect();
     }
     this.channels.clear();
     if (this.workletNode) {
@@ -119,20 +122,27 @@ export class AudioHost {
 
     const gain = this.ctx.createGain();
     const panner = this.ctx.createStereoPanner();
+    const analyser = this.ctx.createAnalyser();
+    analyser.fftSize = 256;
+    analyser.smoothingTimeConstant = 0.5;
 
     const volume = init.volume ?? 1;
     const pan = init.pan ?? 0;
     gain.gain.value = volume;
     panner.pan.value = pan;
 
+    // gain → panner → analyser → master
     gain.connect(panner);
-    panner.connect(this.masterGain);
+    panner.connect(analyser);
+    analyser.connect(this.masterGain);
 
     this.channels.set(init.stemId, {
       stemId: init.stemId,
       buffer: null,
       gain,
       panner,
+      analyser,
+      meterBuffer: new Float32Array(analyser.fftSize),
       volume,
       pan,
       muted: false,
@@ -170,7 +180,24 @@ export class AudioHost {
     }
     channel.gain.disconnect();
     channel.panner.disconnect();
+    channel.analyser.disconnect();
     this.channels.delete(stemId);
+  }
+
+  /**
+   * Read the current peak amplitude (0..1) for a channel — for a live meter.
+   * Returns 0 if the channel doesn't exist or nothing is playing.
+   */
+  getChannelLevel(stemId: string): number {
+    const channel = this.channels.get(stemId);
+    if (!channel) return 0;
+    channel.analyser.getFloatTimeDomainData(channel.meterBuffer);
+    let peak = 0;
+    for (let i = 0; i < channel.meterBuffer.length; i++) {
+      const v = Math.abs(channel.meterBuffer[i] ?? 0);
+      if (v > peak) peak = v;
+    }
+    return peak;
   }
 
   // ────────────────────────────────────────────────────────────────────

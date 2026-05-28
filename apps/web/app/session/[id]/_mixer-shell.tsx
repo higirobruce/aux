@@ -5,6 +5,7 @@ import { AudioHost } from '@aux/audio-engine';
 import { Button } from '@aux/ui';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ChannelStrip } from './_channel-strip';
+import './mixer.css';
 
 interface Props {
   sessionId: string;
@@ -226,23 +227,27 @@ export function MixerShell({ sessionId, initialStems }: Props) {
       {stems.length > 0 && (
         <section className="mb-10">
           <p className="font-mono text-xs tracking-widest uppercase text-ink-3 mb-3">Mixer</p>
-          <div className="border border-line rounded-md divide-y divide-line">
-            {stems.map((stem) => {
-              const state = channelState[stem.id] ?? DEFAULT_CHANNEL;
-              return (
-                <ChannelStrip
-                  key={stem.id}
-                  stem={stem}
-                  state={state}
-                  loaded={loadedIds.has(stem.id)}
-                  anySoloed={anySoloed}
-                  onVolume={(v) => setVolume(stem.id, v)}
-                  onPan={(p) => setPan(stem.id, p)}
-                  onMute={() => toggleMute(stem.id)}
-                  onSolo={() => toggleSolo(stem.id)}
-                />
-              );
-            })}
+          <div className="mixer">
+            <div className="mixer-console">
+              {stems.map((stem) => {
+                const state = channelState[stem.id] ?? DEFAULT_CHANNEL;
+                return (
+                  <ChannelStrip
+                    key={stem.id}
+                    stem={stem}
+                    state={state}
+                    loaded={loadedIds.has(stem.id)}
+                    anySoloed={anySoloed}
+                    host={hostRef.current}
+                    active={transport === 'playing'}
+                    onVolume={(v) => setVolume(stem.id, v)}
+                    onPan={(p) => setPan(stem.id, p)}
+                    onMute={() => toggleMute(stem.id)}
+                    onSolo={() => toggleSolo(stem.id)}
+                  />
+                );
+              })}
+            </div>
           </div>
         </section>
       )}
