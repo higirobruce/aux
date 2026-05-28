@@ -1,10 +1,12 @@
 'use client';
 
 import { extractMetadata } from '@/lib/audio-metadata';
+import { type FileMetadata, MATCH_UNCERTAIN, matchStems } from '@/lib/stem-match';
 import type { Stem } from '@/lib/types';
 import { Button } from '@aux/ui';
 import { useRouter } from 'next/navigation';
 import { useState } from 'react';
+import { StemSwapDialog, type SwapDecision } from './_stem-swap-dialog';
 
 interface Props {
   sessionId: string;
@@ -13,7 +15,7 @@ interface Props {
 
 interface UploadState {
   filename: string;
-  status: 'analyzing' | 'uploading' | 'registering' | 'done' | 'failed';
+  status: 'analyzing' | 'uploading' | 'registering' | 'swapping' | 'done' | 'failed';
   error?: string;
   progress?: number;
 }
@@ -57,21 +59,33 @@ export function StemDropZone({ sessionId, initialStems }: Props) {
   const [stems, setStems] = useState<Stem[]>(initialStems);
   const [uploads, setUploads] = useState<Record<string, UploadState>>({});
   const [dragging, setDragging] = useState(false);
+  /** Pending swap proposal — non-null shows the modal. */
+  const [pendingSwap, setPendingSwap] = useState<{
+    metadatas: FileMetadata[];
+    matches: ReturnType<typeof matchStems>;
+  } | null>(null);
 
-  async function uploadOne(file: File, key: string) {
+  type Metadata = Awaited<ReturnType<typeof extractMetadata>>;
+
+  /**
+   * Upload a file and either register it as a new stem (no target) or
+   * PUT its source onto an existing stem (target = the channel to keep).
+   * Returns the resulting Stem row.
+   */
+  async function uploadOne(
+    file: File,
+    key: string,
+    meta: Metadata,
+    targetStemId: string | null
+  ): Promise<Stem> {
     const filename = file.name;
     const setStatus = (status: UploadState['status'], error?: string) => {
       setUploads((prev) => ({ ...prev, [key]: { filename, status, error } }));
     };
 
     try {
-      setStatus('analyzing');
-
-      const meta = await extractMetadata(file);
-
       setStatus('uploading');
 
-      // 1) Sign — get a presigned PUT URL.
       const signRes = await fetch('/api/stems/sign', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -88,7 +102,6 @@ export function StemDropZone({ sessionId, initialStems }: Props) {
         key: string;
       };
 
-      // 2) Upload directly to S3/MinIO via the signed URL.
       const putRes = await fetch(uploadUrl, {
         method: 'PUT',
         headers: { 'Content-Type': file.type || 'application/octet-stream' },
@@ -96,22 +109,44 @@ export function StemDropZone({ sessionId, initialStems }: Props) {
       });
       if (!putRes.ok) throw new Error(`upload failed (${putRes.status})`);
 
-      setStatus('registering');
+      const audioBody = {
+        s3Key,
+        lengthMs: meta.lengthMs,
+        channels: meta.channels,
+        sampleRate: meta.sampleRate,
+        peakDb: meta.peakDb,
+        lufsI: meta.lufsI,
+      };
 
-      // 3) Register the Stem row.
+      if (targetStemId) {
+        // Swap: replace the source on the existing stem. Name + id stay.
+        setStatus('swapping');
+        const swapRes = await fetch(
+          `/api/sessions/${sessionId}/stems/${targetStemId}/swap-source`,
+          {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            credentials: 'include',
+            body: JSON.stringify(audioBody),
+          }
+        );
+        if (!swapRes.ok) {
+          const data = await swapRes.json().catch(() => ({}));
+          throw new Error(data?.message ?? `swap failed (${swapRes.status})`);
+        }
+        const updated: Stem = await swapRes.json();
+        setStems((prev) => prev.map((s) => (s.id === updated.id ? updated : s)));
+        window.dispatchEvent(new CustomEvent<Stem>('aux:stem-swapped', { detail: updated }));
+        setStatus('done');
+        return updated;
+      }
+
+      setStatus('registering');
       const regRes = await fetch(`/api/sessions/${sessionId}/stems`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         credentials: 'include',
-        body: JSON.stringify({
-          name: file.name,
-          s3Key,
-          lengthMs: meta.lengthMs,
-          channels: meta.channels,
-          sampleRate: meta.sampleRate,
-          peakDb: meta.peakDb,
-          lufsI: meta.lufsI,
-        }),
+        body: JSON.stringify({ name: file.name, ...audioBody }),
       });
       if (!regRes.ok) {
         const data = await regRes.json().catch(() => ({}));
@@ -121,15 +156,100 @@ export function StemDropZone({ sessionId, initialStems }: Props) {
       setStems((prev) => [...prev, created]);
       window.dispatchEvent(new CustomEvent<Stem>('aux:stem-added', { detail: created }));
       setStatus('done');
+      return created;
     } catch (err) {
       setStatus('failed', err instanceof Error ? err.message : 'failed');
+      throw err;
     }
   }
 
+  async function processDecisions(
+    metadatas: FileMetadata[],
+    decisions: SwapDecision[]
+  ): Promise<void> {
+    const lookup = new Map(metadatas.map((m) => [m.file, m]));
+    await Promise.all(
+      decisions.map(async (d, i) => {
+        const m = lookup.get(d.file);
+        if (!m) return;
+        const meta = await extractMetadata(d.file);
+        await uploadOne(d.file, `${Date.now()}-${i}-${d.file.name}`, meta, d.targetStemId).catch(
+          () => {
+            /* per-file error is captured in upload state; don't fail the batch */
+          }
+        );
+      })
+    );
+    router.refresh();
+  }
+
+  /**
+   * Extract metadata for every file, then decide whether to open the swap
+   * modal or upload directly:
+   *   - no existing stems → straight to upload
+   *   - existing stems but no file scored ≥ MATCH_UNCERTAIN → straight to upload
+   *   - otherwise → open the swap dialog, defer the actual uploads to confirm
+   */
   async function handleFiles(fileList: FileList | File[]) {
     const files = Array.from(fileList);
-    await Promise.all(files.map((file, i) => uploadOne(file, `${Date.now()}-${i}-${file.name}`)));
-    router.refresh();
+    if (files.length === 0) return;
+
+    // Pre-analyze every file so the modal can show length scores. Sets each
+    // row's status to 'analyzing'; the per-file key collides with the upload
+    // key later, which is fine — uploadOne overrides it.
+    const metaResults = await Promise.all(
+      files.map(async (file, i) => {
+        const key = `${Date.now()}-${i}-${file.name}`;
+        setUploads((prev) => ({ ...prev, [key]: { filename: file.name, status: 'analyzing' } }));
+        try {
+          const meta = await extractMetadata(file);
+          return { key, file, meta };
+        } catch {
+          setUploads((prev) => ({
+            ...prev,
+            [key]: { filename: file.name, status: 'failed', error: 'decode failed' },
+          }));
+          return null;
+        }
+      })
+    );
+
+    const metadatas: FileMetadata[] = metaResults
+      .filter((r): r is NonNullable<typeof r> => r !== null)
+      .map((r) => ({ file: r.file, lengthMs: r.meta.lengthMs }));
+
+    if (stems.length === 0) {
+      // Pure new-upload path — bypass the matcher entirely.
+      await Promise.all(
+        metaResults.map(async (r, i) => {
+          if (!r) return;
+          await uploadOne(r.file, r.key, r.meta, null).catch(() => {
+            /* errors surface in upload state */
+            void i;
+          });
+        })
+      );
+      router.refresh();
+      return;
+    }
+
+    const matches = matchStems(stems, metadatas);
+    const anyMatch = matches.some((m) => m.score >= MATCH_UNCERTAIN);
+    if (!anyMatch) {
+      // No plausible match → same as the empty-session path.
+      await Promise.all(
+        metaResults.map(async (r) => {
+          if (!r) return;
+          await uploadOne(r.file, r.key, r.meta, null).catch(() => {});
+        })
+      );
+      router.refresh();
+      return;
+    }
+
+    // Hand off to the modal. The "analyzing" placeholders in `uploads` get
+    // replaced when the user confirms (uploadOne writes its own status).
+    setPendingSwap({ metadatas, matches });
   }
 
   function handleDrop(e: React.DragEvent) {
@@ -267,6 +387,29 @@ export function StemDropZone({ sessionId, initialStems }: Props) {
             </div>
           ))}
         </div>
+      )}
+
+      {pendingSwap && (
+        <StemSwapDialog
+          matches={pendingSwap.matches}
+          stems={stems}
+          onCancel={() => {
+            // Cancel: drop the analyzing placeholders for these files.
+            setUploads((prev) => {
+              const next = { ...prev };
+              for (const [k, u] of Object.entries(next)) {
+                if (u.status === 'analyzing') delete next[k];
+              }
+              return next;
+            });
+            setPendingSwap(null);
+          }}
+          onConfirm={(decisions) => {
+            const metadatas = pendingSwap.metadatas;
+            setPendingSwap(null);
+            void processDecisions(metadatas, decisions);
+          }}
+        />
       )}
     </div>
   );

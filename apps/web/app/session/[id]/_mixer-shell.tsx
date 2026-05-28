@@ -439,6 +439,29 @@ export function MixerShell({
     });
   }, []);
 
+  /**
+   * A swap replaces the audio behind an existing stem without changing its
+   * id. The React channelState (volume/pan/EQ/comp) stays attached. We:
+   *  - update the Stem object in `stems` so the strip displays the new
+   *    sample rate / length / channels
+   *  - drop the audio-engine channel for this stem so the next Play
+   *    re-decodes fresh audio (replaying the saved params via loadStems)
+   *  - clear the loaded flag for that channel
+   */
+  const onStemSwapped = useCallback(
+    (stem: Stem) => {
+      hostRef.current?.removeChannel(stem.id);
+      setStems((prev) => prev.map((s) => (s.id === stem.id ? stem : s)));
+      setLoadedIds((prev) => {
+        const next = new Set(prev);
+        next.delete(stem.id);
+        return next;
+      });
+      if (transport === 'playing') handleStop();
+    },
+    [transport, handleStop]
+  );
+
   const anySoloed = useMemo(
     () => Object.values(channelState).some((c) => c.soloed),
     [channelState]
@@ -575,7 +598,11 @@ export function MixerShell({
         </div>
       </aside>
 
-      <StemEvents onStemAdded={onStemAdded} onStemRemoved={onStemRemoved} />
+      <StemEvents
+        onStemAdded={onStemAdded}
+        onStemRemoved={onStemRemoved}
+        onStemSwapped={onStemSwapped}
+      />
     </>
   );
 }
@@ -585,9 +612,11 @@ export function MixerShell({
 function StemEvents({
   onStemAdded,
   onStemRemoved,
+  onStemSwapped,
 }: {
   onStemAdded: (s: Stem) => void;
   onStemRemoved: (id: string) => void;
+  onStemSwapped: (s: Stem) => void;
 }) {
   useEffect(() => {
     function handleAdded(e: Event) {
@@ -598,12 +627,18 @@ function StemEvents({
       const id = (e as CustomEvent<string>).detail;
       if (id) onStemRemoved(id);
     }
+    function handleSwapped(e: Event) {
+      const stem = (e as CustomEvent<Stem>).detail;
+      if (stem) onStemSwapped(stem);
+    }
     window.addEventListener('aux:stem-added', handleAdded);
     window.addEventListener('aux:stem-removed', handleRemoved);
+    window.addEventListener('aux:stem-swapped', handleSwapped);
     return () => {
       window.removeEventListener('aux:stem-added', handleAdded);
       window.removeEventListener('aux:stem-removed', handleRemoved);
+      window.removeEventListener('aux:stem-swapped', handleSwapped);
     };
-  }, [onStemAdded, onStemRemoved]);
+  }, [onStemAdded, onStemRemoved, onStemSwapped]);
   return null;
 }

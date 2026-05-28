@@ -22,6 +22,18 @@ export interface RegisterStemInput {
   lufsI: number;
 }
 
+export interface SwapSourceInput {
+  userId: string;
+  sessionId: string;
+  stemId: string;
+  s3Key: string;
+  lengthMs: number;
+  channels: number;
+  sampleRate: number;
+  peakDb: number;
+  lufsI: number;
+}
+
 @Injectable()
 export class StemsService {
   private readonly db = getPrismaClient();
@@ -77,6 +89,39 @@ export class StemsService {
         downloadUrl: stem.s3Key ? await this.storage.signGetUrl(stem.s3Key, 3600) : null,
       }))
     );
+  }
+
+  /**
+   * Replace the underlying audio + metadata on an existing stem. Keeps
+   * `id` and `name` — every MixState row (volume / pan / EQ / comp) stays
+   * attached because they're keyed by stemId. The old S3 object is deleted
+   * after the swap so we don't leak storage.
+   */
+  async swapSource(input: SwapSourceInput) {
+    await this.sessions.assertOwnership(input.userId, input.sessionId);
+    const stem = await this.db.stem.findFirst({
+      where: { id: input.stemId, sessionId: input.sessionId },
+    });
+    if (!stem) throw new NotFoundException('Stem not found');
+
+    const oldS3Key = stem.s3Key;
+    const updated = await this.db.stem.update({
+      where: { id: input.stemId },
+      data: {
+        s3Key: input.s3Key,
+        lengthMs: input.lengthMs,
+        channels: input.channels,
+        sampleRate: input.sampleRate,
+        peakDb: input.peakDb,
+        lufsI: input.lufsI,
+      },
+    });
+
+    if (oldS3Key && oldS3Key !== input.s3Key) {
+      // Best-effort cleanup — don't fail the swap if storage delete trips.
+      this.storage.deleteObject(oldS3Key).catch(() => {});
+    }
+    return updated;
   }
 
   async delete(userId: string, sessionId: string, stemId: string) {
