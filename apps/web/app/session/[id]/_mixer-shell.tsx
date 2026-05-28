@@ -1,8 +1,8 @@
 'use client';
 
 import type { Stem, StemWithUrl } from '@/lib/types';
-import { AudioHost } from '@aux/audio-engine';
-import { MIX_STATE_VERSION, MixStateSchema } from '@aux/session-doc';
+import { AudioHost, Eq8BandType } from '@aux/audio-engine';
+import { DEFAULT_CHANNEL_EQ, MIX_STATE_VERSION, MixStateSchema } from '@aux/session-doc';
 import Link from 'next/link';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ChannelStrip } from './_channel-strip';
@@ -25,10 +25,29 @@ export interface ChannelState {
   pan: number; // -1..1
   muted: boolean;
   soloed: boolean;
+  eq: { lo: number; mid: number; hi: number }; // dB, ±24
 }
 
-const DEFAULT_CHANNEL: ChannelState = { volume: 1, pan: 0, muted: false, soloed: false };
+const DEFAULT_CHANNEL: ChannelState = {
+  volume: 1,
+  pan: 0,
+  muted: false,
+  soloed: false,
+  eq: { ...DEFAULT_CHANNEL_EQ },
+};
 const AUTOSAVE_DEBOUNCE_MS = 600;
+
+/**
+ * EQ band layout — three knobs on the strip map to three of the eight
+ * EQ-8 bands. The remaining five (HP, two peaks, HS, LP) wait for the
+ * v0.3 full-EQ panel.
+ */
+const EQ_BANDS = {
+  lo: { idx: 1, type: Eq8BandType.LowShelf, freq: 100, q: Math.SQRT1_2 },
+  mid: { idx: 3, type: Eq8BandType.Peak, freq: 1000, q: 1.0 },
+  hi: { idx: 6, type: Eq8BandType.HighShelf, freq: 8000, q: Math.SQRT1_2 },
+} as const;
+export type EqBand = keyof typeof EQ_BANDS;
 
 function formatTime(seconds: number): string {
   if (!Number.isFinite(seconds) || seconds < 0) return '0:00';
@@ -40,12 +59,48 @@ function formatTime(seconds: number): string {
 /**
  * Parse the server-provided mix state. Tolerates missing / malformed data —
  * an unknown schema or invalid payload just yields an empty channel map.
+ *
+ * v1 (volume/pan/mute/solo only) docs are upgraded in memory by adding the
+ * default EQ section to each channel — no zod import on the client, so the
+ * v1 shape is checked structurally.
  */
 function hydrateChannelState(raw: unknown): Record<string, ChannelState> {
   if (raw == null) return {};
-  const parsed = MixStateSchema.safeParse(raw);
-  if (!parsed.success) return {};
-  return parsed.data.channels;
+
+  const v2 = MixStateSchema.safeParse(raw);
+  if (v2.success) return v2.data.channels;
+
+  if (
+    typeof raw === 'object' &&
+    raw !== null &&
+    'version' in raw &&
+    (raw as { version: unknown }).version === 1 &&
+    'channels' in raw
+  ) {
+    const channels = (raw as { channels: Record<string, unknown> }).channels;
+    const upgraded: Record<string, ChannelState> = {};
+    for (const [id, ch] of Object.entries(channels)) {
+      if (!ch || typeof ch !== 'object') continue;
+      const c = ch as Partial<ChannelState>;
+      if (
+        typeof c.volume === 'number' &&
+        typeof c.pan === 'number' &&
+        typeof c.muted === 'boolean' &&
+        typeof c.soloed === 'boolean'
+      ) {
+        upgraded[id] = {
+          volume: c.volume,
+          pan: c.pan,
+          muted: c.muted,
+          soloed: c.soloed,
+          eq: { ...DEFAULT_CHANNEL_EQ },
+        };
+      }
+    }
+    return upgraded;
+  }
+
+  return {};
 }
 
 export function MixerShell({
@@ -262,6 +317,10 @@ export function MixerShell({
       host.setChannelPan(stem.id, ch.pan, 0);
       host.setChannelMute(stem.id, ch.muted);
       host.setChannelSolo(stem.id, ch.soloed);
+      for (const band of ['lo', 'mid', 'hi'] as const) {
+        const { idx, type, freq, q } = EQ_BANDS[band];
+        host.setChannelEqBand(stem.id, idx, type, freq, ch.eq[band], q);
+      }
     }
   }
 
@@ -312,6 +371,18 @@ export function MixerShell({
       const soloed = !current.soloed;
       hostRef.current?.setChannelSolo(stemId, soloed);
       return { ...prev, [stemId]: { ...current, soloed } };
+    });
+  }, []);
+
+  const setEq = useCallback((stemId: string, band: EqBand, gainDb: number) => {
+    const { idx, type, freq, q } = EQ_BANDS[band];
+    hostRef.current?.setChannelEqBand(stemId, idx, type, freq, gainDb, q);
+    setChannelState((prev) => {
+      const current = prev[stemId] ?? DEFAULT_CHANNEL;
+      return {
+        ...prev,
+        [stemId]: { ...current, eq: { ...current.eq, [band]: gainDb } },
+      };
     });
   }, []);
 
@@ -420,6 +491,7 @@ export function MixerShell({
                     onPan={(p) => setPan(stem.id, p)}
                     onMute={() => toggleMute(stem.id)}
                     onSolo={() => toggleSolo(stem.id)}
+                    onEq={(band, db) => setEq(stem.id, band, db)}
                   />
                 );
               })

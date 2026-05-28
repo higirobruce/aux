@@ -5,7 +5,7 @@ import type { AudioHost } from '@aux/audio-engine';
 import { Fader } from './_fader';
 import { Knob } from './_knob';
 import { Meter } from './_meter';
-import type { ChannelState } from './_mixer-shell';
+import type { ChannelState, EqBand } from './_mixer-shell';
 
 interface Props {
   stem: Stem;
@@ -18,6 +18,16 @@ interface Props {
   onPan: (value: number) => void;
   onMute: () => void;
   onSolo: () => void;
+  onEq: (band: EqBand, gainDb: number) => void;
+}
+
+const EQ_KNOB_MIN_DB = -12;
+const EQ_KNOB_MAX_DB = 12;
+
+function formatEqDb(db: number): string {
+  if (Math.abs(db) < 0.05) return '0';
+  const sign = db > 0 ? '+' : '−';
+  return `${sign}${Math.abs(db).toFixed(1)}`;
 }
 
 // ─── dB <-> linear ──────────────────────────────────────────────────────
@@ -80,6 +90,7 @@ export function ChannelStrip({
   onPan,
   onMute,
   onSolo,
+  onEq,
 }: Props) {
   const effectivelyMuted = state.muted || (anySoloed && !state.soloed);
 
@@ -91,6 +102,45 @@ export function ChannelStrip({
       <div className="ch-meta">
         {stem.channels === 1 ? 'mono' : 'stereo'} · {Math.round(stem.sampleRate / 1000)}k
         {!loaded && <div>(not loaded)</div>}
+      </div>
+
+      <div className="ch-eq">
+        <div className="knob-wrap">
+          <Knob
+            value={state.eq.lo}
+            min={EQ_KNOB_MIN_DB}
+            max={EQ_KNOB_MAX_DB}
+            defaultValue={0}
+            ariaLabel={`${stem.name} EQ low`}
+            onChange={(v) => onEq('lo', v)}
+          />
+          <span className="knob-label">Lo</span>
+          <span className="knob-readout">{formatEqDb(state.eq.lo)}</span>
+        </div>
+        <div className="knob-wrap">
+          <Knob
+            value={state.eq.mid}
+            min={EQ_KNOB_MIN_DB}
+            max={EQ_KNOB_MAX_DB}
+            defaultValue={0}
+            ariaLabel={`${stem.name} EQ mid`}
+            onChange={(v) => onEq('mid', v)}
+          />
+          <span className="knob-label">Mid</span>
+          <span className="knob-readout">{formatEqDb(state.eq.mid)}</span>
+        </div>
+        <div className="knob-wrap">
+          <Knob
+            value={state.eq.hi}
+            min={EQ_KNOB_MIN_DB}
+            max={EQ_KNOB_MAX_DB}
+            defaultValue={0}
+            ariaLabel={`${stem.name} EQ high`}
+            onChange={(v) => onEq('hi', v)}
+          />
+          <span className="knob-label">Hi</span>
+          <span className="knob-readout">{formatEqDb(state.eq.hi)}</span>
+        </div>
       </div>
 
       <div className="ch-pan-row">
