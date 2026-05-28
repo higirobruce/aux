@@ -2,6 +2,7 @@ import { getPrismaClient } from '@aux/db';
 import { betterAuth } from 'better-auth';
 import { prismaAdapter } from 'better-auth/adapters/prisma';
 import { magicLink } from 'better-auth/plugins';
+import { sendMagicLinkMail } from './mailer.js';
 
 /**
  * Narrow surface of the better-auth instance that this app uses.
@@ -57,15 +58,7 @@ export function createAuth(): Auth {
     plugins: [
       magicLink({
         async sendMagicLink({ email, url, token }) {
-          if (process.env.RESEND_API_KEY) {
-            // TODO: wire Resend in production
-            console.log(`[auth] (resend stub) magic link for ${email}: ${url}`);
-            return;
-          }
-          // Dev: just log it. Token included so curl-based smoke tests can grab it.
-          console.log(`[auth] magic link for ${email}`);
-          console.log(`[auth]   url:   ${url}`);
-          console.log(`[auth]   token: ${token}`);
+          await sendMagicLinkMail({ email, url, token });
         },
         expiresIn: Number(process.env.MAGIC_LINK_TTL_SECONDS ?? 600),
       }),
