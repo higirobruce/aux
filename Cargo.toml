@@ -8,6 +8,8 @@ members = [
   "packages/dsp-plate",
   "packages/dsp-hall",
   "packages/dsp-transient",
+  "packages/dsp-deess",
+  "packages/dsp-imager",
 ]
 
 # Optimize WASM size + perf for release builds.

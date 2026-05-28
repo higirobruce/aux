@@ -32,6 +32,12 @@ interface Props {
   /** Transient designer params (attack / sustain ∈ [-1, 1]). */
   onTransient: (field: 'attack' | 'sustain', value: number) => void;
   onTransientBypass: () => void;
+  /** De-esser params: freq (2k..12k Hz), amount (0..1). */
+  onDeEss: (field: 'freq' | 'amount', value: number) => void;
+  onDeEssBypass: () => void;
+  /** Imager width (0..2; 1 = unity). */
+  onImager: (width: number) => void;
+  onImagerBypass: () => void;
 }
 
 const EQ_KNOB_MIN_DB = -12;
@@ -61,6 +67,20 @@ function formatTransient(v: number): string {
   if (Math.abs(v) < 0.02) return '0';
   const sign = v > 0 ? '+' : '−';
   return `${sign}${Math.round(Math.abs(v) * 100)}`;
+}
+
+function formatDeEssFreq(hz: number): string {
+  if (hz >= 1000) return `${(hz / 1000).toFixed(hz % 1000 === 0 ? 0 : 1)}k`;
+  return `${Math.round(hz)}`;
+}
+
+function formatDeEssAmount(v: number): string {
+  return v < 0.01 ? 'off' : `${Math.round(v * 100)}`;
+}
+
+function formatImagerWidth(v: number): string {
+  if (Math.abs(v - 1) < 0.02) return '1.00';
+  return v.toFixed(2);
 }
 
 // ─── dB <-> linear ──────────────────────────────────────────────────────
@@ -132,6 +152,10 @@ export function ChannelStrip({
   onRemoveSend,
   onTransient,
   onTransientBypass,
+  onDeEss,
+  onDeEssBypass,
+  onImager,
+  onImagerBypass,
 }: Props) {
   const effectivelyMuted = state.muted || (anySoloed && !state.soloed);
 
@@ -274,6 +298,70 @@ export function ChannelStrip({
             />
             <span className="knob-label">Sus</span>
             <span className="knob-readout">{formatTransient(state.transient.sustain)}</span>
+          </div>
+        </div>
+      </div>
+
+      <div className="ch-deess">
+        <button
+          type="button"
+          className={`ch-deess-toggle ${state.deess.bypassed ? '' : 'on'}`}
+          onClick={onDeEssBypass}
+          aria-pressed={!state.deess.bypassed}
+          title={state.deess.bypassed ? 'De-ess bypassed — click to engage' : 'De-ess active'}
+        >
+          DeEss
+        </button>
+        <div className="ch-deess-knobs">
+          <div className="knob-wrap">
+            <Knob
+              value={state.deess.freq}
+              min={2000}
+              max={12000}
+              defaultValue={6000}
+              ariaLabel={`${stem.name} de-ess frequency`}
+              onChange={(v) => onDeEss('freq', v)}
+            />
+            <span className="knob-label">Frq</span>
+            <span className="knob-readout">{formatDeEssFreq(state.deess.freq)}</span>
+          </div>
+          <div className="knob-wrap">
+            <Knob
+              value={state.deess.amount}
+              min={0}
+              max={1}
+              defaultValue={0}
+              ariaLabel={`${stem.name} de-ess amount`}
+              onChange={(v) => onDeEss('amount', v)}
+            />
+            <span className="knob-label">Amt</span>
+            <span className="knob-readout">{formatDeEssAmount(state.deess.amount)}</span>
+          </div>
+        </div>
+      </div>
+
+      <div className="ch-imager">
+        <button
+          type="button"
+          className={`ch-imager-toggle ${state.imager.bypassed ? '' : 'on'}`}
+          onClick={onImagerBypass}
+          aria-pressed={!state.imager.bypassed}
+          title={state.imager.bypassed ? 'Imager bypassed — click to engage' : 'Imager active'}
+        >
+          Img
+        </button>
+        <div className="ch-imager-knobs">
+          <div className="knob-wrap">
+            <Knob
+              value={state.imager.width}
+              min={0}
+              max={2}
+              defaultValue={1}
+              ariaLabel={`${stem.name} imager width`}
+              onChange={onImager}
+            />
+            <span className="knob-label">Wid</span>
+            <span className="knob-readout">{formatImagerWidth(state.imager.width)}</span>
           </div>
         </div>
       </div>

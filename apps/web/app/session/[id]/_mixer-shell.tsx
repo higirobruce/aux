@@ -9,7 +9,9 @@ import {
   COMP_DEFAULTS,
   type CompType,
   DEFAULT_CHANNEL_COMP,
+  DEFAULT_CHANNEL_DEESS,
   DEFAULT_CHANNEL_EQ,
+  DEFAULT_CHANNEL_IMAGER,
   DEFAULT_CHANNEL_TRANSIENT,
   DEFAULT_COMP_TYPE,
   DEFAULT_LIMITER_STATE,
@@ -53,6 +55,10 @@ export interface ChannelState {
   sends: Record<string, number>;
   /** Transient designer — both knobs ∈ [-1, 1]. */
   transient: { attack: number; sustain: number; bypassed: boolean };
+  /** DeEss — split-band sibilance tamer. */
+  deess: { freq: number; amount: number; bypassed: boolean };
+  /** Imager — M/S stereo width. */
+  imager: { width: number; bypassed: boolean };
 }
 
 const DEFAULT_CHANNEL: ChannelState = {
@@ -66,6 +72,8 @@ const DEFAULT_CHANNEL: ChannelState = {
   outputBusId: MASTER_BUS_ID,
   sends: {},
   transient: { ...DEFAULT_CHANNEL_TRANSIENT },
+  deess: { ...DEFAULT_CHANNEL_DEESS },
+  imager: { ...DEFAULT_CHANNEL_IMAGER },
 };
 const AUTOSAVE_DEBOUNCE_MS = 600;
 
@@ -127,7 +135,7 @@ function hydrateMixState(raw: unknown): HydratedMix {
     return empty;
   }
   const ver = (raw as { version: unknown }).version;
-  if (typeof ver !== 'number' || ver < 1 || ver > 9) return empty;
+  if (typeof ver !== 'number' || ver < 1 || ver >= MIX_STATE_VERSION) return empty;
 
   const channels = (raw as { channels: Record<string, unknown> }).channels;
   const upgradedChannels: Record<string, ChannelState> = {};
@@ -153,6 +161,8 @@ function hydrateMixState(raw: unknown): HydratedMix {
       outputBusId: c.outputBusId ?? MASTER_BUS_ID,
       sends: c.sends ?? {},
       transient: c.transient ?? { ...DEFAULT_CHANNEL_TRANSIENT },
+      deess: c.deess ?? { ...DEFAULT_CHANNEL_DEESS },
+      imager: c.imager ?? { ...DEFAULT_CHANNEL_IMAGER },
     };
   }
   // Bus migration. v5+ docs already have a `buses` field; older docs don't.
@@ -434,6 +444,10 @@ export function MixerShell({
       hallWasmUrl: '/hall_bg.wasm',
       transientWorkletUrl: '/transient-worklet.js',
       transientWasmUrl: '/transient_bg.wasm',
+      deessWorkletUrl: '/deess-worklet.js',
+      deessWasmUrl: '/deess_bg.wasm',
+      imagerWorkletUrl: '/imager-worklet.js',
+      imagerWasmUrl: '/imager_bg.wasm',
     });
     await host.start();
     hostRef.current = host;
@@ -503,6 +517,10 @@ export function MixerShell({
       applyCompToHost(host, stem.id, ch.comp.threshold, ch.comp.ratio, ch.compType);
       host.setChannelTransient(stem.id, ch.transient.attack, ch.transient.sustain);
       host.setChannelTransientBypassed(stem.id, ch.transient.bypassed);
+      host.setChannelDeEss(stem.id, ch.deess.freq, ch.deess.amount);
+      host.setChannelDeEssBypassed(stem.id, ch.deess.bypassed);
+      host.setChannelImager(stem.id, ch.imager.width);
+      host.setChannelImagerBypassed(stem.id, ch.imager.bypassed);
     }
 
     // Ensure user-defined buses exist on the host (Master is auto-created)
@@ -648,6 +666,50 @@ export function MixerShell({
       return {
         ...prev,
         [stemId]: { ...current, transient: { ...current.transient, bypassed } },
+      };
+    });
+  }, []);
+
+  const setDeEss = useCallback((stemId: string, field: 'freq' | 'amount', value: number) => {
+    setChannelState((prev) => {
+      const current = prev[stemId] ?? DEFAULT_CHANNEL;
+      const nextDeEss = { ...current.deess, [field]: value };
+      hostRef.current?.setChannelDeEss(stemId, nextDeEss.freq, nextDeEss.amount);
+      return { ...prev, [stemId]: { ...current, deess: nextDeEss } };
+    });
+  }, []);
+
+  const toggleDeEssBypass = useCallback((stemId: string) => {
+    setChannelState((prev) => {
+      const current = prev[stemId] ?? DEFAULT_CHANNEL;
+      const bypassed = !current.deess.bypassed;
+      hostRef.current?.setChannelDeEssBypassed(stemId, bypassed);
+      return {
+        ...prev,
+        [stemId]: { ...current, deess: { ...current.deess, bypassed } },
+      };
+    });
+  }, []);
+
+  const setImager = useCallback((stemId: string, width: number) => {
+    setChannelState((prev) => {
+      const current = prev[stemId] ?? DEFAULT_CHANNEL;
+      hostRef.current?.setChannelImager(stemId, width);
+      return {
+        ...prev,
+        [stemId]: { ...current, imager: { ...current.imager, width } },
+      };
+    });
+  }, []);
+
+  const toggleImagerBypass = useCallback((stemId: string) => {
+    setChannelState((prev) => {
+      const current = prev[stemId] ?? DEFAULT_CHANNEL;
+      const bypassed = !current.imager.bypassed;
+      hostRef.current?.setChannelImagerBypassed(stemId, bypassed);
+      return {
+        ...prev,
+        [stemId]: { ...current, imager: { ...current.imager, bypassed } },
       };
     });
   }, []);
@@ -984,6 +1046,10 @@ export function MixerShell({
                     onRemoveSend={(busId) => removeChannelSend(stem.id, busId)}
                     onTransient={(field, value) => setTransient(stem.id, field, value)}
                     onTransientBypass={() => toggleTransientBypass(stem.id)}
+                    onDeEss={(field, value) => setDeEss(stem.id, field, value)}
+                    onDeEssBypass={() => toggleDeEssBypass(stem.id)}
+                    onImager={(width) => setImager(stem.id, width)}
+                    onImagerBypass={() => toggleImagerBypass(stem.id)}
                   />
                 );
               })

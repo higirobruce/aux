@@ -86,6 +86,20 @@ export interface AudioHostOptions {
   transientWorkletUrl?: string | URL;
   /** URL to transient_bg.wasm. */
   transientWasmUrl?: string | URL;
+  /**
+   * URL to the DeEss worklet (split-band sibilance tamer). With its wasm,
+   * every channel gets a DeEss insert between Transient and Imager.
+   */
+  deessWorkletUrl?: string | URL;
+  /** URL to deess_bg.wasm. */
+  deessWasmUrl?: string | URL;
+  /**
+   * URL to the Imager worklet (M/S stereo width). Sits last in the channel
+   * chain so the panner sees the final stereo image.
+   */
+  imagerWorkletUrl?: string | URL;
+  /** URL to imager_bg.wasm. */
+  imagerWasmUrl?: string | URL;
   /** Sample rate (default: AudioContext default). */
   sampleRate?: number;
 }
@@ -173,6 +187,10 @@ interface ChannelInternals {
   compColor: AudioWorkletNode | null;
   /** Optional Transient designer between Comp-Color and gain. */
   transient: AudioWorkletNode | null;
+  /** Optional DeEss between Transient and Imager. */
+  deess: AudioWorkletNode | null;
+  /** Optional Imager (M/S width) — last channel insert before gain. */
+  imager: AudioWorkletNode | null;
   /** Latest gain reduction (≥ 0) from whichever comp is currently active. */
   compGrDb: number;
   /** Latest GR from the Color-flavor comp, surfaced separately for the meter. */
@@ -215,6 +233,10 @@ export class AudioHost {
   private reverbWasmModules: Partial<Record<ReverbKind, WebAssembly.Module>> = {};
   /** Transient designer — per-channel insert. */
   private transientWasmModule: WebAssembly.Module | null = null;
+  /** DeEss — per-channel insert. */
+  private deessWasmModule: WebAssembly.Module | null = null;
+  /** Imager — per-channel insert. */
+  private imagerWasmModule: WebAssembly.Module | null = null;
 
   private channels = new Map<string, ChannelInternals>();
   private buses = new Map<string, BusInternals>();
@@ -316,6 +338,28 @@ export class AudioHost {
       );
     }
 
+    if (this.options.deessWorkletUrl && this.options.deessWasmUrl) {
+      await this.ctx.audioWorklet.addModule(this.options.deessWorkletUrl);
+      const res = await fetch(this.options.deessWasmUrl);
+      if (!res.ok) throw new Error(`deess wasm fetch failed (${res.status})`);
+      this.deessWasmModule = await WebAssembly.compileStreaming(
+        new Response(await res.arrayBuffer(), {
+          headers: { 'Content-Type': 'application/wasm' },
+        })
+      );
+    }
+
+    if (this.options.imagerWorkletUrl && this.options.imagerWasmUrl) {
+      await this.ctx.audioWorklet.addModule(this.options.imagerWorkletUrl);
+      const res = await fetch(this.options.imagerWasmUrl);
+      if (!res.ok) throw new Error(`imager wasm fetch failed (${res.status})`);
+      this.imagerWasmModule = await WebAssembly.compileStreaming(
+        new Response(await res.arrayBuffer(), {
+          headers: { 'Content-Type': 'application/wasm' },
+        })
+      );
+    }
+
     this.workletNode = new AudioWorkletNode(this.ctx, 'aux-processor', {
       numberOfInputs: 1,
       numberOfOutputs: 1,
@@ -346,6 +390,8 @@ export class AudioHost {
       if (channel.comp) channel.comp.disconnect();
       if (channel.compColor) channel.compColor.disconnect();
       if (channel.transient) channel.transient.disconnect();
+      if (channel.deess) channel.deess.disconnect();
+      if (channel.imager) channel.imager.disconnect();
       for (const send of channel.sends.values()) send.disconnect();
       channel.sends.clear();
       channel.gain.disconnect();
@@ -403,11 +449,33 @@ export class AudioHost {
     // straightforward: each new node connects to the previous "front" and
     // becomes the new front; the source ultimately connects to `front`.
     //
-    //   source → [eq8] → [comp] → [compColor] → [transient] → gain → panner → analyser → bus
+    //   source → [eq8] → [comp] → [compColor] → [transient] → [deess] → [imager] → gain → panner → analyser → bus
     //
     // Bracketed nodes are conditional: they only exist if the corresponding
     // WASM module was loaded at start(). With everything off the routing
     // reduces to source → gain → ... as before.
+    let imager: AudioWorkletNode | null = null;
+    if (this.imagerWasmModule) {
+      imager = new AudioWorkletNode(this.ctx, 'aux-imager-processor', {
+        numberOfInputs: 1,
+        numberOfOutputs: 1,
+        outputChannelCount: [2],
+        processorOptions: { wasmModule: this.imagerWasmModule },
+      });
+      imager.connect(gain);
+    }
+
+    let deess: AudioWorkletNode | null = null;
+    if (this.deessWasmModule) {
+      deess = new AudioWorkletNode(this.ctx, 'aux-deess-processor', {
+        numberOfInputs: 1,
+        numberOfOutputs: 1,
+        outputChannelCount: [2],
+        processorOptions: { wasmModule: this.deessWasmModule },
+      });
+      deess.connect(imager ?? gain);
+    }
+
     let transient: AudioWorkletNode | null = null;
     if (this.transientWasmModule) {
       transient = new AudioWorkletNode(this.ctx, 'aux-transient-processor', {
@@ -416,7 +484,7 @@ export class AudioHost {
         outputChannelCount: [2],
         processorOptions: { wasmModule: this.transientWasmModule },
       });
-      transient.connect(gain);
+      transient.connect(deess ?? imager ?? gain);
     }
 
     let compColor: AudioWorkletNode | null = null;
@@ -427,7 +495,7 @@ export class AudioHost {
         outputChannelCount: [2],
         processorOptions: { wasmModule: this.compColorWasmModule },
       });
-      compColor.connect(transient ?? gain);
+      compColor.connect(transient ?? deess ?? imager ?? gain);
     }
 
     let comp: AudioWorkletNode | null = null;
@@ -438,7 +506,7 @@ export class AudioHost {
         outputChannelCount: [2],
         processorOptions: { wasmModule: this.compWasmModule },
       });
-      comp.connect(compColor ?? transient ?? gain);
+      comp.connect(compColor ?? transient ?? deess ?? imager ?? gain);
     }
 
     let eq8: AudioWorkletNode | null = null;
@@ -449,7 +517,7 @@ export class AudioHost {
         outputChannelCount: [2],
         processorOptions: { wasmModule: this.eq8WasmModule },
       });
-      eq8.connect(comp ?? compColor ?? transient ?? gain);
+      eq8.connect(comp ?? compColor ?? transient ?? deess ?? imager ?? gain);
     }
 
     // gain → panner → analyser → outputBus.input
@@ -464,6 +532,8 @@ export class AudioHost {
       comp,
       compColor,
       transient,
+      deess,
+      imager,
       compGrDb: 0,
       compColorGrDb: 0,
       gain,
@@ -524,6 +594,8 @@ export class AudioHost {
     if (channel.comp) channel.comp.disconnect();
     if (channel.compColor) channel.compColor.disconnect();
     if (channel.transient) channel.transient.disconnect();
+    if (channel.deess) channel.deess.disconnect();
+    if (channel.imager) channel.imager.disconnect();
     for (const send of channel.sends.values()) send.disconnect();
     channel.sends.clear();
     channel.gain.disconnect();
@@ -547,6 +619,40 @@ export class AudioHost {
     const transient = this.channels.get(stemId)?.transient;
     if (!transient) return;
     transient.port.postMessage({ type: 'set-bypassed', bypassed });
+  }
+
+  // ────────────────────────────────────────────────────────────────────
+  // Per-channel DeEss
+  // ────────────────────────────────────────────────────────────────────
+
+  /** `freq` Hz (2k..12k), `amount` 0..1 (0 = off). */
+  setChannelDeEss(stemId: string, freq: number, amount: number): void {
+    const deess = this.channels.get(stemId)?.deess;
+    if (!deess) return;
+    deess.port.postMessage({ type: 'set-params', freq, amount });
+  }
+
+  setChannelDeEssBypassed(stemId: string, bypassed: boolean): void {
+    const deess = this.channels.get(stemId)?.deess;
+    if (!deess) return;
+    deess.port.postMessage({ type: 'set-bypassed', bypassed });
+  }
+
+  // ────────────────────────────────────────────────────────────────────
+  // Per-channel Imager (M/S width)
+  // ────────────────────────────────────────────────────────────────────
+
+  /** `width` 0..2; 1 = unity (passthrough). */
+  setChannelImager(stemId: string, width: number): void {
+    const imager = this.channels.get(stemId)?.imager;
+    if (!imager) return;
+    imager.port.postMessage({ type: 'set-width', width });
+  }
+
+  setChannelImagerBypassed(stemId: string, bypassed: boolean): void {
+    const imager = this.channels.get(stemId)?.imager;
+    if (!imager) return;
+    imager.port.postMessage({ type: 'set-bypassed', bypassed });
   }
 
   // ────────────────────────────────────────────────────────────────────
@@ -1060,7 +1166,13 @@ export class AudioHost {
       // Routing front: prefer eq8 if present, else comp, else gain.
       // addChannel() chains eq8 → comp → gain when both inserts exist.
       src.connect(
-        channel.eq8 ?? channel.comp ?? channel.compColor ?? channel.transient ?? channel.gain
+        channel.eq8 ??
+          channel.comp ??
+          channel.compColor ??
+          channel.transient ??
+          channel.deess ??
+          channel.imager ??
+          channel.gain
       );
       src.onended = () => {
         if (channel.source === src) channel.source = null;
