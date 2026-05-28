@@ -1,20 +1,26 @@
 /**
  * Audio host — main-thread side of the engine.
  *
- * Per docs/implementation.html §04: this file holds the AudioContext,
- * loads the worklet, and proxies messages between the React state and the
- * audio thread.
+ * Per docs/implementation.html §04 + §16.01. The graph topology stays
+ * stable through the lifetime of the host; only sources come and go as
+ * playback starts/stops:
  *
- * v0.2 playback model — simple, deliberately:
- *
- *   AudioBufferSourceNode (per stem)
- *      └─→ master GainNode
- *               └─→ AudioWorkletNode  (pass-through DSP for now)
- *                        └─→ AudioContext.destination
- *
- * The worklet stays in the chain so future per-channel DSP slots in
- * without restructuring. Multi-source mixing happens at the master gain
- * node where Web Audio sums inputs.
+ *     [source: AudioBufferSourceNode]  ← created per play() call
+ *           │
+ *           ▼
+ *     channel.gain  (GainNode — volume × mute × solo)
+ *           │
+ *           ▼
+ *     channel.panner  (StereoPannerNode)
+ *           │
+ *           ▼  (× N channels)
+ *     masterGain  (GainNode — master fader)
+ *           │
+ *           ▼
+ *     workletNode  (AudioWorkletNode — pass-through DSP for now)
+ *           │
+ *           ▼
+ *     AudioContext.destination
  */
 
 import type { AudioGraph, WorkletEvent, WorkletMessage } from './types';
@@ -26,22 +32,33 @@ export interface AudioHostOptions {
   sampleRate?: number;
 }
 
-export interface StemHandle {
-  id: string;
-  buffer: AudioBuffer;
+export interface ChannelInit {
+  stemId: string;
+  /** Linear gain, 0..2; 1 = unity (0 dB). Default 1. */
+  volume?: number;
+  /** Pan, -1..1; 0 = center. Default 0. */
+  pan?: number;
+}
+
+interface ChannelInternals {
+  stemId: string;
+  buffer: AudioBuffer | null;
+  gain: GainNode;
+  panner: StereoPannerNode;
+  volume: number;
+  pan: number;
+  muted: boolean;
+  soloed: boolean;
+  source: AudioBufferSourceNode | null;
 }
 
 export class AudioHost {
   private ctx: AudioContext | null = null;
   private masterGain: GainNode | null = null;
-  private node: AudioWorkletNode | null = null;
+  private workletNode: AudioWorkletNode | null = null;
   private listeners = new Set<(e: WorkletEvent) => void>();
 
-  /** Currently-playing source nodes, keyed by stem id, plus their stem id. */
-  private activeSources = new Map<string, AudioBufferSourceNode>();
-
-  /** Loaded stem buffers, keyed by stem id. */
-  private buffers = new Map<string, AudioBuffer>();
+  private channels = new Map<string, ChannelInternals>();
 
   constructor(private readonly options: AudioHostOptions) {}
 
@@ -54,7 +71,7 @@ export class AudioHost {
 
     await this.ctx.audioWorklet.addModule(this.options.workletUrl);
 
-    this.node = new AudioWorkletNode(this.ctx, 'aux-processor', {
+    this.workletNode = new AudioWorkletNode(this.ctx, 'aux-processor', {
       numberOfInputs: 1,
       numberOfOutputs: 1,
       outputChannelCount: [2],
@@ -62,20 +79,24 @@ export class AudioHost {
 
     this.masterGain = this.ctx.createGain();
 
-    this.node.port.onmessage = (e: MessageEvent<WorkletEvent>) => {
+    this.workletNode.port.onmessage = (e: MessageEvent<WorkletEvent>) => {
       for (const l of this.listeners) l(e.data);
     };
 
-    // masterGain → worklet → destination
-    this.masterGain.connect(this.node);
-    this.node.connect(this.ctx.destination);
+    this.masterGain.connect(this.workletNode);
+    this.workletNode.connect(this.ctx.destination);
   }
 
   async stop(): Promise<void> {
     this.stopAll();
-    if (this.node) {
-      this.node.disconnect();
-      this.node = null;
+    for (const channel of this.channels.values()) {
+      channel.gain.disconnect();
+      channel.panner.disconnect();
+    }
+    this.channels.clear();
+    if (this.workletNode) {
+      this.workletNode.disconnect();
+      this.workletNode = null;
     }
     if (this.masterGain) {
       this.masterGain.disconnect();
@@ -85,78 +106,192 @@ export class AudioHost {
       await this.ctx.close();
       this.ctx = null;
     }
-    this.buffers.clear();
   }
 
-  /** Decode a fetched audio file into an AudioBuffer cached against the stem id. */
+  // ────────────────────────────────────────────────────────────────────
+  // Channels
+  // ────────────────────────────────────────────────────────────────────
+
+  /** Register a channel for a stem; idempotent. */
+  addChannel(init: ChannelInit): void {
+    if (!this.ctx || !this.masterGain) throw new Error('AudioHost not started');
+    if (this.channels.has(init.stemId)) return;
+
+    const gain = this.ctx.createGain();
+    const panner = this.ctx.createStereoPanner();
+
+    const volume = init.volume ?? 1;
+    const pan = init.pan ?? 0;
+    gain.gain.value = volume;
+    panner.pan.value = pan;
+
+    gain.connect(panner);
+    panner.connect(this.masterGain);
+
+    this.channels.set(init.stemId, {
+      stemId: init.stemId,
+      buffer: null,
+      gain,
+      panner,
+      volume,
+      pan,
+      muted: false,
+      soloed: false,
+      source: null,
+    });
+  }
+
+  /** Decode and attach an audio buffer to its channel. Auto-creates the channel. */
   async loadStem(stemId: string, audioData: ArrayBuffer): Promise<void> {
     if (!this.ctx) throw new Error('AudioHost not started');
-    if (this.buffers.has(stemId)) return;
-    const buffer = await this.ctx.decodeAudioData(audioData.slice(0));
-    this.buffers.set(stemId, buffer);
+    if (!this.channels.has(stemId)) this.addChannel({ stemId });
+    const channel = this.channels.get(stemId);
+    if (!channel) throw new Error(`channel ${stemId} missing`);
+    if (channel.buffer) return;
+    channel.buffer = await this.ctx.decodeAudioData(audioData.slice(0));
   }
 
-  /** Has the stem been decoded and cached? */
   isLoaded(stemId: string): boolean {
-    return this.buffers.has(stemId);
+    return this.channels.get(stemId)?.buffer != null;
   }
 
-  /** Sum-duration of the longest loaded stem, in seconds. */
-  get durationSeconds(): number {
-    let max = 0;
-    for (const b of this.buffers.values()) {
-      if (b.duration > max) max = b.duration;
+  removeChannel(stemId: string): void {
+    const channel = this.channels.get(stemId);
+    if (!channel) return;
+    if (channel.source) {
+      try {
+        channel.source.onended = null;
+        channel.source.stop(0);
+      } catch {
+        // already stopped
+      }
+      channel.source.disconnect();
+      channel.source = null;
     }
-    return max;
+    channel.gain.disconnect();
+    channel.panner.disconnect();
+    this.channels.delete(stemId);
   }
 
-  /** Start every loaded stem in-sync. `offsetSeconds` lets us start mid-session. */
+  // ────────────────────────────────────────────────────────────────────
+  // Channel parameters
+  // ────────────────────────────────────────────────────────────────────
+
+  setChannelVolume(stemId: string, value: number, rampSec = 0.01): void {
+    const channel = this.channels.get(stemId);
+    if (!channel || !this.ctx) return;
+    channel.volume = Math.max(0, Math.min(4, value));
+    this.applyEffectiveGain(channel, rampSec);
+  }
+
+  setChannelPan(stemId: string, value: number, rampSec = 0.01): void {
+    const channel = this.channels.get(stemId);
+    if (!channel || !this.ctx) return;
+    const pan = Math.max(-1, Math.min(1, value));
+    channel.pan = pan;
+    channel.panner.pan.cancelScheduledValues(this.ctx.currentTime);
+    channel.panner.pan.linearRampToValueAtTime(pan, this.ctx.currentTime + rampSec);
+  }
+
+  setChannelMute(stemId: string, muted: boolean): void {
+    const channel = this.channels.get(stemId);
+    if (!channel) return;
+    channel.muted = muted;
+    this.applyEffectiveGain(channel);
+  }
+
+  setChannelSolo(stemId: string, soloed: boolean): void {
+    const channel = this.channels.get(stemId);
+    if (!channel) return;
+    channel.soloed = soloed;
+    // Solo on any channel changes effective gain across every channel.
+    for (const c of this.channels.values()) this.applyEffectiveGain(c);
+  }
+
+  /**
+   * Compute the actual gain to apply to a channel based on volume + mute +
+   * global solo state. Writes to the GainNode.
+   */
+  private applyEffectiveGain(channel: ChannelInternals, rampSec = 0.005): void {
+    if (!this.ctx) return;
+    const anySoloed = [...this.channels.values()].some((c) => c.soloed);
+    let effective = channel.volume;
+    if (channel.muted) effective = 0;
+    else if (anySoloed && !channel.soloed) effective = 0;
+
+    channel.gain.gain.cancelScheduledValues(this.ctx.currentTime);
+    channel.gain.gain.linearRampToValueAtTime(effective, this.ctx.currentTime + rampSec);
+  }
+
+  // ────────────────────────────────────────────────────────────────────
+  // Transport
+  // ────────────────────────────────────────────────────────────────────
+
+  /** Start every loaded channel from the given offset (in seconds). */
   playAll(offsetSeconds = 0): void {
-    if (!this.ctx || !this.masterGain) throw new Error('AudioHost not started');
+    if (!this.ctx) throw new Error('AudioHost not started');
     if (this.ctx.state === 'suspended') void this.ctx.resume();
 
     this.stopAll();
 
-    for (const [stemId, buffer] of this.buffers) {
+    for (const channel of this.channels.values()) {
+      if (!channel.buffer) continue;
       const src = this.ctx.createBufferSource();
-      src.buffer = buffer;
-      src.connect(this.masterGain);
-      src.onended = () => this.activeSources.delete(stemId);
-      src.start(0, Math.min(offsetSeconds, buffer.duration));
-      this.activeSources.set(stemId, src);
+      src.buffer = channel.buffer;
+      src.connect(channel.gain);
+      src.onended = () => {
+        if (channel.source === src) channel.source = null;
+      };
+      src.start(0, Math.min(offsetSeconds, channel.buffer.duration));
+      channel.source = src;
     }
   }
 
-  /** Stop every currently-playing source. */
+  /** Stop every currently-playing source. The channel chain stays intact. */
   stopAll(): void {
-    for (const src of this.activeSources.values()) {
-      try {
-        src.onended = null;
-        src.stop(0);
-      } catch {
-        // Source already stopped.
+    for (const channel of this.channels.values()) {
+      if (channel.source) {
+        try {
+          channel.source.onended = null;
+          channel.source.stop(0);
+        } catch {
+          // already stopped
+        }
+        channel.source.disconnect();
+        channel.source = null;
       }
-      src.disconnect();
     }
-    this.activeSources.clear();
   }
 
-  /** Are any sources currently playing? */
-  get isPlaying(): boolean {
-    return this.activeSources.size > 0;
+  /** Duration of the longest loaded channel, in seconds. */
+  get durationSeconds(): number {
+    let max = 0;
+    for (const c of this.channels.values()) {
+      if (c.buffer && c.buffer.duration > max) max = c.buffer.duration;
+    }
+    return max;
   }
 
-  /** Set the master output gain — 0..1 typically, 0 = silent. */
-  setMasterGain(value: number, rampSeconds = 0.01): void {
+  /** Master volume, 0..4; 1 = 0 dB. */
+  setMasterGain(value: number, rampSec = 0.01): void {
     if (!this.masterGain || !this.ctx) return;
     const target = Math.max(0, Math.min(4, value));
     this.masterGain.gain.cancelScheduledValues(this.ctx.currentTime);
-    this.masterGain.gain.linearRampToValueAtTime(target, this.ctx.currentTime + rampSeconds);
+    this.masterGain.gain.linearRampToValueAtTime(target, this.ctx.currentTime + rampSec);
   }
 
+  get isPlaying(): boolean {
+    for (const c of this.channels.values()) if (c.source) return true;
+    return false;
+  }
+
+  // ────────────────────────────────────────────────────────────────────
+  // Misc
+  // ────────────────────────────────────────────────────────────────────
+
   send(msg: WorkletMessage): void {
-    if (!this.node) throw new Error('AudioHost not started');
-    this.node.port.postMessage(msg);
+    if (!this.workletNode) throw new Error('AudioHost not started');
+    this.workletNode.port.postMessage(msg);
   }
 
   updateGraph(graph: AudioGraph): void {
@@ -172,7 +307,6 @@ export class AudioHost {
     return this.ctx;
   }
 
-  /** AudioContext.currentTime — for transport math. */
   get currentTime(): number {
     return this.ctx?.currentTime ?? 0;
   }

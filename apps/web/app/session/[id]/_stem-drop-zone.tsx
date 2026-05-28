@@ -119,6 +119,7 @@ export function StemDropZone({ sessionId, initialStems }: Props) {
       }
       const created: Stem = await regRes.json();
       setStems((prev) => [...prev, created]);
+      window.dispatchEvent(new CustomEvent<Stem>('aux:stem-added', { detail: created }));
       setStatus('done');
     } catch (err) {
       setStatus('failed', err instanceof Error ? err.message : 'failed');
@@ -147,6 +148,7 @@ export function StemDropZone({ sessionId, initialStems }: Props) {
     });
     if (res.ok) {
       setStems((prev) => prev.filter((s) => s.id !== stemId));
+      window.dispatchEvent(new CustomEvent<string>('aux:stem-removed', { detail: stemId }));
     }
   }
 

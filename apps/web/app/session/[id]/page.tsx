@@ -2,8 +2,8 @@ import { apiFetch } from '@/lib/api';
 import type { SessionDetail } from '@/lib/types';
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
+import { MixerShell } from './_mixer-shell';
 import { StemDropZone } from './_stem-drop-zone';
-import { Transport } from './_transport';
 
 export default async function SessionPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
@@ -32,16 +32,9 @@ export default async function SessionPage({ params }: { params: Promise<{ id: st
         </p>
       </header>
 
-      <Transport sessionId={session.id} />
+      <MixerShell sessionId={session.id} initialStems={session.stems} />
 
       <StemDropZone sessionId={session.id} initialStems={session.stems} />
-
-      <div className="mt-12 border-t border-line pt-6 text-ink-3 text-sm">
-        <p>
-          Mixer surface (channel strips, EQ, master) wires up in the next phase per{' '}
-          <code className="text-ink">docs/implementation.html §11 v0.2</code>.
-        </p>
-      </div>
     </main>
   );
 }
