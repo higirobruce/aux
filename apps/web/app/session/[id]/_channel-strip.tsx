@@ -2,6 +2,7 @@
 
 import type { Stem } from '@/lib/types';
 import type { AudioHost } from '@aux/audio-engine';
+import type { CompType } from '@aux/session-doc';
 import { Fader } from './_fader';
 import { Knob } from './_knob';
 import { Meter } from './_meter';
@@ -20,6 +21,7 @@ interface Props {
   onSolo: () => void;
   onEq: (band: EqBand, gainDb: number) => void;
   onComp: (field: 'threshold' | 'ratio', value: number) => void;
+  onCompType: (type: CompType) => void;
 }
 
 const EQ_KNOB_MIN_DB = -12;
@@ -107,6 +109,7 @@ export function ChannelStrip({
   onSolo,
   onEq,
   onComp,
+  onCompType,
 }: Props) {
   const effectivelyMuted = state.muted || (anySoloed && !state.soloed);
 
@@ -160,29 +163,56 @@ export function ChannelStrip({
       </div>
 
       <div className="ch-comp">
-        <div className="knob-wrap">
-          <Knob
-            value={state.comp.threshold}
-            min={COMP_THRESH_MIN}
-            max={COMP_THRESH_MAX}
-            defaultValue={0}
-            ariaLabel={`${stem.name} comp threshold`}
-            onChange={(v) => onComp('threshold', v)}
-          />
-          <span className="knob-label">Th</span>
-          <span className="knob-readout">{formatThresh(state.comp.threshold)}</span>
-        </div>
-        <div className="knob-wrap">
-          <Knob
-            value={state.comp.ratio}
-            min={COMP_RATIO_MIN}
-            max={COMP_RATIO_MAX}
-            defaultValue={1}
-            ariaLabel={`${stem.name} comp ratio`}
-            onChange={(v) => onComp('ratio', v)}
-          />
-          <span className="knob-label">Rt</span>
-          <span className="knob-readout">{formatRatio(state.comp.ratio)}</span>
+        <fieldset className="ch-comp-type">
+          <legend className="sr-only">{stem.name} comp flavour</legend>
+          <label className={`ch-comp-type-btn ${state.compType === 'clean' ? 'on' : ''}`}>
+            <input
+              type="radio"
+              name={`comp-type-${stem.id}`}
+              value="clean"
+              checked={state.compType === 'clean'}
+              onChange={() => onCompType('clean')}
+              className="sr-only"
+            />
+            Clean
+          </label>
+          <label className={`ch-comp-type-btn ${state.compType === 'color' ? 'on' : ''}`}>
+            <input
+              type="radio"
+              name={`comp-type-${stem.id}`}
+              value="color"
+              checked={state.compType === 'color'}
+              onChange={() => onCompType('color')}
+              className="sr-only"
+            />
+            Color
+          </label>
+        </fieldset>
+        <div className="ch-comp-knobs">
+          <div className="knob-wrap">
+            <Knob
+              value={state.comp.threshold}
+              min={COMP_THRESH_MIN}
+              max={COMP_THRESH_MAX}
+              defaultValue={0}
+              ariaLabel={`${stem.name} comp threshold`}
+              onChange={(v) => onComp('threshold', v)}
+            />
+            <span className="knob-label">Th</span>
+            <span className="knob-readout">{formatThresh(state.comp.threshold)}</span>
+          </div>
+          <div className="knob-wrap">
+            <Knob
+              value={state.comp.ratio}
+              min={COMP_RATIO_MIN}
+              max={COMP_RATIO_MAX}
+              defaultValue={1}
+              ariaLabel={`${stem.name} comp ratio`}
+              onChange={(v) => onComp('ratio', v)}
+            />
+            <span className="knob-label">Rt</span>
+            <span className="knob-readout">{formatRatio(state.comp.ratio)}</span>
+          </div>
         </div>
       </div>
 

@@ -4,9 +4,12 @@ import { isLocalKey, resolveStemStore } from '@/lib/stem-store';
 import type { Stem, StemWithUrl } from '@/lib/types';
 import { AudioHost, Eq8BandType } from '@aux/audio-engine';
 import {
+  COMP_COLOR_DEFAULTS,
   COMP_DEFAULTS,
+  type CompType,
   DEFAULT_CHANNEL_COMP,
   DEFAULT_CHANNEL_EQ,
+  DEFAULT_COMP_TYPE,
   MIX_STATE_VERSION,
   MixStateSchema,
 } from '@aux/session-doc';
@@ -34,6 +37,7 @@ export interface ChannelState {
   soloed: boolean;
   eq: { lo: number; mid: number; hi: number }; // dB, ±24
   comp: { threshold: number; ratio: number }; // dB threshold + n:1 ratio
+  compType: CompType; // 'clean' (VCA) or 'color' (FET)
 }
 
 const DEFAULT_CHANNEL: ChannelState = {
@@ -43,6 +47,7 @@ const DEFAULT_CHANNEL: ChannelState = {
   soloed: false,
   eq: { ...DEFAULT_CHANNEL_EQ },
   comp: { ...DEFAULT_CHANNEL_COMP },
+  compType: DEFAULT_COMP_TYPE,
 };
 const AUTOSAVE_DEBOUNCE_MS = 600;
 
@@ -69,9 +74,9 @@ function formatTime(seconds: number): string {
  * Parse the server-provided mix state. Tolerates missing / malformed data —
  * an unknown schema or invalid payload just yields an empty channel map.
  *
- * Backcompat: older docs (v1 = pre-EQ, v2 = pre-comp) are upgraded in
- * memory by filling in defaults for the missing sections. Next autosave
- * promotes the doc to the current version.
+ * Backcompat: older docs (v1 pre-EQ, v2 pre-comp, v3 pre-comp-type) are
+ * upgraded in memory by filling in defaults for the missing sections. The
+ * next autosave promotes the doc to the current version.
  */
 function hydrateChannelState(raw: unknown): Record<string, ChannelState> {
   if (raw == null) return {};
@@ -83,7 +88,7 @@ function hydrateChannelState(raw: unknown): Record<string, ChannelState> {
     return {};
   }
   const ver = (raw as { version: unknown }).version;
-  if (typeof ver !== 'number' || ver < 1 || ver > 2) return {};
+  if (typeof ver !== 'number' || ver < 1 || ver > 3) return {};
 
   const channels = (raw as { channels: Record<string, unknown> }).channels;
   const upgraded: Record<string, ChannelState> = {};
@@ -105,9 +110,53 @@ function hydrateChannelState(raw: unknown): Record<string, ChannelState> {
       soloed: c.soloed,
       eq: c.eq ?? { ...DEFAULT_CHANNEL_EQ },
       comp: c.comp ?? { ...DEFAULT_CHANNEL_COMP },
+      compType: c.compType ?? DEFAULT_COMP_TYPE,
     };
   }
   return upgraded;
+}
+
+/**
+ * Push the two-knob (threshold + ratio) state into whichever comp flavour
+ * is currently selected and bypass the other one. Drive is fixed (per
+ * COMP_COLOR_DEFAULTS) until the deep-edit panel exposes it.
+ *
+ * Module-level (not closed over component state) so it can be referenced
+ * from useCallback bodies without joining their dep arrays.
+ */
+function applyCompToHost(
+  host: AudioHost,
+  stemId: string,
+  threshold: number,
+  ratio: number,
+  compType: CompType
+): void {
+  if (compType === 'clean') {
+    host.setChannelComp(
+      stemId,
+      threshold,
+      ratio,
+      COMP_DEFAULTS.attackMs,
+      COMP_DEFAULTS.releaseMs,
+      COMP_DEFAULTS.makeupDb,
+      COMP_DEFAULTS.mix
+    );
+    host.setChannelCompBypassed(stemId, false);
+    host.setChannelCompColorBypassed(stemId, true);
+  } else {
+    host.setChannelCompColor(
+      stemId,
+      threshold,
+      ratio,
+      COMP_COLOR_DEFAULTS.attackMs,
+      COMP_COLOR_DEFAULTS.releaseMs,
+      COMP_COLOR_DEFAULTS.makeupDb,
+      COMP_COLOR_DEFAULTS.mix,
+      COMP_COLOR_DEFAULTS.driveDb
+    );
+    host.setChannelCompColorBypassed(stemId, false);
+    host.setChannelCompBypassed(stemId, true);
+  }
 }
 
 export function MixerShell({
@@ -279,6 +328,8 @@ export function MixerShell({
       eq8WasmUrl: '/eq8_bg.wasm',
       compCleanWorkletUrl: '/comp-clean-worklet.js',
       compCleanWasmUrl: '/comp_clean_bg.wasm',
+      compColorWorkletUrl: '/comp-color-worklet.js',
+      compColorWasmUrl: '/comp_color_bg.wasm',
     });
     await host.start();
     hostRef.current = host;
@@ -345,15 +396,7 @@ export function MixerShell({
         const { idx, type, freq, q } = EQ_BANDS[band];
         host.setChannelEqBand(stem.id, idx, type, freq, ch.eq[band], q);
       }
-      host.setChannelComp(
-        stem.id,
-        ch.comp.threshold,
-        ch.comp.ratio,
-        COMP_DEFAULTS.attackMs,
-        COMP_DEFAULTS.releaseMs,
-        COMP_DEFAULTS.makeupDb,
-        COMP_DEFAULTS.mix
-      );
+      applyCompToHost(host, stem.id, ch.comp.threshold, ch.comp.ratio, ch.compType);
     }
   }
 
@@ -423,16 +466,18 @@ export function MixerShell({
     setChannelState((prev) => {
       const current = prev[stemId] ?? DEFAULT_CHANNEL;
       const nextComp = { ...current.comp, [field]: value };
-      hostRef.current?.setChannelComp(
-        stemId,
-        nextComp.threshold,
-        nextComp.ratio,
-        COMP_DEFAULTS.attackMs,
-        COMP_DEFAULTS.releaseMs,
-        COMP_DEFAULTS.makeupDb,
-        COMP_DEFAULTS.mix
-      );
+      const host = hostRef.current;
+      if (host) applyCompToHost(host, stemId, nextComp.threshold, nextComp.ratio, current.compType);
       return { ...prev, [stemId]: { ...current, comp: nextComp } };
+    });
+  }, []);
+
+  const setCompType = useCallback((stemId: string, compType: CompType) => {
+    setChannelState((prev) => {
+      const current = prev[stemId] ?? DEFAULT_CHANNEL;
+      const host = hostRef.current;
+      if (host) applyCompToHost(host, stemId, current.comp.threshold, current.comp.ratio, compType);
+      return { ...prev, [stemId]: { ...current, compType } };
     });
   }, []);
 
@@ -566,6 +611,7 @@ export function MixerShell({
                     onSolo={() => toggleSolo(stem.id)}
                     onEq={(band, db) => setEq(stem.id, band, db)}
                     onComp={(field, value) => setComp(stem.id, field, value)}
+                    onCompType={(type) => setCompType(stem.id, type)}
                   />
                 );
               })

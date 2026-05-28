@@ -17,6 +17,8 @@ const PUBLIC_PATHS = [
   '/eq8_bg.wasm',
   '/comp-clean-worklet.js',
   '/comp_clean_bg.wasm',
+  '/comp-color-worklet.js',
+  '/comp_color_bg.wasm',
 ];
 
 export function middleware(req: NextRequest) {

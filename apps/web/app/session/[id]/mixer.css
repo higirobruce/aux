@@ -535,15 +535,76 @@
   color: #939aa5;
 }
 
-/* ─── Comp row (Threshold + Ratio knobs) ───────────────────────────── */
+/* ─── Comp row (type selector + Threshold + Ratio knobs) ───────────── */
 
 .ch-comp {
+  padding: 6px 6px 8px;
+  border-bottom: 1px solid #0a0c10;
+  background: rgba(0, 0, 0, 0.22);
+}
+
+.ch-comp-type {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 2px;
+  margin-bottom: 6px;
+  padding: 0;
+  border: 0;
+}
+
+/* Screen-reader-only — visually hides legend + radio inputs while keeping
+ * them in the accessibility tree. */
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+.ch-comp-type-btn {
+  height: 16px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-family: var(--font-mono);
+  font-size: 8px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  background: linear-gradient(180deg, #2a3038, #14171c);
+  border: 1px solid #0a0c10;
+  border-radius: 2px;
+  color: #6b7280;
+  cursor: pointer;
+  user-select: none;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.06);
+  transition: color 100ms ease, background 100ms ease;
+}
+
+.ch-comp-type-btn:hover:not(.on) {
+  color: #c5d5ec;
+}
+
+.ch-comp-type-btn:has(input:focus-visible) {
+  outline: 2px solid var(--azure, #2e5fa8);
+  outline-offset: 1px;
+}
+
+.ch-comp-type-btn.on {
+  background: linear-gradient(180deg, #3a4860, #1c2638);
+  color: #dce7f5;
+  border-color: rgba(46, 95, 168, 0.45);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.14), 0 0 6px rgba(46, 95, 168, 0.25);
+}
+
+.ch-comp-knobs {
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 4px;
-  padding: 8px 6px;
-  border-bottom: 1px solid #0a0c10;
-  background: rgba(0, 0, 0, 0.22);
 }
 
 .ch-comp .knob-wrap {

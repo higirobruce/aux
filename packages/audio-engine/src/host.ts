@@ -39,11 +39,21 @@ export interface AudioHostOptions {
   /**
    * URL to the Comp-Clean worklet processor. With `compCleanWasmUrl`, every
    * channel gets a per-channel VCA compressor inserted between the EQ and
-   * the gain node. Insert order: source → eq8 → comp → gain → panner → ...
+   * the gain node. Insert order: source → eq8 → compClean → compColor →
+   * gain → panner → …
    */
   compCleanWorkletUrl?: string | URL;
   /** URL to comp_clean_bg.wasm. */
   compCleanWasmUrl?: string | URL;
+  /**
+   * URL to the Comp-Color worklet processor (FET-style). When provided
+   * alongside `compColorWasmUrl`, every channel also gets a Comp-Color
+   * node sitting after Comp-Clean. The UI flips between Clean and Color
+   * by bypassing the inactive one; the audio path doesn't change.
+   */
+  compColorWorkletUrl?: string | URL;
+  /** URL to comp_color_bg.wasm. */
+  compColorWasmUrl?: string | URL;
   /** Sample rate (default: AudioContext default). */
   sampleRate?: number;
 }
@@ -74,10 +84,15 @@ interface ChannelInternals {
    *  if comp is null). Null when the host was started without EQ-8 URLs. */
   eq8: AudioWorkletNode | null;
   /** Comp-Clean worklet — receives `eq8` output (or source if no EQ).
-   *  Output feeds `gain`. Null when started without comp URLs. */
+   *  Output feeds `compColor` if present, else `gain`. */
   comp: AudioWorkletNode | null;
-  /** Latest gain reduction in dB (≥ 0) reported by the comp worklet. */
+  /** Comp-Color worklet — receives `comp` output (or source / eq if neither
+   *  Clean nor EQ is configured). Output feeds `gain`. */
+  compColor: AudioWorkletNode | null;
+  /** Latest gain reduction (≥ 0) from whichever comp is currently active. */
   compGrDb: number;
+  /** Latest GR from the Color-flavor comp, surfaced separately for the meter. */
+  compColorGrDb: number;
   gain: GainNode;
   panner: StereoPannerNode;
   analyser: AnalyserNode;
@@ -99,6 +114,8 @@ export class AudioHost {
   private eq8WasmModule: WebAssembly.Module | null = null;
   /** Same pattern as eq8WasmModule, but for Comp-Clean. */
   private compWasmModule: WebAssembly.Module | null = null;
+  /** Same again for Comp-Color (FET). */
+  private compColorWasmModule: WebAssembly.Module | null = null;
 
   private channels = new Map<string, ChannelInternals>();
 
@@ -144,6 +161,17 @@ export class AudioHost {
       );
     }
 
+    if (this.options.compColorWorkletUrl && this.options.compColorWasmUrl) {
+      await this.ctx.audioWorklet.addModule(this.options.compColorWorkletUrl);
+      const res = await fetch(this.options.compColorWasmUrl);
+      if (!res.ok) throw new Error(`comp-color wasm fetch failed (${res.status})`);
+      this.compColorWasmModule = await WebAssembly.compileStreaming(
+        new Response(await res.arrayBuffer(), {
+          headers: { 'Content-Type': 'application/wasm' },
+        })
+      );
+    }
+
     this.workletNode = new AudioWorkletNode(this.ctx, 'aux-processor', {
       numberOfInputs: 1,
       numberOfOutputs: 1,
@@ -165,6 +193,7 @@ export class AudioHost {
     for (const channel of this.channels.values()) {
       if (channel.eq8) channel.eq8.disconnect();
       if (channel.comp) channel.comp.disconnect();
+      if (channel.compColor) channel.compColor.disconnect();
       channel.gain.disconnect();
       channel.panner.disconnect();
       channel.analyser.disconnect();
@@ -208,11 +237,22 @@ export class AudioHost {
     // straightforward: each new node connects to the previous "front" and
     // becomes the new front; the source ultimately connects to `front`.
     //
-    //   source → [eq8] → [comp] → gain → panner → analyser → master
+    //   source → [eq8] → [comp] → [compColor] → gain → panner → analyser → master
     //
     // Bracketed nodes are conditional: they only exist if the corresponding
-    // WASM module was loaded at start(). With both off, the routing reduces
-    // to source → gain → ... as before.
+    // WASM module was loaded at start(). With everything off the routing
+    // reduces to source → gain → ... as before.
+    let compColor: AudioWorkletNode | null = null;
+    if (this.compColorWasmModule) {
+      compColor = new AudioWorkletNode(this.ctx, 'aux-comp-color-processor', {
+        numberOfInputs: 1,
+        numberOfOutputs: 1,
+        outputChannelCount: [2],
+        processorOptions: { wasmModule: this.compColorWasmModule },
+      });
+      compColor.connect(gain);
+    }
+
     let comp: AudioWorkletNode | null = null;
     if (this.compWasmModule) {
       comp = new AudioWorkletNode(this.ctx, 'aux-comp-clean-processor', {
@@ -221,7 +261,7 @@ export class AudioHost {
         outputChannelCount: [2],
         processorOptions: { wasmModule: this.compWasmModule },
       });
-      comp.connect(gain);
+      comp.connect(compColor ?? gain);
     }
 
     let eq8: AudioWorkletNode | null = null;
@@ -232,7 +272,7 @@ export class AudioHost {
         outputChannelCount: [2],
         processorOptions: { wasmModule: this.eq8WasmModule },
       });
-      eq8.connect(comp ?? gain);
+      eq8.connect(comp ?? compColor ?? gain);
     }
 
     // gain → panner → analyser → master
@@ -245,7 +285,9 @@ export class AudioHost {
       buffer: null,
       eq8,
       comp,
+      compColor,
       compGrDb: 0,
+      compColorGrDb: 0,
       gain,
       panner,
       analyser,
@@ -260,6 +302,11 @@ export class AudioHost {
     if (comp) {
       comp.port.onmessage = (e: MessageEvent<{ type: string; db: number }>) => {
         if (e.data?.type === 'gr') channelInternals.compGrDb = e.data.db;
+      };
+    }
+    if (compColor) {
+      compColor.port.onmessage = (e: MessageEvent<{ type: string; db: number }>) => {
+        if (e.data?.type === 'gr') channelInternals.compColorGrDb = e.data.db;
       };
     }
 
@@ -295,6 +342,7 @@ export class AudioHost {
     }
     if (channel.eq8) channel.eq8.disconnect();
     if (channel.comp) channel.comp.disconnect();
+    if (channel.compColor) channel.compColor.disconnect();
     channel.gain.disconnect();
     channel.panner.disconnect();
     channel.analyser.disconnect();
@@ -385,6 +433,49 @@ export class AudioHost {
     return this.channels.get(stemId)?.compGrDb ?? 0;
   }
 
+  // ────────────────────────────────────────────────────────────────────
+  // Comp-Color parameters (FET-style)
+  // ────────────────────────────────────────────────────────────────────
+
+  /**
+   * Push the seven Color-flavor params at once. Drive is the extra
+   * parameter Comp-Clean doesn't have — pre-gain into the tanh stage,
+   * 0..24 dB. No-op if the host was started without Color URLs.
+   */
+  setChannelCompColor(
+    stemId: string,
+    thresholdDb: number,
+    ratio: number,
+    attackMs: number,
+    releaseMs: number,
+    makeupDb: number,
+    mix: number,
+    driveDb: number
+  ): void {
+    const channel = this.channels.get(stemId);
+    if (!channel?.compColor) return;
+    channel.compColor.port.postMessage({
+      type: 'set-params',
+      thresholdDb,
+      ratio,
+      attackMs,
+      releaseMs,
+      makeupDb,
+      mix,
+      driveDb,
+    });
+  }
+
+  setChannelCompColorBypassed(stemId: string, bypassed: boolean): void {
+    const channel = this.channels.get(stemId);
+    if (!channel?.compColor) return;
+    channel.compColor.port.postMessage({ type: 'set-bypassed', bypassed });
+  }
+
+  getChannelCompColorGr(stemId: string): number {
+    return this.channels.get(stemId)?.compColorGrDb ?? 0;
+  }
+
   /**
    * Read the current peak amplitude (0..1) for a channel — for a live meter.
    * Returns 0 if the channel doesn't exist or nothing is playing.
@@ -468,7 +559,7 @@ export class AudioHost {
       src.buffer = channel.buffer;
       // Routing front: prefer eq8 if present, else comp, else gain.
       // addChannel() chains eq8 → comp → gain when both inserts exist.
-      src.connect(channel.eq8 ?? channel.comp ?? channel.gain);
+      src.connect(channel.eq8 ?? channel.comp ?? channel.compColor ?? channel.gain);
       src.onended = () => {
         if (channel.source === src) channel.source = null;
       };

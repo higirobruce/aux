@@ -10,12 +10,17 @@ import { z } from 'zod';
  * ----------
  * v1 — volume / pan / mute / solo  (autosave slice, 5d36165).
  * v2 — adds EQ state: LO (low-shelf), MID (peak), HI (high-shelf) in dB.
- * v3 — adds Comp-Clean state per channel: { threshold, ratio }. Only the
- *      two knobs that ship in the v0.2 strip UI; attack/release/makeup/mix
- *      use sensible defaults until the v0.3 deep-edit panel.
+ * v3 — adds Comp-Clean state: { threshold, ratio } per channel.
+ * v4 — adds compType ∈ { 'clean', 'color' }. The same { threshold, ratio }
+ *      pair drives whichever flavour is active; the inactive one is bypassed
+ *      in the audio thread. Color also runs with a fixed drive default
+ *      (6 dB) until the deep-edit panel lands in a later v0.3 slice.
  */
 
-export const MIX_STATE_VERSION = 3;
+export const MIX_STATE_VERSION = 4;
+
+export const CompTypeSchema = z.enum(['clean', 'color']);
+export type CompType = z.infer<typeof CompTypeSchema>;
 
 export const ChannelEqSchema = z.object({
   /** Low-shelf gain in dB (band 1, freq 100 Hz). */
@@ -40,6 +45,7 @@ export const ChannelStateSchema = z.object({
   soloed: z.boolean(),
   eq: ChannelEqSchema,
   comp: ChannelCompSchema,
+  compType: CompTypeSchema,
 });
 
 export const MixStateSchema = z.object({
@@ -59,12 +65,28 @@ export const DEFAULT_CHANNEL_EQ: ChannelEq = { lo: 0, mid: 0, hi: 0 };
  */
 export const DEFAULT_CHANNEL_COMP: ChannelComp = { threshold: 0, ratio: 1 };
 
-/** Baked-in defaults for the comp params the v0.2 UI doesn't expose. */
+/** Default comp flavour for new channels. */
+export const DEFAULT_COMP_TYPE: CompType = 'clean';
+
+/** Baked-in defaults for the Clean-flavor comp params the UI doesn't expose. */
 export const COMP_DEFAULTS = {
   attackMs: 10,
   releaseMs: 100,
   makeupDb: 0,
   mix: 1,
+} as const;
+
+/**
+ * Color-flavor needs the same five-plus-drive defaults. Attack is much
+ * faster and there's a fixed 6 dB of drive that gives the FET its
+ * characteristic warmth without forcing the engineer to dial it in.
+ */
+export const COMP_COLOR_DEFAULTS = {
+  attackMs: 1,
+  releaseMs: 50,
+  makeupDb: 0,
+  mix: 1,
+  driveDb: 6,
 } as const;
 
 export function emptyMixState(): MixState {
