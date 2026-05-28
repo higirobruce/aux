@@ -205,10 +205,18 @@
 }
 
 .bus-strip .ch-name {
+  /* Bus strips keep the name at the top (not a scribble strip) — undo the
+     sticky / scribble-strip styling that the channel strip gets. */
   position: relative;
+  bottom: auto;
+  z-index: auto;
+  margin-top: 0;
   background: linear-gradient(180deg, #344058, #1c2638);
   color: #dce7f5;
   letter-spacing: 0.18em;
+  border-top: 0;
+  border-bottom: 1px solid #0a0c10;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.05);
 }
 
 .bus-strip .ch-meta {
@@ -681,6 +689,14 @@
 }
 
 .ch-name {
+  /* "Scribble strip" — physical-console convention: the track label lives
+     at the bottom of the strip, just under the fader. Sticky-bottom keeps
+     it pinned to the visible viewport so engineers always know which track
+     a given strip belongs to, even when scrolled. */
+  position: sticky;
+  bottom: 0;
+  z-index: 1;
+  margin-top: auto;
   text-align: center;
   font-size: 10px;
   letter-spacing: 0.06em;
@@ -688,9 +704,9 @@
   color: #dce7f5;
   padding: 7px 6px;
   background: linear-gradient(180deg, #2a3038, #14171c);
-  border-bottom: 1px solid #0a0c10;
+  border-top: 1px solid #0a0c10;
   text-transform: uppercase;
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.05);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.06), 0 -2px 6px rgba(0, 0, 0, 0.35);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;

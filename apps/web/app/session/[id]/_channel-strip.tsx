@@ -161,9 +161,6 @@ export function ChannelStrip({
 
   return (
     <div className={`ch-strip ${effectivelyMuted ? 'muted' : ''}`}>
-      <div className="ch-name" title={stem.name}>
-        {stem.name}
-      </div>
       <div className="ch-meta">
         {stem.channels === 1 ? 'mono' : 'stereo'} · {Math.round(stem.sampleRate / 1000)}k
         {!loaded && <div>(not loaded)</div>}
@@ -442,6 +439,13 @@ export function ChannelStrip({
             </option>
           ))}
         </select>
+      </div>
+
+      {/* Scribble-strip name — sticks to the bottom of the scroll viewport
+          so the track is always identifiable, even when the user has
+          scrolled the mixer console down past this strip's top. */}
+      <div className="ch-name" title={stem.name}>
+        {stem.name}
       </div>
     </div>
   );
