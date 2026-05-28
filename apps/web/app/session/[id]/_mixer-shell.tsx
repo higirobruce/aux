@@ -2,13 +2,16 @@
 
 import type { Stem, StemWithUrl } from '@/lib/types';
 import { AudioHost } from '@aux/audio-engine';
-import { Button } from '@aux/ui';
+import Link from 'next/link';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ChannelStrip } from './_channel-strip';
+import { StemDropZone } from './_stem-drop-zone';
 import './mixer.css';
 
 interface Props {
   sessionId: string;
+  sessionName: string;
+  storageMode: string;
   initialStems: Stem[];
 }
 
@@ -30,7 +33,7 @@ function formatTime(seconds: number): string {
   return `${m}:${s.toString().padStart(2, '0')}`;
 }
 
-export function MixerShell({ sessionId, initialStems }: Props) {
+export function MixerShell({ sessionId, sessionName, storageMode, initialStems }: Props) {
   const hostRef = useRef<AudioHost | null>(null);
   const playStartedAtRef = useRef<number | null>(null);
 
@@ -41,6 +44,15 @@ export function MixerShell({ sessionId, initialStems }: Props) {
   const [error, setError] = useState<string | null>(null);
   const [channelState, setChannelState] = useState<Record<string, ChannelState>>({});
   const [loadedIds, setLoadedIds] = useState<Set<string>>(new Set());
+  const [stemsOpen, setStemsOpen] = useState(initialStems.length === 0);
+
+  const handleStop = useCallback(() => {
+    const host = hostRef.current;
+    if (host) host.stopAll();
+    playStartedAtRef.current = null;
+    setPosition(0);
+    setTransport('idle');
+  }, []);
 
   // Tear down on unmount.
   useEffect(() => {
@@ -69,7 +81,17 @@ export function MixerShell({ sessionId, initialStems }: Props) {
     };
     raf = requestAnimationFrame(tick);
     return () => cancelAnimationFrame(raf);
-  }, [transport, duration]);
+  }, [transport, duration, handleStop]);
+
+  // Esc closes the drawer.
+  useEffect(() => {
+    if (!stemsOpen) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setStemsOpen(false);
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [stemsOpen]);
 
   async function ensureHost(): Promise<AudioHost> {
     if (hostRef.current) return hostRef.current;
@@ -101,7 +123,6 @@ export function MixerShell({ sessionId, initialStems }: Props) {
     setLoadedIds(new Set(downloadable.map((s) => s.id)));
     setDuration(host.durationSeconds);
 
-    // Initialize channel state for any stems we haven't seen yet.
     setChannelState((prev) => {
       const next = { ...prev };
       for (const stem of downloadable) {
@@ -125,14 +146,6 @@ export function MixerShell({ sessionId, initialStems }: Props) {
       setTransport('idle');
       setError(err instanceof Error ? err.message : 'playback failed');
     }
-  }
-
-  function handleStop() {
-    const host = hostRef.current;
-    if (host) host.stopAll();
-    playStartedAtRef.current = null;
-    setPosition(0);
-    setTransport('idle');
   }
 
   const setVolume = useCallback((stemId: string, volume: number) => {
@@ -169,7 +182,6 @@ export function MixerShell({ sessionId, initialStems }: Props) {
     });
   }, []);
 
-  // Stems are exposed so the drop zone (sibling) can refresh the list.
   const onStemAdded = useCallback((stem: Stem) => {
     setStems((prev) => (prev.some((s) => s.id === stem.id) ? prev : [...prev, stem]));
   }, []);
@@ -196,40 +208,68 @@ export function MixerShell({ sessionId, initialStems }: Props) {
 
   return (
     <>
-      <div className="sticky top-0 z-10 -mx-6 px-6 py-3 mb-6 bg-paper/95 backdrop-blur border-b border-line">
-        <div className="flex items-center gap-4">
+      <div className="mixer mixer-fullscreen">
+        <div className="mixer-transport">
+          <Link
+            href="/"
+            className="transport-btn"
+            title="Back to sessions"
+            aria-label="Back to sessions"
+          >
+            ←
+          </Link>
           {transport === 'playing' ? (
-            <Button onClick={handleStop} size="sm">
-              ■ Stop
-            </Button>
+            <button
+              type="button"
+              className="transport-btn on"
+              onClick={handleStop}
+              title="Stop"
+              aria-label="Stop"
+            >
+              ■
+            </button>
           ) : (
-            <Button onClick={handlePlay} size="sm" disabled={transport === 'loading'}>
-              {transport === 'loading' ? 'Loading…' : '▶ Play'}
-            </Button>
+            <button
+              type="button"
+              className="transport-btn"
+              onClick={handlePlay}
+              disabled={transport === 'loading' || stems.length === 0}
+              title={stems.length === 0 ? 'Add stems first' : 'Play'}
+              aria-label="Play"
+            >
+              {transport === 'loading' ? '…' : '▶'}
+            </button>
           )}
 
-          <span className="font-mono text-sm text-ink-2 tabular-nums">
+          <div className="transport-time" aria-live="off">
             {formatTime(position)} / {formatTime(duration)}
-          </span>
+          </div>
 
-          {loadedIds.size > 0 && (
-            <span className="font-mono text-xs text-ink-3">{loadedIds.size} loaded</span>
-          )}
+          <div className="transport-info">
+            <span className="name" title={sessionName}>
+              {sessionName}
+            </span>
+            <span className="muted">{storageMode}</span>
+            {loadedIds.size > 0 && <span className="muted">{loadedIds.size} loaded</span>}
+            {transport === 'playing' && <span className="playing">● playing</span>}
+            {error && <span className="err">{error}</span>}
+          </div>
 
-          {transport === 'playing' && (
-            <span className="font-mono text-xs text-ink-3">● playing</span>
-          )}
-
-          {error && <span className="text-xs text-red-700 font-mono ml-auto">{error}</span>}
+          <button
+            type="button"
+            className="transport-stems-btn"
+            onClick={() => setStemsOpen(true)}
+            aria-label="Open stems panel"
+          >
+            Stems
+            <span className="count">{stems.length}</span>
+          </button>
         </div>
-      </div>
 
-      {stems.length > 0 && (
-        <section className="mb-10">
-          <p className="font-mono text-xs tracking-widest uppercase text-ink-3 mb-3">Mixer</p>
-          <div className="mixer">
-            <div className="mixer-console">
-              {stems.map((stem) => {
+        <div className="mixer-body">
+          <div className="mixer-console">
+            {stems.length > 0 ? (
+              stems.map((stem) => {
                 const state = channelState[stem.id] ?? DEFAULT_CHANNEL;
                 return (
                   <ChannelStrip
@@ -246,13 +286,52 @@ export function MixerShell({ sessionId, initialStems }: Props) {
                     onSolo={() => toggleSolo(stem.id)}
                   />
                 );
-              })}
-            </div>
+              })
+            ) : (
+              <div className="mixer-empty">
+                <p>No stems in this session yet.</p>
+                <button
+                  type="button"
+                  className="mixer-empty-cta"
+                  onClick={() => setStemsOpen(true)}
+                >
+                  Add stems →
+                </button>
+              </div>
+            )}
           </div>
-        </section>
-      )}
+        </div>
+      </div>
 
-      {/* Exposed so the drop zone can update the parent's view. */}
+      <button
+        type="button"
+        aria-label="Close stems panel"
+        aria-hidden={!stemsOpen}
+        tabIndex={stemsOpen ? 0 : -1}
+        className={`stems-backdrop ${stemsOpen ? '' : 'closed'}`}
+        onClick={() => setStemsOpen(false)}
+      />
+      <aside
+        className={`stems-drawer ${stemsOpen ? '' : 'closed'}`}
+        aria-label="Stems"
+        aria-hidden={!stemsOpen}
+      >
+        <div className="stems-drawer-header">
+          <span className="stems-drawer-title">Stems</span>
+          <button
+            type="button"
+            className="stems-drawer-close"
+            onClick={() => setStemsOpen(false)}
+            aria-label="Close"
+          >
+            ×
+          </button>
+        </div>
+        <div className="stems-drawer-body">
+          <StemDropZone sessionId={sessionId} initialStems={initialStems} />
+        </div>
+      </aside>
+
       <StemEvents onStemAdded={onStemAdded} onStemRemoved={onStemRemoved} />
     </>
   );

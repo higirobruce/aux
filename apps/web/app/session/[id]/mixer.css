@@ -17,20 +17,288 @@
   user-select: none;
 }
 
+/* Full-screen mode — mixer fills the viewport. */
+.mixer.mixer-fullscreen {
+  position: fixed;
+  inset: 0;
+  border: none;
+  border-radius: 0;
+  box-shadow: 0 1px 0 rgba(255, 255, 255, 0.05) inset, 0 -2px 8px rgba(0, 0, 0, 0.4) inset;
+  display: flex;
+  flex-direction: column;
+}
+
+/* ─── Transport bar (header) ───────────────────────────────────────── */
+
+.mixer-transport {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 10px 14px;
+  background: linear-gradient(180deg, #2a2f38, #1c2028);
+  border-bottom: 1px solid #000;
+  box-shadow: 0 1px 0 rgba(255, 255, 255, 0.06) inset;
+  flex: 0 0 auto;
+}
+
+.transport-btn {
+  min-width: 32px;
+  height: 28px;
+  padding: 0 8px;
+  background: linear-gradient(180deg, #3a4048, #1c2028);
+  border: 1px solid #000;
+  border-radius: 3px;
+  color: #c5d5ec;
+  font-size: 12px;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  text-decoration: none;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.18), inset 0 -1px 0 rgba(0, 0, 0, 0.4), 0 1px 2px
+    rgba(0, 0, 0, 0.4);
+  transition: background 100ms ease, color 100ms ease;
+}
+
+.transport-btn:hover:not(:disabled) {
+  background: linear-gradient(180deg, #4a525e, #242830);
+}
+
+.transport-btn:active:not(:disabled) {
+  box-shadow: inset 0 1px 3px rgba(0, 0, 0, 0.5);
+}
+
+.transport-btn:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.transport-btn.on {
+  background: linear-gradient(180deg, #3a8a5a, #1c4a28);
+  color: #d8f4d8;
+  border-color: #0a2a14;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.2), 0 0 8px rgba(95, 174, 107, 0.3);
+}
+
+.transport-time {
+  font-family: var(--font-mono);
+  font-size: 13px;
+  letter-spacing: 0.06em;
+  color: #dce7f5;
+  padding: 5px 12px;
+  background: #0a0c10;
+  border: 1px solid #000;
+  border-radius: 3px;
+  box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.7), 0 0 6px rgba(46, 95, 168, 0.15) inset;
+  white-space: nowrap;
+  tab-size: 4;
+}
+
+.transport-info {
+  font-size: 11px;
+  color: #c5d5ec;
+  flex: 1;
+  letter-spacing: 0.05em;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+
+.transport-info .name {
+  color: #dce7f5;
+  font-weight: 500;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.transport-info .muted {
+  color: #6b7280;
+  text-transform: uppercase;
+  font-size: 10px;
+  letter-spacing: 0.12em;
+}
+
+.transport-info .playing {
+  color: #5fae6b;
+  font-weight: 500;
+}
+
+.transport-info .err {
+  color: #e55c4c;
+  font-weight: 500;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.transport-stems-btn {
+  min-height: 28px;
+  padding: 0 12px;
+  background: linear-gradient(180deg, #3a4048, #1c2028);
+  border: 1px solid #000;
+  border-radius: 3px;
+  color: #dce7f5;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.18), inset 0 -1px 0 rgba(0, 0, 0, 0.4), 0 1px 2px
+    rgba(0, 0, 0, 0.4);
+  transition: background 100ms ease;
+}
+
+.transport-stems-btn:hover {
+  background: linear-gradient(180deg, #4a525e, #242830);
+}
+
+.transport-stems-btn .count {
+  font-size: 10px;
+  color: #939aa5;
+  background: rgba(0, 0, 0, 0.35);
+  padding: 1px 6px;
+  border-radius: 8px;
+}
+
+/* ─── Body + console ───────────────────────────────────────────────── */
+
+.mixer-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+}
+
 .mixer-console {
+  flex: 1 1 auto;
   display: flex;
   gap: 0;
   padding: 10px 6px;
   overflow-x: auto;
+  overflow-y: hidden;
   background: linear-gradient(180deg, #1c2028 0%, #14171c 100%);
 }
 
+.mixer.mixer-fullscreen .ch-strip {
+  min-height: 0;
+  height: 100%;
+}
+
 .mixer-empty {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 16px;
   padding: 32px;
   text-align: center;
   color: #6b7280;
-  font-size: 11px;
+  font-size: 12px;
   letter-spacing: 0.06em;
+}
+
+.mixer-empty-cta {
+  padding: 10px 18px;
+  background: linear-gradient(180deg, #3a4048, #1c2028);
+  border: 1px solid #000;
+  border-radius: 3px;
+  color: #dce7f5;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  cursor: pointer;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.18), inset 0 -1px 0 rgba(0, 0, 0, 0.4);
+}
+
+.mixer-empty-cta:hover {
+  background: linear-gradient(180deg, #4a525e, #242830);
+}
+
+/* ─── Stems drawer (slide-in from right) ───────────────────────────── */
+
+.stems-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.45);
+  z-index: 40;
+  border: none;
+  cursor: default;
+  opacity: 1;
+  transition: opacity 160ms ease-out;
+}
+
+.stems-backdrop.closed {
+  opacity: 0;
+  pointer-events: none;
+}
+
+.stems-drawer {
+  position: fixed;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  width: min(480px, 90vw);
+  background: var(--color-paper, #f8f5ef);
+  border-left: 1px solid var(--color-line, #d8d2c4);
+  box-shadow: -16px 0 48px rgba(0, 0, 0, 0.25);
+  z-index: 50;
+  display: flex;
+  flex-direction: column;
+  transform: translateX(0);
+  transition: transform 220ms cubic-bezier(0.32, 0.72, 0, 1);
+}
+
+.stems-drawer.closed {
+  transform: translateX(100%);
+  pointer-events: none;
+}
+
+.stems-drawer-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 16px 20px;
+  border-bottom: 1px solid var(--color-line, #d8d2c4);
+  flex: 0 0 auto;
+}
+
+.stems-drawer-title {
+  font-family: var(--font-display);
+  font-size: 18px;
+  letter-spacing: -0.01em;
+  color: var(--color-ink, #1a1814);
+}
+
+.stems-drawer-close {
+  width: 32px;
+  height: 32px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 4px;
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--color-ink-3, #6b6a64);
+  font-size: 22px;
+  line-height: 1;
+  cursor: pointer;
+  transition: background 100ms ease, color 100ms ease;
+}
+
+.stems-drawer-close:hover {
+  background: var(--color-paper-2, #f0ecde);
+  color: var(--color-ink, #1a1814);
+}
+
+.stems-drawer-body {
+  flex: 1 1 auto;
+  overflow-y: auto;
+  padding: 16px 20px 24px;
 }
 
 /* ─── Channel strip ────────────────────────────────────────────────── */
