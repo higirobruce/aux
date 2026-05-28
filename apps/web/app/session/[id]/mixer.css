@@ -177,8 +177,10 @@
   display: flex;
   gap: 0;
   padding: 10px 6px;
+  /* Horizontal scroll for many strips; vertical scrolling is per-strip
+     (.ch-strip-body) so each strip's scribble-strip name stays in view. */
   overflow-x: auto;
-  overflow-y: auto;
+  overflow-y: hidden;
   background: linear-gradient(180deg, #1c2028 0%, #14171c 100%);
 }
 
@@ -678,6 +680,18 @@
   position: relative;
   transition: border-color 120ms ease, box-shadow 120ms ease;
   min-height: 360px;
+  min-width: 0;
+}
+
+/* Inner scroll body — everything except the name. When the timeline panel
+   shrinks the available mixer height, the controls scroll within the strip
+   so the name (sibling of this div, below) stays planted at the bottom. */
+.ch-strip-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+  scrollbar-width: thin;
 }
 
 .ch-strip.muted {
@@ -690,13 +704,10 @@
 
 .ch-name {
   /* "Scribble strip" — physical-console convention: the track label lives
-     at the bottom of the strip, just under the fader. Sticky-bottom keeps
-     it pinned to the visible viewport so engineers always know which track
-     a given strip belongs to, even when scrolled. */
-  position: sticky;
-  bottom: 0;
-  z-index: 1;
-  margin-top: auto;
+     at the bottom of the strip, just under the fader. Sits outside the
+     scrollable .ch-strip-body so it's always visible, no matter how the
+     engineer has scrolled the controls above. */
+  flex: 0 0 auto;
   text-align: center;
   font-size: 10px;
   letter-spacing: 0.06em;
