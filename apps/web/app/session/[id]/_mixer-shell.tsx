@@ -2,6 +2,7 @@
 
 import type { Stem, StemWithUrl } from '@/lib/types';
 import { AudioHost } from '@aux/audio-engine';
+import { MIX_STATE_VERSION, MixStateSchema } from '@aux/session-doc';
 import Link from 'next/link';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ChannelStrip } from './_channel-strip';
@@ -13,9 +14,11 @@ interface Props {
   sessionName: string;
   storageMode: string;
   initialStems: Stem[];
+  initialMixState: unknown;
 }
 
 type TransportState = 'idle' | 'loading' | 'playing';
+type SaveStatus = 'idle' | 'saving' | 'saved' | 'failed';
 
 export interface ChannelState {
   volume: number; // 0..2, 1 = unity
@@ -25,6 +28,7 @@ export interface ChannelState {
 }
 
 const DEFAULT_CHANNEL: ChannelState = { volume: 1, pan: 0, muted: false, soloed: false };
+const AUTOSAVE_DEBOUNCE_MS = 600;
 
 function formatTime(seconds: number): string {
   if (!Number.isFinite(seconds) || seconds < 0) return '0:00';
@@ -33,7 +37,24 @@ function formatTime(seconds: number): string {
   return `${m}:${s.toString().padStart(2, '0')}`;
 }
 
-export function MixerShell({ sessionId, sessionName, storageMode, initialStems }: Props) {
+/**
+ * Parse the server-provided mix state. Tolerates missing / malformed data —
+ * an unknown schema or invalid payload just yields an empty channel map.
+ */
+function hydrateChannelState(raw: unknown): Record<string, ChannelState> {
+  if (raw == null) return {};
+  const parsed = MixStateSchema.safeParse(raw);
+  if (!parsed.success) return {};
+  return parsed.data.channels;
+}
+
+export function MixerShell({
+  sessionId,
+  sessionName,
+  storageMode,
+  initialStems,
+  initialMixState,
+}: Props) {
   const hostRef = useRef<AudioHost | null>(null);
   const playStartedAtRef = useRef<number | null>(null);
 
@@ -42,9 +63,16 @@ export function MixerShell({ sessionId, sessionName, storageMode, initialStems }
   const [duration, setDuration] = useState(0);
   const [position, setPosition] = useState(0);
   const [error, setError] = useState<string | null>(null);
-  const [channelState, setChannelState] = useState<Record<string, ChannelState>>({});
+  const [channelState, setChannelState] = useState<Record<string, ChannelState>>(() =>
+    hydrateChannelState(initialMixState)
+  );
   const [loadedIds, setLoadedIds] = useState<Set<string>>(new Set());
   const [stemsOpen, setStemsOpen] = useState(initialStems.length === 0);
+  const [saveStatus, setSaveStatus] = useState<SaveStatus>('idle');
+  // First render is hydration; suppress that as an autosave trigger.
+  const hasMounted = useRef(false);
+  const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const inFlightSave = useRef<AbortController | null>(null);
 
   const handleStop = useCallback(() => {
     const host = hostRef.current;
@@ -54,13 +82,69 @@ export function MixerShell({ sessionId, sessionName, storageMode, initialStems }
     setTransport('idle');
   }, []);
 
+  // Keep a live ref to channelState so async helpers (loadStems, the autosave
+  // flush) read the current value without re-binding.
+  const channelStateRef = useRef(channelState);
+  useEffect(() => {
+    channelStateRef.current = channelState;
+  }, [channelState]);
+
   // Tear down on unmount.
   useEffect(() => {
     return () => {
       const host = hostRef.current;
       if (host) void host.stop();
+      if (saveTimer.current) clearTimeout(saveTimer.current);
+      if (inFlightSave.current) inFlightSave.current.abort();
     };
   }, []);
+
+  // Debounced autosave. Every channel-state change schedules a PUT
+  // /api/sessions/:id/mix after AUTOSAVE_DEBOUNCE_MS of idle. The effect body
+  // reads channelStateRef.current at flush time — channelState only sits in
+  // the dep list to trigger the rerun on each change.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: trigger-only dep
+  useEffect(() => {
+    if (!hasMounted.current) {
+      hasMounted.current = true;
+      return;
+    }
+
+    if (saveTimer.current) clearTimeout(saveTimer.current);
+
+    saveTimer.current = setTimeout(async () => {
+      // Cancel any save still in flight — newest wins.
+      if (inFlightSave.current) inFlightSave.current.abort();
+      const controller = new AbortController();
+      inFlightSave.current = controller;
+
+      setSaveStatus('saving');
+      try {
+        const res = await fetch(`/api/sessions/${sessionId}/mix`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          credentials: 'include',
+          signal: controller.signal,
+          body: JSON.stringify({
+            version: MIX_STATE_VERSION,
+            channels: channelStateRef.current,
+          }),
+        });
+        if (!res.ok) throw new Error(`save failed (${res.status})`);
+        setSaveStatus('saved');
+      } catch (err) {
+        if ((err as { name?: string })?.name === 'AbortError') return;
+        setSaveStatus('failed');
+      }
+    }, AUTOSAVE_DEBOUNCE_MS);
+
+    return () => {
+      if (saveTimer.current) {
+        clearTimeout(saveTimer.current);
+        saveTimer.current = null;
+      }
+    };
+  }, [channelState, sessionId]);
 
   // Position ticker.
   useEffect(() => {
@@ -130,6 +214,19 @@ export function MixerShell({ sessionId, sessionName, storageMode, initialStems }
       }
       return next;
     });
+
+    // Apply the (possibly hydrated) channel state to the audio graph. Without
+    // this, the host's GainNode + StereoPannerNode start at defaults even when
+    // we just restored a mix from autosave.
+    const latest = channelStateRef.current;
+    for (const stem of downloadable) {
+      const ch = latest[stem.id];
+      if (!ch) continue;
+      host.setChannelVolume(stem.id, ch.volume, 0);
+      host.setChannelPan(stem.id, ch.pan, 0);
+      host.setChannelMute(stem.id, ch.muted);
+      host.setChannelSolo(stem.id, ch.soloed);
+    }
   }
 
   async function handlePlay() {
@@ -252,6 +349,9 @@ export function MixerShell({ sessionId, sessionName, storageMode, initialStems }
             <span className="muted">{storageMode}</span>
             {loadedIds.size > 0 && <span className="muted">{loadedIds.size} loaded</span>}
             {transport === 'playing' && <span className="playing">● playing</span>}
+            {saveStatus === 'saving' && <span className="muted">saving…</span>}
+            {saveStatus === 'saved' && <span className="muted">saved</span>}
+            {saveStatus === 'failed' && <span className="err">save failed</span>}
             {error && <span className="err">{error}</span>}
           </div>
 

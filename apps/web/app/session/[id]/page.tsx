@@ -14,6 +14,7 @@ export default async function SessionPage({ params }: { params: Promise<{ id: st
       sessionName={session.name}
       storageMode={session.storageMode}
       initialStems={session.stems}
+      initialMixState={session.mixState}
     />
   );
 }

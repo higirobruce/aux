@@ -38,4 +38,5 @@ export interface StemWithUrl extends Stem {
 
 export interface SessionDetail extends SessionSummary {
   stems: Stem[];
+  mixState: unknown; // validated client-side via @aux/session-doc MixStateSchema
 }

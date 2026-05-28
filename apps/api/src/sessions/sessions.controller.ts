@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Param, Post, Req, UseGuards } from '@nestjs/common';
+import { Body, Controller, Get, Param, Post, Put, Req, UseGuards } from '@nestjs/common';
 import { z } from 'zod';
 import { AuthGuard, type AuthenticatedRequest } from '../auth/auth.guard.js';
 import { SessionsService } from './sessions.service.js';
@@ -34,5 +34,14 @@ export class SessionsController {
       name: parsed.name,
       storageMode: parsed.storageMode,
     });
+  }
+
+  /**
+   * Autosave the live mixer state. Body is a MixState document (see
+   * @aux/session-doc). Validates and persists; returns the parsed doc.
+   */
+  @Put(':id/mix')
+  async saveMix(@Req() req: AuthenticatedRequest, @Param('id') id: string, @Body() body: unknown) {
+    return this.sessions.saveMixState(req.user.id, id, body);
   }
 }

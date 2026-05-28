@@ -1,4 +1,5 @@
 import { getPrismaClient } from '@aux/db';
+import { type MixState, MixStateSchema } from '@aux/session-doc';
 import { Injectable, NotFoundException } from '@nestjs/common';
 
 /**
@@ -33,6 +34,21 @@ export class SessionsService {
     });
     if (!session) throw new NotFoundException('Session not found');
     return session;
+  }
+
+  /**
+   * Persist the live mixer state (per-channel volume/pan/mute/solo).
+   * The payload is validated against [[MixStateSchema]] before write.
+   * Returns the validated value (with unknown channels stripped).
+   */
+  async saveMixState(userId: string, sessionId: string, payload: unknown): Promise<MixState> {
+    await this.assertOwnership(userId, sessionId);
+    const parsed = MixStateSchema.parse(payload);
+    await this.db.session.update({
+      where: { id: sessionId },
+      data: { mixState: parsed },
+    });
+    return parsed;
   }
 
   async create(input: { ownerId: string; name: string; storageMode: 'cloud' | 'local' }) {
