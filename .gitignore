@@ -20,6 +20,9 @@ coverage/
 .env.local
 .env.*.local
 
+# Prisma — generated client is reproducible from the schema, not source
+**/prisma/generated/
+
 # Rust
 target/
 

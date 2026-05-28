@@ -1,3 +1,4 @@
+import { Button } from '@aux/ui';
 import Link from 'next/link';
 
 export default function LandingPage() {
@@ -17,18 +18,12 @@ export default function LandingPage() {
         the delivery.
       </p>
       <div className="flex flex-wrap gap-3">
-        <Link
-          href="http://localhost:3100"
-          className="inline-flex items-center px-5 py-2.5 text-sm font-medium bg-ink text-paper rounded-md hover:bg-ink-2 transition-colors"
-        >
-          Open the mixer
-        </Link>
-        <Link
-          href="/playground"
-          className="inline-flex items-center px-5 py-2.5 text-sm font-medium border border-line text-ink rounded-md hover:border-ink transition-colors"
-        >
-          Design system playground
-        </Link>
+        <Button asChild size="lg">
+          <Link href="http://localhost:3100">Open the mixer</Link>
+        </Button>
+        <Button asChild variant="outline" size="lg">
+          <Link href="/playground">Design system playground</Link>
+        </Button>
       </div>
     </main>
   );

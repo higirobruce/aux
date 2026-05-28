@@ -1,4 +1,4 @@
-/// <reference lib="webworker" />
+/// <reference types="@types/audioworklet" />
 /**
  * aux audio worklet — the audio thread.
  *
@@ -10,9 +10,7 @@
  * Loaded via AudioContext.audioWorklet.addModule() — see host.ts.
  */
 
-declare const registerProcessor: (name: string, ctor: typeof AudioWorkletProcessor) => void;
-
-import type { AudioGraph, WorkletEvent, WorkletMessage } from './types.js';
+import type { AudioGraph, WorkletEvent, WorkletMessage } from './types';
 
 class AuxProcessor extends AudioWorkletProcessor {
   private graph: AudioGraph | null = null;

@@ -10,4 +10,5 @@
  * the mockup-island components where the product's identity lives.
  */
 
-export { cn } from './lib/utils.js';
+export { cn } from './lib/utils';
+export { Button, buttonVariants, type ButtonProps } from './components/button';

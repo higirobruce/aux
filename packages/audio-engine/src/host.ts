@@ -7,7 +7,7 @@
  * hot-swap protocol is implemented.
  */
 
-import type { AudioGraph, WorkletEvent, WorkletMessage } from './types.js';
+import type { AudioGraph, WorkletEvent, WorkletMessage } from './types';
 
 export interface AudioHostOptions {
   /** URL to the compiled worklet module. */

@@ -1,4 +1,4 @@
-import type { SessionDoc } from './schema.js';
+import type { SessionDoc } from './schema';
 
 /**
  * Atom-path helpers — read/write parameters via dot-notation paths.
@@ -8,19 +8,30 @@ import type { SessionDoc } from './schema.js';
  *
  * Per docs/implementation.html §02 — these paths are the addressing
  * scheme used everywhere: undo, diff, automation, future Yjs collab.
+ *
+ * The dynamic traversal uses `unknown` with structural narrowing rather
+ * than `any`; the cost is one safe-cast at the lookup site.
  */
 
-type AtomPath = string;
+export type AtomPath = string;
+
+type Indexable = Record<string | number, unknown> | unknown[];
+
+function isIndexable(value: unknown): value is Indexable {
+  return typeof value === 'object' && value !== null;
+}
+
+function toKey(segment: string): string | number {
+  return /^\d+$/.test(segment) ? Number(segment) : segment;
+}
 
 export function readAtom(doc: SessionDoc, path: AtomPath): unknown {
   const parts = path.split('.');
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  let cur: any = doc;
+  let cur: unknown = doc;
   for (const part of parts) {
-    if (cur == null) return undefined;
-    // numeric segment → array index
-    const idx = /^\d+$/.test(part) ? Number(part) : part;
-    cur = cur[idx];
+    if (!isIndexable(cur)) return undefined;
+    const key = toKey(part);
+    cur = (cur as Record<string | number, unknown>)[key];
   }
   return cur;
 }
@@ -28,20 +39,21 @@ export function readAtom(doc: SessionDoc, path: AtomPath): unknown {
 export function writeAtom(doc: SessionDoc, path: AtomPath, value: unknown): SessionDoc {
   const parts = path.split('.');
   if (parts.length === 0) return doc;
+
   const next = structuredClone(doc);
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  let cur: any = next;
+  let cur: unknown = next;
+
   for (let i = 0; i < parts.length - 1; i++) {
     const part = parts[i];
     if (part === undefined) continue;
-    const idx = /^\d+$/.test(part) ? Number(part) : part;
-    cur = cur[idx];
-    if (cur == null) throw new Error(`atom path not found: ${path}`);
+    if (!isIndexable(cur)) throw new Error(`atom path not found: ${path}`);
+    const key = toKey(part);
+    cur = (cur as Record<string | number, unknown>)[key];
   }
+
   const last = parts[parts.length - 1];
-  if (last === undefined) return doc;
-  const idx = /^\d+$/.test(last) ? Number(last) : last;
-  cur[idx] = value;
+  if (last === undefined || !isIndexable(cur)) return doc;
+  (cur as Record<string | number, unknown>)[toKey(last)] = value;
   return next;
 }
 

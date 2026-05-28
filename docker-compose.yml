@@ -1,0 +1,66 @@
+# Local dev infrastructure for aux.
+# Per docs/implementation.html §03 + §15.3.
+#
+# Bring up:    docker compose up -d
+# Tear down:   docker compose down
+# Reset data:  docker compose down -v
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: aux-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: aux
+      POSTGRES_PASSWORD: dev
+      POSTGRES_DB: aux
+    ports:
+      # Host 5433 → container 5432, to avoid clashing with any homebrew/system Postgres on 5432.
+      - '5433:5432'
+    volumes:
+      - aux-postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U aux']
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    container_name: aux-redis
+    restart: unless-stopped
+    ports:
+      - '6379:6379'
+    volumes:
+      - aux-redis-data:/data
+    healthcheck:
+      test: ['CMD', 'redis-cli', 'ping']
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  # MinIO — S3-compatible local object storage for the stem store.
+  # Real R2 in prod; this for dev so we don't need a Cloudflare account yet.
+  minio:
+    image: minio/minio:latest
+    container_name: aux-minio
+    restart: unless-stopped
+    command: server /data --console-address ':9001'
+    environment:
+      MINIO_ROOT_USER: aux
+      MINIO_ROOT_PASSWORD: aux-dev-secret
+    ports:
+      - '9000:9000'   # S3 API
+      - '9001:9001'   # admin console
+    volumes:
+      - aux-minio-data:/data
+    healthcheck:
+      test: ['CMD', 'curl', '-f', 'http://localhost:9000/minio/health/live']
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  aux-postgres-data:
+  aux-redis-data:
+  aux-minio-data:
