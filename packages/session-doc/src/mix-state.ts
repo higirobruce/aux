@@ -15,23 +15,36 @@ import { z } from 'zod';
  * v5 — adds buses + channel.outputBusId.
  * v6 — adds channel.sends.
  * v7 — adds masterChain (limiter on Master).
- * v8 — buses gain an optional `plate` field — Dattorro plate reverb on the
- *      bus, designed for the classic send-return wet workflow.
+ * v8 — buses gain an optional `plate` field (Dattorro plate reverb).
+ * v9 — generalises the per-bus reverb to a discriminated `reverb` slot
+ *      with `kind: 'plate' | 'hall'`. The `plate` field is dropped — the
+ *      client migrates v8 docs by promoting `bus.plate` to
+ *      `bus.reverb: { kind: 'plate', ... }` in memory.
  */
 
-export const MIX_STATE_VERSION = 8;
+export const MIX_STATE_VERSION = 9;
 
 /** Stable id for the always-present Master bus. Sessions can omit it from
  *  their `buses` record; the client treats it as if explicitly present. */
 export const MASTER_BUS_ID = 'master';
 
-export const PlateStateSchema = z.object({
+export const ReverbKindSchema = z.enum(['plate', 'hall']);
+export type ReverbKind = z.infer<typeof ReverbKindSchema>;
+
+/**
+ * Per-bus reverb insert — Plate and Hall share the same params today, with
+ * a `kind` discriminator picking which DSP is engaged. Hall accepts wider
+ * pre-delay (up to 500 ms) so the schema's upper bound matches that; the
+ * Plate DSP clamps internally to its own narrower range.
+ */
+export const ReverbStateSchema = z.object({
+  kind: ReverbKindSchema,
   /** Feedback amount around the tank loop, 0..0.95. */
   decay: z.number().min(0).max(0.95),
   /** High-freq damping inside the tank, 0..1. */
   damping: z.number().min(0).max(1),
-  /** Pre-delay in ms, 0..200. */
-  preDelayMs: z.number().min(0).max(200),
+  /** Pre-delay in ms, 0..500. */
+  preDelayMs: z.number().min(0).max(500),
   /** Dry/wet mix, 0..1. Typically 1.0 on a send-return bus. */
   mix: z.number().min(0).max(1),
   bypassed: z.boolean(),
@@ -43,8 +56,8 @@ export const BusStateSchema = z.object({
   /** Linear gain 0..2; 1 = 0 dB. */
   gain: z.number().min(0).max(4),
   muted: z.boolean(),
-  /** Optional Plate reverb insert. Absent (or undefined) = no plate. */
-  plate: PlateStateSchema.optional(),
+  /** Optional reverb insert (Plate or Hall). Absent = no reverb. */
+  reverb: ReverbStateSchema.optional(),
 });
 
 export const BusesSchema = z.record(z.string(), BusStateSchema);
@@ -108,16 +121,30 @@ export type ChannelEq = z.infer<typeof ChannelEqSchema>;
 export type ChannelComp = z.infer<typeof ChannelCompSchema>;
 export type ChannelStateDoc = z.infer<typeof ChannelStateSchema>;
 export type BusState = z.infer<typeof BusStateSchema>;
-export type PlateState = z.infer<typeof PlateStateSchema>;
+export type ReverbState = z.infer<typeof ReverbStateSchema>;
 
-/** Sensible Plate defaults — medium tail, slightly damped, full wet. */
-export const DEFAULT_PLATE_STATE: PlateState = {
-  decay: 0.55,
-  damping: 0.4,
-  preDelayMs: 10,
-  mix: 1.0,
-  bypassed: false,
-};
+/** Sensible defaults per reverb kind — both share most params, Hall just
+ *  wants a longer tail and bigger pre-delay by default. */
+export function defaultReverb(kind: ReverbKind): ReverbState {
+  if (kind === 'hall') {
+    return {
+      kind: 'hall',
+      decay: 0.75,
+      damping: 0.25,
+      preDelayMs: 30,
+      mix: 1.0,
+      bypassed: false,
+    };
+  }
+  return {
+    kind: 'plate',
+    decay: 0.55,
+    damping: 0.4,
+    preDelayMs: 10,
+    mix: 1.0,
+    bypassed: false,
+  };
+}
 export type LimiterState = z.infer<typeof LimiterStateSchema>;
 export type MasterChain = z.infer<typeof MasterChainSchema>;
 export type MixState = z.infer<typeof MixStateSchema>;

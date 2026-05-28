@@ -317,7 +317,7 @@
   color: #e55c4c;
 }
 
-.bus-add-plate-btn {
+.bus-add-reverb-select {
   width: 100%;
   padding: 4px 6px;
   font-family: var(--font-mono);
@@ -329,12 +329,39 @@
   border-radius: 2px;
   color: #6b7280;
   cursor: pointer;
+  appearance: none;
+  -webkit-appearance: none;
   transition: color 100ms ease, border-color 100ms ease;
 }
 
-.bus-add-plate-btn:hover {
+.bus-add-reverb-select:hover {
   color: #c5d5ec;
   border-color: rgba(95, 174, 107, 0.7);
+}
+
+.bus-reverb-kind {
+  flex: 1;
+  font-family: var(--font-mono);
+  font-size: 9px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  padding: 2px 4px;
+  background: rgba(95, 174, 107, 0.15);
+  border: 1px solid rgba(95, 174, 107, 0.45);
+  border-radius: 2px;
+  color: #dce7f5;
+  cursor: pointer;
+  appearance: none;
+  -webkit-appearance: none;
+}
+
+.bus-reverb-kind:hover {
+  background: rgba(95, 174, 107, 0.22);
+}
+
+.bus-reverb-kind:focus-visible {
+  outline: 1px solid var(--azure, #2e5fa8);
+  outline-offset: 1px;
 }
 
 .bus-plate .knob-wrap {

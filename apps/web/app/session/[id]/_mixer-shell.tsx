@@ -2,7 +2,7 @@
 
 import { isLocalKey, resolveStemStore } from '@/lib/stem-store';
 import type { Stem, StemWithUrl } from '@/lib/types';
-import { AudioHost, Eq8BandType, MASTER_BUS_ID } from '@aux/audio-engine';
+import { AudioHost, Eq8BandType, MASTER_BUS_ID, type ReverbKind } from '@aux/audio-engine';
 import {
   type BusState,
   COMP_COLOR_DEFAULTS,
@@ -14,12 +14,12 @@ import {
   DEFAULT_LIMITER_STATE,
   DEFAULT_MASTER_BUS,
   DEFAULT_MASTER_CHAIN,
-  DEFAULT_PLATE_STATE,
   type LimiterState,
   MIX_STATE_VERSION,
   type MasterChain,
   MixStateSchema,
-  type PlateState,
+  type ReverbState,
+  defaultReverb,
 } from '@aux/session-doc';
 import Link from 'next/link';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
@@ -123,7 +123,7 @@ function hydrateMixState(raw: unknown): HydratedMix {
     return empty;
   }
   const ver = (raw as { version: unknown }).version;
-  if (typeof ver !== 'number' || ver < 1 || ver > 7) return empty;
+  if (typeof ver !== 'number' || ver < 1 || ver > 8) return empty;
 
   const channels = (raw as { channels: Record<string, unknown> }).channels;
   const upgradedChannels: Record<string, ChannelState> = {};
@@ -150,9 +150,44 @@ function hydrateMixState(raw: unknown): HydratedMix {
       sends: c.sends ?? {},
     };
   }
+  // Bus migration. v5+ docs already have a `buses` field; older docs don't.
+  // We also need to translate v8's `bus.plate` into v9's
+  // `bus.reverb: { kind: 'plate', ... }`.
+  const upgradedBuses: Record<string, BusState> = {
+    [MASTER_BUS_ID]: { ...DEFAULT_MASTER_BUS },
+  };
+  const rawBuses = (raw as { buses?: unknown }).buses;
+  if (rawBuses && typeof rawBuses === 'object') {
+    for (const [id, b] of Object.entries(rawBuses as Record<string, unknown>)) {
+      if (!b || typeof b !== 'object') continue;
+      const src = b as Partial<BusState> & { plate?: Partial<ReverbState> };
+      if (
+        typeof src.id !== 'string' ||
+        typeof src.name !== 'string' ||
+        typeof src.gain !== 'number' ||
+        typeof src.muted !== 'boolean'
+      ) {
+        continue;
+      }
+      const base: BusState = {
+        id: src.id,
+        name: src.name,
+        gain: src.gain,
+        muted: src.muted,
+      };
+      // v8 → v9: promote `plate` to `reverb` with kind = 'plate'.
+      if (src.plate && typeof src.plate === 'object') {
+        base.reverb = { ...defaultReverb('plate'), ...src.plate, kind: 'plate' };
+      } else if (src.reverb && typeof src.reverb === 'object') {
+        base.reverb = { ...defaultReverb('plate'), ...src.reverb };
+      }
+      upgradedBuses[id] = base;
+    }
+  }
+
   return {
     channels: upgradedChannels,
-    buses: { [MASTER_BUS_ID]: { ...DEFAULT_MASTER_BUS } },
+    buses: upgradedBuses,
     masterChain: { ...DEFAULT_MASTER_CHAIN, limiter: { ...DEFAULT_LIMITER_STATE } },
   };
 }
@@ -390,6 +425,8 @@ export function MixerShell({
       limiterWasmUrl: '/limiter_bg.wasm',
       plateWorkletUrl: '/plate-worklet.js',
       plateWasmUrl: '/plate_bg.wasm',
+      hallWorkletUrl: '/hall-worklet.js',
+      hallWasmUrl: '/hall_bg.wasm',
     });
     await host.start();
     hostRef.current = host;
@@ -467,17 +504,19 @@ export function MixerShell({
       }
       host.setBusGain(bus.id, bus.gain, 0);
       host.setBusMute(bus.id, bus.muted, 0);
-      // Restore any bus-level Plate insert and its saved params.
-      if (bus.plate && bus.id !== MASTER_BUS_ID) {
-        if (!host.hasBusPlate(bus.id)) host.addBusPlate(bus.id);
-        host.setBusPlateParams(
+      // Restore any bus-level reverb insert + its saved params.
+      if (bus.reverb && bus.id !== MASTER_BUS_ID) {
+        if (host.getBusReverbKind(bus.id) !== bus.reverb.kind) {
+          host.addBusReverb(bus.id, bus.reverb.kind);
+        }
+        host.setBusReverbParams(
           bus.id,
-          bus.plate.decay,
-          bus.plate.damping,
-          bus.plate.preDelayMs,
-          bus.plate.mix
+          bus.reverb.decay,
+          bus.reverb.damping,
+          bus.reverb.preDelayMs,
+          bus.reverb.mix
         );
-        host.setBusPlateBypassed(bus.id, bus.plate.bypassed);
+        host.setBusReverbBypassed(bus.id, bus.reverb.bypassed);
       }
     }
 
@@ -621,61 +660,68 @@ export function MixerShell({
     });
   }, []);
 
-  const addBusPlate = useCallback((busId: string) => {
+  /**
+   * Add (or swap to) a reverb of the given kind on a user bus. If the bus
+   * already has a reverb of a different kind, it's swapped out — the
+   * params are reset to that kind's defaults rather than preserved, since
+   * Hall and Plate "feel" different at the same settings.
+   */
+  const addBusReverb = useCallback((busId: string, kind: ReverbKind) => {
     if (busId === MASTER_BUS_ID) return;
     setBusState((prev) => {
       const current = prev[busId];
-      if (!current || current.plate) return prev;
-      const plate: PlateState = { ...DEFAULT_PLATE_STATE };
+      if (!current) return prev;
+      if (current.reverb?.kind === kind) return prev;
+      const reverb = defaultReverb(kind);
       const host = hostRef.current;
       if (host) {
-        host.addBusPlate(busId);
-        host.setBusPlateParams(busId, plate.decay, plate.damping, plate.preDelayMs, plate.mix);
-        host.setBusPlateBypassed(busId, plate.bypassed);
+        host.addBusReverb(busId, kind);
+        host.setBusReverbParams(busId, reverb.decay, reverb.damping, reverb.preDelayMs, reverb.mix);
+        host.setBusReverbBypassed(busId, reverb.bypassed);
       }
-      return { ...prev, [busId]: { ...current, plate } };
+      return { ...prev, [busId]: { ...current, reverb } };
     });
   }, []);
 
-  const removeBusPlate = useCallback((busId: string) => {
-    hostRef.current?.removeBusPlate(busId);
+  const removeBusReverb = useCallback((busId: string) => {
+    hostRef.current?.removeBusReverb(busId);
     setBusState((prev) => {
       const current = prev[busId];
-      if (!current?.plate) return prev;
-      const { plate: _, ...rest } = current;
+      if (!current?.reverb) return prev;
+      const { reverb: _, ...rest } = current;
       void _;
       return { ...prev, [busId]: rest };
     });
   }, []);
 
-  const setBusPlate = useCallback(
+  const setBusReverb = useCallback(
     (busId: string, field: 'decay' | 'damping' | 'preDelayMs' | 'mix', value: number) => {
       setBusState((prev) => {
         const current = prev[busId];
-        if (!current?.plate) return prev;
-        const nextPlate: PlateState = { ...current.plate, [field]: value };
-        hostRef.current?.setBusPlateParams(
+        if (!current?.reverb) return prev;
+        const nextReverb: ReverbState = { ...current.reverb, [field]: value };
+        hostRef.current?.setBusReverbParams(
           busId,
-          nextPlate.decay,
-          nextPlate.damping,
-          nextPlate.preDelayMs,
-          nextPlate.mix
+          nextReverb.decay,
+          nextReverb.damping,
+          nextReverb.preDelayMs,
+          nextReverb.mix
         );
-        return { ...prev, [busId]: { ...current, plate: nextPlate } };
+        return { ...prev, [busId]: { ...current, reverb: nextReverb } };
       });
     },
     []
   );
 
-  const toggleBusPlateBypass = useCallback((busId: string) => {
+  const toggleBusReverbBypass = useCallback((busId: string) => {
     setBusState((prev) => {
       const current = prev[busId];
-      if (!current?.plate) return prev;
-      const bypassed = !current.plate.bypassed;
-      hostRef.current?.setBusPlateBypassed(busId, bypassed);
+      if (!current?.reverb) return prev;
+      const bypassed = !current.reverb.bypassed;
+      hostRef.current?.setBusReverbBypassed(busId, bypassed);
       return {
         ...prev,
-        [busId]: { ...current, plate: { ...current.plate, bypassed } },
+        [busId]: { ...current, reverb: { ...current.reverb, bypassed } },
       };
     });
   }, []);
@@ -938,11 +984,11 @@ export function MixerShell({
                   onMute={() => toggleBusMute(bus.id)}
                   onDelete={() => deleteBus(bus.id)}
                   onRename={(name) => renameBus(bus.id, name)}
-                  plate={bus.plate}
-                  onAddPlate={() => addBusPlate(bus.id)}
-                  onRemovePlate={() => removeBusPlate(bus.id)}
-                  onPlate={(field, value) => setBusPlate(bus.id, field, value)}
-                  onPlateBypass={() => toggleBusPlateBypass(bus.id)}
+                  reverb={bus.reverb}
+                  onAddReverb={(kind) => addBusReverb(bus.id, kind)}
+                  onRemoveReverb={() => removeBusReverb(bus.id)}
+                  onReverb={(field, value) => setBusReverb(bus.id, field, value)}
+                  onReverbBypass={() => toggleBusReverbBypass(bus.id)}
                 />
               ))}
             <button

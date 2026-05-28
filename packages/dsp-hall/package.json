@@ -1,0 +1,23 @@
+{
+  "name": "@aux/dsp-hall",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Hall reverb (Dattorro-derived, denser diffusion) — Rust DSP compiled to WASM.",
+  "type": "module",
+  "main": "./wasm/hall.js",
+  "types": "./wasm/hall.d.ts",
+  "files": ["wasm"],
+  "exports": {
+    ".": {
+      "types": "./wasm/hall.d.ts",
+      "default": "./wasm/hall.js"
+    },
+    "./hall_bg.wasm": "./wasm/hall_bg.wasm",
+    "./package.json": "./package.json"
+  },
+  "scripts": {
+    "build": "wasm-pack build --release --target web --out-dir wasm --out-name hall && rm -f wasm/.gitignore wasm/package.json",
+    "test:rust": "cargo test --release",
+    "clean": "rm -rf wasm target"
+  }
+}

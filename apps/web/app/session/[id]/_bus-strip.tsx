@@ -1,7 +1,7 @@
 'use client';
 
-import type { AudioHost } from '@aux/audio-engine';
-import type { BusState, LimiterState, PlateState } from '@aux/session-doc';
+import type { AudioHost, ReverbKind } from '@aux/audio-engine';
+import type { BusState, LimiterState, ReverbState } from '@aux/session-doc';
 import { useEffect, useRef, useState } from 'react';
 import { Fader } from './_fader';
 import { Knob } from './_knob';
@@ -21,12 +21,12 @@ interface Props {
   limiter?: LimiterState;
   onLimiter?: (field: 'thresholdDb' | 'releaseMs' | 'makeupDb', value: number) => void;
   onLimiterBypass?: () => void;
-  /** User-bus-only — optional Plate reverb insert. */
-  plate?: PlateState;
-  onAddPlate?: () => void;
-  onRemovePlate?: () => void;
-  onPlate?: (field: 'decay' | 'damping' | 'preDelayMs' | 'mix', value: number) => void;
-  onPlateBypass?: () => void;
+  /** User-bus-only — optional reverb insert (Plate or Hall). */
+  reverb?: ReverbState;
+  onAddReverb?: (kind: ReverbKind) => void;
+  onRemoveReverb?: () => void;
+  onReverb?: (field: 'decay' | 'damping' | 'preDelayMs' | 'mix', value: number) => void;
+  onReverbBypass?: () => void;
 }
 
 // Same dB ↔ position mapping as the channel fader.
@@ -87,11 +87,11 @@ export function BusStrip({
   limiter,
   onLimiter,
   onLimiterBypass,
-  plate,
-  onAddPlate,
-  onRemovePlate,
-  onPlate,
-  onPlateBypass,
+  reverb,
+  onAddReverb,
+  onRemoveReverb,
+  onReverb,
+  onReverbBypass,
 }: Props) {
   const [editing, setEditing] = useState(false);
   const [draftName, setDraftName] = useState(bus.name);
@@ -204,27 +204,37 @@ export function BusStrip({
         </div>
       )}
 
-      {onAddPlate && (
+      {onAddReverb && (
         <div className="bus-plate">
-          {plate ? (
+          {reverb ? (
             <>
               <div className="bus-plate-header">
+                <select
+                  className="bus-reverb-kind"
+                  value={reverb.kind}
+                  onChange={(e) => onAddReverb(e.target.value as ReverbKind)}
+                  aria-label="Reverb kind"
+                  title="Switch reverb kind"
+                >
+                  <option value="plate">Plate</option>
+                  <option value="hall">Hall</option>
+                </select>
                 <button
                   type="button"
-                  className={`bus-limiter-toggle ${plate.bypassed ? '' : 'on'}`}
-                  onClick={onPlateBypass}
-                  aria-pressed={!plate.bypassed}
-                  title={plate.bypassed ? 'Plate bypassed — click to engage' : 'Plate active'}
+                  className={`bus-limiter-toggle ${reverb.bypassed ? '' : 'on'}`}
+                  onClick={onReverbBypass}
+                  aria-pressed={!reverb.bypassed}
+                  title={reverb.bypassed ? 'Reverb bypassed — click to engage' : 'Reverb active'}
                 >
-                  Plate
+                  On
                 </button>
-                {onRemovePlate && (
+                {onRemoveReverb && (
                   <button
                     type="button"
                     className="bus-plate-remove"
-                    aria-label="Remove plate"
-                    title="Remove plate"
-                    onClick={onRemovePlate}
+                    aria-label="Remove reverb"
+                    title="Remove reverb"
+                    onClick={onRemoveReverb}
                   >
                     ×
                   </button>
@@ -233,39 +243,44 @@ export function BusStrip({
               <div className="bus-limiter-knobs">
                 <div className="knob-wrap">
                   <Knob
-                    value={plate.decay}
+                    value={reverb.decay}
                     min={0}
                     max={0.95}
-                    defaultValue={0.55}
-                    ariaLabel="Plate decay"
-                    onChange={(v) => onPlate?.('decay', v)}
+                    defaultValue={reverb.kind === 'hall' ? 0.75 : 0.55}
+                    ariaLabel="Reverb decay"
+                    onChange={(v) => onReverb?.('decay', v)}
                   />
                   <span className="knob-label">Dcy</span>
-                  <span className="knob-readout">{Math.round(plate.decay * 100)}</span>
+                  <span className="knob-readout">{Math.round(reverb.decay * 100)}</span>
                 </div>
                 <div className="knob-wrap">
                   <Knob
-                    value={plate.damping}
+                    value={reverb.damping}
                     min={0}
                     max={1}
-                    defaultValue={0.4}
-                    ariaLabel="Plate damping"
-                    onChange={(v) => onPlate?.('damping', v)}
+                    defaultValue={reverb.kind === 'hall' ? 0.25 : 0.4}
+                    ariaLabel="Reverb damping"
+                    onChange={(v) => onReverb?.('damping', v)}
                   />
                   <span className="knob-label">Dmp</span>
-                  <span className="knob-readout">{Math.round(plate.damping * 100)}</span>
+                  <span className="knob-readout">{Math.round(reverb.damping * 100)}</span>
                 </div>
               </div>
             </>
           ) : (
-            <button
-              type="button"
-              className="bus-add-plate-btn"
-              onClick={onAddPlate}
-              title="Add a Plate reverb to this bus"
+            <select
+              className="bus-add-reverb-select"
+              value=""
+              aria-label="Add reverb"
+              onChange={(e) => {
+                const kind = e.target.value as ReverbKind | '';
+                if (kind) onAddReverb(kind);
+              }}
             >
-              + Plate
-            </button>
+              <option value="">+ reverb…</option>
+              <option value="plate">Plate</option>
+              <option value="hall">Hall</option>
+            </select>
           )}
         </div>
       )}

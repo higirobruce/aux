@@ -65,15 +65,25 @@ export interface AudioHostOptions {
   limiterWasmUrl?: string | URL;
   /**
    * URL to the Plate-reverb worklet (Dattorro-style). When both URLs are
-   * present, any user bus can host one optional Plate insert via
-   * addBusPlate(busId). The Master bus does not host a Plate.
+   * present, any user bus can host one optional reverb insert via
+   * addBusReverb(busId, 'plate'). The Master bus never hosts a reverb.
    */
   plateWorkletUrl?: string | URL;
   /** URL to plate_bg.wasm. */
   plateWasmUrl?: string | URL;
+  /**
+   * URL to the Hall-reverb worklet (denser diffusion, longer tank). Same
+   * insertion model as Plate — a bus can host *one* reverb of either kind.
+   */
+  hallWorkletUrl?: string | URL;
+  /** URL to hall_bg.wasm. */
+  hallWasmUrl?: string | URL;
   /** Sample rate (default: AudioContext default). */
   sampleRate?: number;
 }
+
+/** Which reverb DSP fills the bus's single reverb slot. */
+export type ReverbKind = 'plate' | 'hall';
 
 /** Numeric band-type enum, mirrors @aux/dsp-eq8's BandType. */
 export const Eq8BandType = {
@@ -125,9 +135,11 @@ interface BusInternals {
   /** Latest gain reduction (≥ 0) from the limiter — used to drive the
    *  Master strip's GR display. */
   limiterGrDb: number;
-  /** Optional Plate reverb on a user bus. Inserted between `gainNode` (or
-   *  the limiter if present) and `analyser`. Master never hosts a Plate. */
-  plate: AudioWorkletNode | null;
+  /** Optional reverb insert on a user bus (Plate or Hall). Sits between
+   *  `gainNode` and `analyser`. Master never hosts a reverb. */
+  reverb: AudioWorkletNode | null;
+  /** Kind currently filling the reverb slot; null when no reverb is set. */
+  reverbKind: ReverbKind | null;
   analyser: AnalyserNode;
   meterBuffer: Float32Array<ArrayBuffer>;
   gain: number;
@@ -189,8 +201,8 @@ export class AudioHost {
   private compColorWasmModule: WebAssembly.Module | null = null;
   /** Limiter — currently only used on the Master bus. */
   private limiterWasmModule: WebAssembly.Module | null = null;
-  /** Plate — optional, per user bus. */
-  private plateWasmModule: WebAssembly.Module | null = null;
+  /** Plate / Hall reverb modules — keyed by kind so addBusReverb can pick. */
+  private reverbWasmModules: Partial<Record<ReverbKind, WebAssembly.Module>> = {};
 
   private channels = new Map<string, ChannelInternals>();
   private buses = new Map<string, BusInternals>();
@@ -263,7 +275,18 @@ export class AudioHost {
       await this.ctx.audioWorklet.addModule(this.options.plateWorkletUrl);
       const res = await fetch(this.options.plateWasmUrl);
       if (!res.ok) throw new Error(`plate wasm fetch failed (${res.status})`);
-      this.plateWasmModule = await WebAssembly.compileStreaming(
+      this.reverbWasmModules.plate = await WebAssembly.compileStreaming(
+        new Response(await res.arrayBuffer(), {
+          headers: { 'Content-Type': 'application/wasm' },
+        })
+      );
+    }
+
+    if (this.options.hallWorkletUrl && this.options.hallWasmUrl) {
+      await this.ctx.audioWorklet.addModule(this.options.hallWorkletUrl);
+      const res = await fetch(this.options.hallWasmUrl);
+      if (!res.ok) throw new Error(`hall wasm fetch failed (${res.status})`);
+      this.reverbWasmModules.hall = await WebAssembly.compileStreaming(
         new Response(await res.arrayBuffer(), {
           headers: { 'Content-Type': 'application/wasm' },
         })
@@ -310,7 +333,7 @@ export class AudioHost {
       bus.input.disconnect();
       bus.gainNode.disconnect();
       if (bus.limiter) bus.limiter.disconnect();
-      if (bus.plate) bus.plate.disconnect();
+      if (bus.reverb) bus.reverb.disconnect();
       bus.analyser.disconnect();
     }
     this.buses.clear();
@@ -661,7 +684,8 @@ export class AudioHost {
       gainNode,
       limiter,
       limiterGrDb: 0,
-      plate: null,
+      reverb: null,
+      reverbKind: null,
       analyser,
       meterBuffer: new Float32Array(analyser.fftSize),
       gain,
@@ -695,7 +719,7 @@ export class AudioHost {
     bus.input.disconnect();
     bus.gainNode.disconnect();
     if (bus.limiter) bus.limiter.disconnect();
-    if (bus.plate) bus.plate.disconnect();
+    if (bus.reverb) bus.reverb.disconnect();
     bus.analyser.disconnect();
     this.buses.delete(busId);
   }
@@ -731,77 +755,87 @@ export class AudioHost {
   }
 
   // ────────────────────────────────────────────────────────────────────
-  // Per-bus Plate (user buses only)
+  // Per-bus Reverb slot (user buses only)
   // ────────────────────────────────────────────────────────────────────
 
-  /** True iff a bus has a Plate currently inserted. */
-  hasBusPlate(busId: string): boolean {
-    return this.buses.get(busId)?.plate != null;
+  /** Returns the kind of reverb currently on a bus, or null. */
+  getBusReverbKind(busId: string): ReverbKind | null {
+    return this.buses.get(busId)?.reverbKind ?? null;
   }
 
   /**
-   * Insert a Plate reverb on the given user bus. No-op if the bus is
-   * Master, the bus is unknown, the Plate WASM wasn't loaded at start(),
-   * or a Plate is already present.
+   * Insert (or swap to) a reverb of the given kind on a user bus. No-op
+   * if the bus is Master, unknown, or the requested DSP module wasn't
+   * loaded at start(). If a different reverb is already present it's
+   * removed first; calling with the same kind is a no-op.
    *
-   * Wiring: the existing analyser is unhooked from gainNode, the plate
-   * is spliced in between, and the analyser hangs off the plate so the
+   * Wiring: the existing analyser is unhooked from gainNode, the reverb
+   * is spliced in between, and the analyser hangs off the reverb so the
    * meter shows the wet output.
    */
-  addBusPlate(busId: string): void {
+  addBusReverb(busId: string, kind: ReverbKind): void {
     if (!this.ctx || busId === MASTER_BUS_ID) return;
     const bus = this.buses.get(busId);
-    if (!bus || bus.plate || !this.plateWasmModule) return;
+    if (!bus) return;
+    if (bus.reverbKind === kind) return;
+    if (bus.reverb) this.removeBusReverb(busId);
+    const module = this.reverbWasmModules[kind];
+    if (!module) return;
 
-    const plate = new AudioWorkletNode(this.ctx, 'aux-plate-processor', {
+    const processorName = kind === 'plate' ? 'aux-plate-processor' : 'aux-hall-processor';
+    const reverb = new AudioWorkletNode(this.ctx, processorName, {
       numberOfInputs: 1,
       numberOfOutputs: 1,
       outputChannelCount: [2],
-      processorOptions: { wasmModule: this.plateWasmModule },
+      processorOptions: { wasmModule: module },
     });
 
-    // Splice plate between gainNode and analyser. (User buses don't have
-    // a limiter, so gainNode is the only upstream node to disconnect.)
     try {
       bus.gainNode.disconnect(bus.analyser);
     } catch {
-      // Already broken — repair below.
+      // Already disconnected; repair below.
     }
-    bus.gainNode.connect(plate);
-    plate.connect(bus.analyser);
-    bus.plate = plate;
+    bus.gainNode.connect(reverb);
+    reverb.connect(bus.analyser);
+    bus.reverb = reverb;
+    bus.reverbKind = kind;
   }
 
-  /** Remove the Plate insert on a user bus and re-bridge gainNode → analyser. */
-  removeBusPlate(busId: string): void {
+  /** Remove the reverb on a user bus and re-bridge gainNode → analyser. */
+  removeBusReverb(busId: string): void {
     const bus = this.buses.get(busId);
-    if (!bus || !bus.plate) return;
+    if (!bus || !bus.reverb) return;
     try {
-      bus.gainNode.disconnect(bus.plate);
+      bus.gainNode.disconnect(bus.reverb);
     } catch {
       // Was never wired; nothing to undo.
     }
-    bus.plate.disconnect();
-    bus.plate = null;
+    bus.reverb.disconnect();
+    bus.reverb = null;
+    bus.reverbKind = null;
     bus.gainNode.connect(bus.analyser);
   }
 
-  setBusPlateParams(
+  /**
+   * Set the four shared reverb params (decay, damping, pre-delay ms, mix).
+   * Both Plate and Hall accept the same message shape.
+   */
+  setBusReverbParams(
     busId: string,
     decay: number,
     damping: number,
     preDelayMs: number,
     mix: number
   ): void {
-    const plate = this.buses.get(busId)?.plate;
-    if (!plate) return;
-    plate.port.postMessage({ type: 'set-params', decay, damping, preDelayMs, mix });
+    const reverb = this.buses.get(busId)?.reverb;
+    if (!reverb) return;
+    reverb.port.postMessage({ type: 'set-params', decay, damping, preDelayMs, mix });
   }
 
-  setBusPlateBypassed(busId: string, bypassed: boolean): void {
-    const plate = this.buses.get(busId)?.plate;
-    if (!plate) return;
-    plate.port.postMessage({ type: 'set-bypassed', bypassed });
+  setBusReverbBypassed(busId: string, bypassed: boolean): void {
+    const reverb = this.buses.get(busId)?.reverb;
+    if (!reverb) return;
+    reverb.port.postMessage({ type: 'set-bypassed', bypassed });
   }
 
   setBusGain(busId: string, value: number, rampSec = 0.01): void {

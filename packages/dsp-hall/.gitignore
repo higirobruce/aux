@@ -1,0 +1,1 @@
+# Wasm output is committed in wasm/ so JS-only devs don't need Rust to typecheck.
