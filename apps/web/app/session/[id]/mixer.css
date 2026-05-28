@@ -176,13 +176,10 @@
   flex: 1 1 auto;
   display: flex;
   gap: 0;
-  /* Bottom padding reserves space for the horizontal scrollbar so the
-     sticky scribble-strip name (.ch-name) doesn't render underneath it. */
-  padding: 10px 6px 18px;
+  padding: 10px 6px;
   overflow-x: auto;
   overflow-y: auto;
   background: linear-gradient(180deg, #1c2028 0%, #14171c 100%);
-  scrollbar-gutter: stable;
 }
 
 /* ─── Bus rail (Master + future user buses) ────────────────────────── */
@@ -209,10 +206,7 @@
 
 .bus-strip .ch-name {
   /* Bus strips keep the name at the top (not a scribble strip) — undo the
-     sticky / scribble-strip styling that the channel strip gets. */
-  position: relative;
-  bottom: auto;
-  z-index: auto;
+     channel-strip scribble-strip styling. */
   margin-top: 0;
   background: linear-gradient(180deg, #344058, #1c2638);
   color: #dce7f5;
@@ -693,15 +687,11 @@
 }
 
 .ch-name {
-  /* "Scribble strip" — last flex child of .ch-strip. With position: sticky
-     and bottom: 0, the name pins to the bottom of the .mixer-console
-     scrollport so the track is always identifiable, even when the
-     engineer has scrolled the console down to see the lower controls.
-     margin-top: auto pushes the name to the strip's natural bottom when
-     the strip's content is shorter than the strip box. */
-  position: sticky;
-  bottom: 0;
-  z-index: 2;
+  /* "Scribble strip" — last flex child of .ch-strip. Sits at the strip's
+     natural bottom (margin-top: auto pushes any free vertical space above
+     it). Not sticky: a previous sticky version layered over the output
+     selector mid-scroll, which hid it. Engineers scroll down to see the
+     fader / output / name cluster as one row. */
   flex: 0 0 auto;
   margin-top: auto;
   text-align: center;
