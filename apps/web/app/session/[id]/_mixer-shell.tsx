@@ -315,6 +315,26 @@ export function MixerShell({
     };
   }, []);
 
+  // Pre-decode stems on mount so the timeline can show waveforms without
+  // waiting for a Play press. The AudioContext starts in 'suspended' state —
+  // we don't need a user gesture to decode, only to actually play. Failures
+  // are silent: the worst case is the timeline keeps saying "loading…" until
+  // the user hits Play, which is what it did before this effect existed.
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      try {
+        await loadStems();
+      } catch {
+        // Surfaced through the normal play path; nothing to do here.
+      }
+      if (cancelled) return;
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
   // Debounced autosave. Every channel-state change schedules a PUT
   // /api/sessions/:id/mix after AUTOSAVE_DEBOUNCE_MS of idle. The effect body
   // reads channelStateRef.current at flush time — channelState only sits in

@@ -178,7 +178,7 @@
   gap: 0;
   padding: 10px 6px;
   overflow-x: auto;
-  overflow-y: hidden;
+  overflow-y: auto;
   background: linear-gradient(180deg, #1c2028 0%, #14171c 100%);
 }
 
@@ -683,17 +683,26 @@
 .ch-name {
   text-align: center;
   font-size: 10px;
-  letter-spacing: 0.12em;
+  letter-spacing: 0.06em;
   font-weight: 500;
   color: #dce7f5;
-  padding: 7px 4px;
+  padding: 6px 4px;
   background: linear-gradient(180deg, #2a3038, #14171c);
   border-bottom: 1px solid #0a0c10;
   text-transform: uppercase;
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.05);
-  white-space: nowrap;
+  /* Wrap to at most two lines and ellipsis the rest — stem names are often
+     longer than the 88 px strip width, single-line truncation lost too much
+     context. Mid-word break-all is fine here because most stem names use
+     underscores / hyphens, which CSS doesn't treat as wrap opportunities. */
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  line-clamp: 2;
+  line-height: 1.25;
   overflow: hidden;
-  text-overflow: ellipsis;
+  word-break: break-all;
+  min-height: calc(2 * 1.25em + 12px);
 }
 
 .ch-meta {
@@ -1585,7 +1594,9 @@
 }
 
 .stem-timeline-lanes {
-  max-height: 240px;
+  /* Show ~6 lanes (≈360 px) before scrolling kicks in. Capped at 40vh so
+     a tall stem list never crowds out the mixer console underneath. */
+  max-height: min(40vh, 360px);
   overflow-y: auto;
 }
 
