@@ -27,7 +27,7 @@ import {
 import Link from 'next/link';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { BusStrip } from './_bus-strip';
-import { ChannelStrip } from './_channel-strip';
+import { ChannelStrip, ChannelStripName } from './_channel-strip';
 import { StemDropZone } from './_stem-drop-zone';
 import { type StemPeaks, StemTimeline } from './_stem-timeline';
 import './mixer.css';
@@ -1117,51 +1117,77 @@ export function MixerShell({
         />
 
         <div className="mixer-body">
-          <div className="mixer-console">
-            {stems.length > 0 ? (
-              stems.map((stem) => {
-                const state = channelState[stem.id] ?? DEFAULT_CHANNEL;
-                return (
-                  <ChannelStrip
-                    key={stem.id}
-                    stem={stem}
-                    state={state}
-                    loaded={loadedIds.has(stem.id)}
-                    anySoloed={anySoloed}
-                    host={hostRef.current}
-                    active={transport === 'playing'}
-                    onVolume={(v) => setVolume(stem.id, v)}
-                    onPan={(p) => setPan(stem.id, p)}
-                    onMute={() => toggleMute(stem.id)}
-                    onSolo={() => toggleSolo(stem.id)}
-                    onEq={(band, db) => setEq(stem.id, band, db)}
-                    onComp={(field, value) => setComp(stem.id, field, value)}
-                    onCompType={(type) => setCompType(stem.id, type)}
-                    buses={busState}
-                    onOutput={(busId) => setChannelOutput(stem.id, busId)}
-                    onSend={(busId, level) => setChannelSend(stem.id, busId, level)}
-                    onRemoveSend={(busId) => removeChannelSend(stem.id, busId)}
-                    onTransient={(field, value) => setTransient(stem.id, field, value)}
-                    onTransientBypass={() => toggleTransientBypass(stem.id)}
-                    onDeEss={(field, value) => setDeEss(stem.id, field, value)}
-                    onDeEssBypass={() => toggleDeEssBypass(stem.id)}
-                    onImager={(width) => setImager(stem.id, width)}
-                    onImagerBypass={() => toggleImagerBypass(stem.id)}
-                  />
-                );
-              })
-            ) : (
-              <div className="mixer-empty">
-                <p>No stems in this session yet.</p>
-                <button
-                  type="button"
-                  className="mixer-empty-cta"
-                  onClick={() => setStemsOpen(true)}
-                >
-                  Add stems →
-                </button>
+          {/* Two-row layout: controls on top scroll vertically inside their
+              own container, while the names row below sits OUTSIDE the
+              vertical scroll so it stays planted. Both rows share the same
+              horizontal scrollbar via .mixer-console-h-scroll so they
+              always stay column-aligned. */}
+          <div className="mixer-console-area">
+            <div className="mixer-console-h-scroll">
+              <div className="mixer-console-stack">
+                <div className="mixer-console">
+                  {stems.length > 0 ? (
+                    stems.map((stem) => {
+                      const state = channelState[stem.id] ?? DEFAULT_CHANNEL;
+                      return (
+                        <ChannelStrip
+                          key={stem.id}
+                          stem={stem}
+                          state={state}
+                          loaded={loadedIds.has(stem.id)}
+                          anySoloed={anySoloed}
+                          host={hostRef.current}
+                          active={transport === 'playing'}
+                          onVolume={(v) => setVolume(stem.id, v)}
+                          onPan={(p) => setPan(stem.id, p)}
+                          onMute={() => toggleMute(stem.id)}
+                          onSolo={() => toggleSolo(stem.id)}
+                          onEq={(band, db) => setEq(stem.id, band, db)}
+                          onComp={(field, value) => setComp(stem.id, field, value)}
+                          onCompType={(type) => setCompType(stem.id, type)}
+                          buses={busState}
+                          onOutput={(busId) => setChannelOutput(stem.id, busId)}
+                          onSend={(busId, level) => setChannelSend(stem.id, busId, level)}
+                          onRemoveSend={(busId) => removeChannelSend(stem.id, busId)}
+                          onTransient={(field, value) => setTransient(stem.id, field, value)}
+                          onTransientBypass={() => toggleTransientBypass(stem.id)}
+                          onDeEss={(field, value) => setDeEss(stem.id, field, value)}
+                          onDeEssBypass={() => toggleDeEssBypass(stem.id)}
+                          onImager={(width) => setImager(stem.id, width)}
+                          onImagerBypass={() => toggleImagerBypass(stem.id)}
+                        />
+                      );
+                    })
+                  ) : (
+                    <div className="mixer-empty">
+                      <p>No stems in this session yet.</p>
+                      <button
+                        type="button"
+                        className="mixer-empty-cta"
+                        onClick={() => setStemsOpen(true)}
+                      >
+                        Add stems →
+                      </button>
+                    </div>
+                  )}
+                </div>
+                {stems.length > 0 && (
+                  <div className="mixer-console-names">
+                    {stems.map((stem) => {
+                      const state = channelState[stem.id] ?? DEFAULT_CHANNEL;
+                      const effectivelyMuted = state.muted || (anySoloed && !state.soloed);
+                      return (
+                        <ChannelStripName
+                          key={stem.id}
+                          stem={stem}
+                          effectivelyMuted={effectivelyMuted}
+                        />
+                      );
+                    })}
+                  </div>
+                )}
               </div>
-            )}
+            </div>
           </div>
           {/* Buses on the right of the console — separated by a thin divider.
               User-created buses live to the left of Master so Master always

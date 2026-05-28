@@ -440,13 +440,28 @@ export function ChannelStrip({
           ))}
         </select>
       </div>
+      {/* The track's scribble-strip name is rendered by MixerShell into a
+          sibling row below .mixer-console — see <ChannelStripName> — so it
+          stays always-visible regardless of how the engineer has scrolled
+          the controls vertically. */}
+    </div>
+  );
+}
 
-      {/* Scribble-strip name — last flex child with position: sticky so it
-          stays pinned to the bottom of the mixer console as the engineer
-          scrolls vertically through all strips together. */}
-      <div className="ch-name" title={stem.name}>
-        {stem.name}
-      </div>
+/**
+ * Scribble-strip name cell — rendered in the sibling row below the mixer
+ * console. Each cell aligns 1:1 with a channel strip column above.
+ */
+export function ChannelStripName({
+  stem,
+  effectivelyMuted,
+}: {
+  stem: Stem;
+  effectivelyMuted: boolean;
+}) {
+  return (
+    <div className={`ch-name ${effectivelyMuted ? 'muted' : ''}`} title={stem.name}>
+      {stem.name}
     </div>
   );
 }
