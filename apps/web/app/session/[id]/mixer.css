@@ -1522,3 +1522,242 @@
   outline: none;
   box-shadow: 0 0 0 1px var(--azure, #2e5fa8);
 }
+
+/* ─── Stem timeline (read-only) ────────────────────────────────────── */
+
+.stem-timeline {
+  position: relative;
+  flex: 0 0 auto;
+  background: linear-gradient(180deg, #14171c 0%, #0d1015 100%);
+  border-top: 1px solid #000;
+  border-bottom: 1px solid #000;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04);
+  overflow: hidden;
+}
+
+.stem-timeline.empty {
+  padding: 14px;
+}
+
+.stem-timeline-empty {
+  color: #6b7280;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  text-align: center;
+  letter-spacing: 0.08em;
+}
+
+.stem-timeline-ruler {
+  display: flex;
+  height: 18px;
+  background: #0a0c10;
+  border-bottom: 1px solid #000;
+}
+
+.stem-timeline-ruler-spacer {
+  flex: 0 0 auto;
+  border-right: 1px solid rgba(255, 255, 255, 0.04);
+}
+
+.stem-timeline-ruler-marks {
+  position: relative;
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.stem-timeline-ruler-tick {
+  position: absolute;
+  top: 0;
+  height: 100%;
+  width: 1px;
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.stem-timeline-ruler-label {
+  position: absolute;
+  top: 2px;
+  left: 4px;
+  font-family: var(--font-mono);
+  font-size: 9px;
+  letter-spacing: 0.06em;
+  color: #6b7280;
+  white-space: nowrap;
+}
+
+.stem-timeline-lanes {
+  max-height: 240px;
+  overflow-y: auto;
+}
+
+.stem-lane {
+  display: flex;
+  align-items: stretch;
+  border-bottom: 1px solid rgba(0, 0, 0, 0.6);
+  background: rgba(0, 0, 0, 0.1);
+}
+
+.stem-lane:last-child {
+  border-bottom: 0;
+}
+
+.stem-lane.muted .stem-lane-wave {
+  opacity: 0.35;
+}
+
+.stem-lane-name {
+  flex: 0 0 auto;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  padding: 6px 8px 6px 10px;
+  background: linear-gradient(180deg, #1a1e25, #14171c);
+  border-right: 1px solid rgba(255, 255, 255, 0.04);
+  box-shadow: inset -1px 0 0 rgba(0, 0, 0, 0.4);
+  min-width: 0;
+}
+
+.stem-lane-title {
+  font-size: 10px;
+  color: #dce7f5;
+  letter-spacing: 0.04em;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.stem-lane-btns {
+  display: flex;
+  gap: 4px;
+  margin-top: 6px;
+}
+
+.stem-lane-btn {
+  width: 22px;
+  height: 16px;
+  background: linear-gradient(180deg, #2a3038, #14171c);
+  border: 1px solid #0a0c10;
+  border-radius: 2px;
+  color: #6b7280;
+  font-family: var(--font-mono);
+  font-size: 9px;
+  letter-spacing: 0.06em;
+  cursor: pointer;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.06);
+  transition: color 100ms ease, background 100ms ease;
+}
+
+.stem-lane-btn.solo.on {
+  background: linear-gradient(180deg, #6a5a26, #382e10);
+  color: #f6e9b8;
+  border-color: rgba(228, 203, 94, 0.4);
+}
+
+.stem-lane-btn.mute.on {
+  background: linear-gradient(180deg, #6a2828, #381010);
+  color: #f5c5c5;
+  border-color: rgba(229, 92, 76, 0.4);
+}
+
+.stem-lane-wave {
+  flex: 1 1 auto;
+  min-width: 0;
+  position: relative;
+  background: #0a0c10;
+}
+
+.stem-lane-wave-canvas-wrap {
+  position: absolute;
+  inset: 0;
+}
+
+.stem-lane-wave-canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+.stem-lane-loading {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-family: var(--font-mono);
+  font-size: 9px;
+  letter-spacing: 0.08em;
+  color: #4a525e;
+}
+
+/* Track: invisible click-receiving overlay across all lanes. The playhead
+   div sits on top of this (z-index 2) so the click target stays underneath. */
+.stem-timeline-track {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  cursor: crosshair;
+  z-index: 1;
+}
+
+.stem-timeline-track:focus-visible {
+  outline: none;
+  box-shadow: inset 0 0 0 1px rgba(46, 95, 168, 0.4);
+}
+
+.stem-timeline-playhead {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 1px;
+  background: #e55c4c;
+  box-shadow: 0 0 6px rgba(229, 92, 76, 0.55);
+  pointer-events: none;
+  z-index: 2;
+}
+
+.stem-timeline-playhead.playing::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: -3px;
+  width: 7px;
+  height: 7px;
+  background: #e55c4c;
+  border-radius: 50%;
+  box-shadow: 0 0 6px rgba(229, 92, 76, 0.75);
+}
+
+/* Collapsed state — show only a thin strip with a "show timeline" affordance. */
+.mixer.timeline-closed .stem-timeline {
+  display: none;
+}
+
+.transport-timeline-btn {
+  min-height: 28px;
+  padding: 0 12px;
+  background: linear-gradient(180deg, #3a4048, #1c2028);
+  border: 1px solid #000;
+  border-radius: 3px;
+  color: #dce7f5;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.18), inset 0 -1px 0 rgba(0, 0, 0, 0.4), 0 1px 2px
+    rgba(0, 0, 0, 0.4);
+  transition: background 100ms ease;
+}
+
+.transport-timeline-btn:hover {
+  background: linear-gradient(180deg, #4a525e, #242830);
+}
+
+.transport-timeline-btn.on {
+  background: linear-gradient(180deg, #2e5fa8, #14355f);
+  color: #dce7f5;
+  border-color: #000;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.18), 0 0 6px rgba(46, 95, 168, 0.35);
+}

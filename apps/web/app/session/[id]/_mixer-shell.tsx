@@ -29,6 +29,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { BusStrip } from './_bus-strip';
 import { ChannelStrip } from './_channel-strip';
 import { StemDropZone } from './_stem-drop-zone';
+import { type StemPeaks, StemTimeline } from './_stem-timeline';
 import './mixer.css';
 
 interface Props {
@@ -273,6 +274,8 @@ export function MixerShell({
   const [masterChain, setMasterChain] = useState<MasterChain>(() => hydrated.masterChain);
   const [loadedIds, setLoadedIds] = useState<Set<string>>(new Set());
   const [stemsOpen, setStemsOpen] = useState(initialStems.length === 0);
+  const [timelineOpen, setTimelineOpen] = useState(true);
+  const [peaks, setPeaks] = useState<Record<string, StemPeaks | undefined>>({});
   const [saveStatus, setSaveStatus] = useState<SaveStatus>('idle');
   // First render is hydration; suppress that as an autosave trigger.
   const hasMounted = useRef(false);
@@ -491,6 +494,25 @@ export function MixerShell({
     setLoadedIds(new Set(loadable.map((s) => s.id)));
     setDuration(host.durationSeconds);
 
+    // Build / refresh peaks for the read-only timeline. Each stem is at most
+    // a few thousand min/max pairs — cheap to compute (linear scan over the
+    // already-decoded AudioBuffer) and we only redo it for stems that don't
+    // already have peaks (or whose buffer was just swapped).
+    setPeaks((prev) => {
+      const next: Record<string, StemPeaks | undefined> = { ...prev };
+      for (const stem of loadable) {
+        if (next[stem.id]) continue;
+        const p = host.getStemPeaks(stem.id, 2000);
+        if (p) next[stem.id] = p;
+      }
+      // Drop peaks for stems that no longer exist.
+      const live = new Set(loadable.map((s) => s.id));
+      for (const id of Object.keys(next)) {
+        if (!live.has(id)) delete next[id];
+      }
+      return next;
+    });
+
     setChannelState((prev) => {
       const next = { ...prev };
       for (const stem of loadable) {
@@ -583,6 +605,23 @@ export function MixerShell({
       setError(err instanceof Error ? err.message : 'playback failed');
     }
   }
+
+  // Seek from the stem timeline. Always clamps to the loaded duration; if we
+  // were playing, restarts every source at the new offset (playAll() also
+  // handles the implicit stopAll). Otherwise just updates state — the next
+  // play will start from there.
+  const handleSeek = useCallback(
+    (seconds: number) => {
+      const target = Math.max(0, Math.min(seconds, duration));
+      setPosition(target);
+      const host = hostRef.current;
+      if (host?.isPlaying) {
+        host.playAll(target);
+        playStartedAtRef.current = host.currentTime - target;
+      }
+    },
+    [duration]
+  );
 
   const setVolume = useCallback((stemId: string, volume: number) => {
     hostRef.current?.setChannelVolume(stemId, volume);
@@ -926,6 +965,12 @@ export function MixerShell({
       next.delete(stemId);
       return next;
     });
+    setPeaks((prev) => {
+      if (!(stemId in prev)) return prev;
+      const next = { ...prev };
+      delete next[stemId];
+      return next;
+    });
   }, []);
 
   /**
@@ -946,6 +991,14 @@ export function MixerShell({
         next.delete(stem.id);
         return next;
       });
+      // Drop the swapped stem's peaks — they'll be re-derived from the new
+      // buffer on the next loadStems().
+      setPeaks((prev) => {
+        if (!(stem.id in prev)) return prev;
+        const next = { ...prev };
+        delete next[stem.id];
+        return next;
+      });
       if (transport === 'playing') handleStop();
     },
     [transport, handleStop]
@@ -958,7 +1011,7 @@ export function MixerShell({
 
   return (
     <>
-      <div className="mixer mixer-fullscreen">
+      <div className={`mixer mixer-fullscreen ${timelineOpen ? '' : 'timeline-closed'}`}>
         <div className="mixer-transport">
           <Link
             href="/"
@@ -1010,6 +1063,17 @@ export function MixerShell({
 
           <button
             type="button"
+            className={`transport-timeline-btn ${timelineOpen ? 'on' : ''}`}
+            onClick={() => setTimelineOpen((v) => !v)}
+            aria-pressed={timelineOpen}
+            aria-label={timelineOpen ? 'Hide timeline' : 'Show timeline'}
+            title={timelineOpen ? 'Hide timeline' : 'Show timeline'}
+          >
+            Timeline
+          </button>
+
+          <button
+            type="button"
             className="transport-stems-btn"
             onClick={() => setStemsOpen(true)}
             aria-label="Open stems panel"
@@ -1018,6 +1082,19 @@ export function MixerShell({
             <span className="count">{stems.length}</span>
           </button>
         </div>
+
+        <StemTimeline
+          stems={stems}
+          peaks={peaks}
+          laneState={channelState}
+          anySoloed={anySoloed}
+          duration={duration}
+          position={position}
+          playing={transport === 'playing'}
+          onMute={toggleMute}
+          onSolo={toggleSolo}
+          onSeek={handleSeek}
+        />
 
         <div className="mixer-body">
           <div className="mixer-console">

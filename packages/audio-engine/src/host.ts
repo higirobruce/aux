@@ -577,6 +577,100 @@ export class AudioHost {
     return this.channels.get(stemId)?.buffer != null;
   }
 
+  /** Duration in seconds of a stem's decoded buffer (0 if not loaded). */
+  getStemDuration(stemId: string): number {
+    return this.channels.get(stemId)?.buffer?.duration ?? 0;
+  }
+
+  /**
+   * Downsampled waveform data for the read-only stem timeline.
+   *
+   * Reads the decoded AudioBuffer and computes `count` (min, max) pairs by
+   * scanning the buffer in equal-width bins. For stereo buffers we fold the
+   * channels by taking the per-bin extremes across both, which is what a
+   * standard DAW waveform shows.
+   *
+   * Returns null when the stem isn't loaded yet. The result is independent
+   * of the audio graph state — no playback or worklet involvement — so
+   * callers can request it as soon as `loadStem()` resolves.
+   *
+   * `inSample` / `outSample` mark the first and last sample whose absolute
+   * value exceeds `silenceThreshold`. Useful for showing where a stem has
+   * audible content vs. silent intro/outro padding.
+   */
+  getStemPeaks(
+    stemId: string,
+    count: number,
+    silenceThreshold = 0.001
+  ): {
+    peaks: Float32Array;
+    inSample: number;
+    outSample: number;
+    sampleRate: number;
+    totalSamples: number;
+  } | null {
+    const buffer = this.channels.get(stemId)?.buffer;
+    if (!buffer || count <= 0) return null;
+    const totalLen = buffer.length;
+    const channels = buffer.numberOfChannels;
+
+    // Stride channel data into a single linked view per channel so we can
+    // walk both in lock-step. Web Audio's getChannelData returns the raw
+    // Float32Array — zero copy.
+    const channelData: Float32Array[] = [];
+    for (let c = 0; c < channels; c++) channelData.push(buffer.getChannelData(c));
+
+    const bins = Math.max(1, Math.min(count, totalLen));
+    const peaks = new Float32Array(bins * 2);
+    const samplesPerBin = totalLen / bins;
+    for (let b = 0; b < bins; b++) {
+      const start = Math.floor(b * samplesPerBin);
+      const end = b === bins - 1 ? totalLen : Math.floor((b + 1) * samplesPerBin);
+      let min = Number.POSITIVE_INFINITY;
+      let max = Number.NEGATIVE_INFINITY;
+      for (let c = 0; c < channels; c++) {
+        const ch = channelData[c];
+        if (!ch) continue;
+        for (let i = start; i < end; i++) {
+          const v = ch[i] ?? 0;
+          if (v < min) min = v;
+          if (v > max) max = v;
+        }
+      }
+      if (!Number.isFinite(min) || !Number.isFinite(max)) {
+        min = 0;
+        max = 0;
+      }
+      peaks[b * 2] = min;
+      peaks[b * 2 + 1] = max;
+    }
+
+    // Silence-trim: walk the first channel from each end. Stops at the first
+    // sample exceeding the threshold. Cheap (linear scan) and accurate enough
+    // for "where does the content start".
+    let inSample = 0;
+    let outSample = totalLen - 1;
+    const probe = channelData[0];
+    if (probe) {
+      while (inSample < totalLen && Math.abs(probe[inSample] ?? 0) <= silenceThreshold) inSample++;
+      while (outSample > inSample && Math.abs(probe[outSample] ?? 0) <= silenceThreshold) {
+        outSample--;
+      }
+      if (inSample >= totalLen) {
+        inSample = 0;
+        outSample = totalLen - 1;
+      }
+    }
+
+    return {
+      peaks,
+      inSample,
+      outSample,
+      sampleRate: buffer.sampleRate,
+      totalSamples: totalLen,
+    };
+  }
+
   removeChannel(stemId: string): void {
     const channel = this.channels.get(stemId);
     if (!channel) return;
