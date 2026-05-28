@@ -9,7 +9,15 @@ import { type NextRequest, NextResponse } from 'next/server';
  * is just to avoid rendering protected pages for users with no cookie.
  */
 const AUTH_COOKIE = 'better-auth.session_token';
-const PUBLIC_PATHS = ['/sign-in'];
+const PUBLIC_PATHS = [
+  '/sign-in',
+  '/aux-worklet.js',
+  '/eq8-worklet.js',
+  '/eq8.js',
+  '/eq8_bg.wasm',
+  '/comp-clean-worklet.js',
+  '/comp_clean_bg.wasm',
+];
 
 export function middleware(req: NextRequest) {
   const { pathname } = req.nextUrl;

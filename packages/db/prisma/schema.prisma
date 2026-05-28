@@ -45,6 +45,7 @@ model Session {
   name          String
   storageMode   StorageMode  @map("storage_mode")
   byoBucket     Json?        @map("byo_bucket")            // v2 — encrypted creds
+  mixState      Json?        @map("mix_state")             // live channel state — see @aux/session-doc MixStateSchema
   lastOpenedAt  DateTime?    @map("last_opened_at")
   archivedAt    DateTime?    @map("archived_at")
   createdAt     DateTime     @default(now()) @map("created_at")
