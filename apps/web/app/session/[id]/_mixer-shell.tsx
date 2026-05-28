@@ -125,6 +125,8 @@ export function MixerShell({
           headers: { 'Content-Type': 'application/json' },
           credentials: 'include',
           signal: controller.signal,
+          // keepalive so the request survives if the tab unloads mid-flight.
+          keepalive: true,
           body: JSON.stringify({
             version: MIX_STATE_VERSION,
             channels: channelStateRef.current,
@@ -145,6 +147,36 @@ export function MixerShell({
       }
     };
   }, [channelState, sessionId]);
+
+  // Flush any pending debounced save before the page unloads. `pagehide` is
+  // more reliable than `beforeunload` (especially on Safari / mobile). The
+  // keepalive flag tells the browser to let the request complete after the
+  // page is gone. Already-in-flight saves above also use keepalive so they
+  // survive on their own — this handler only covers the queued-but-not-yet-
+  // fired case.
+  useEffect(() => {
+    const flush = () => {
+      if (saveTimer.current === null) return;
+      clearTimeout(saveTimer.current);
+      saveTimer.current = null;
+      try {
+        void fetch(`/api/sessions/${sessionId}/mix`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          credentials: 'include',
+          keepalive: true,
+          body: JSON.stringify({
+            version: MIX_STATE_VERSION,
+            channels: channelStateRef.current,
+          }),
+        });
+      } catch {
+        // Can't surface errors from an unload handler.
+      }
+    };
+    window.addEventListener('pagehide', flush);
+    return () => window.removeEventListener('pagehide', flush);
+  }, [sessionId]);
 
   // Position ticker.
   useEffect(() => {
