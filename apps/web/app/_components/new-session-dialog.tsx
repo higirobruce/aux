@@ -1,8 +1,9 @@
 'use client';
 
+import { hasOpfs } from '@/lib/stem-store';
 import { Button, Input, Label } from '@aux/ui';
 import { useRouter } from 'next/navigation';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 
 export function NewSessionDialog() {
   const router = useRouter();
@@ -11,6 +12,12 @@ export function NewSessionDialog() {
   const [storageMode, setStorageMode] = useState<'cloud' | 'local'>('cloud');
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // OPFS detection is client-only; defer the check until after mount so
+  // the SSR pass + first hydration agree.
+  const [localAvailable, setLocalAvailable] = useState(false);
+  useEffect(() => {
+    setLocalAvailable(hasOpfs());
+  }, []);
 
   async function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
@@ -97,20 +104,26 @@ export function NewSessionDialog() {
                 </span>
               </span>
             </label>
-            <label className="flex items-start gap-3 p-3 border border-line rounded-md cursor-pointer hover:border-ink-3 opacity-60">
+            <label
+              className={`flex items-start gap-3 p-3 border border-line rounded-md cursor-pointer hover:border-ink-3 ${
+                localAvailable ? '' : 'opacity-60'
+              }`}
+            >
               <input
                 type="radio"
                 name="storage"
                 value="local"
                 checked={storageMode === 'local'}
                 onChange={() => setStorageMode('local')}
-                disabled={true}
+                disabled={submitting || !localAvailable}
                 className="mt-1"
               />
               <span className="text-sm">
-                <strong className="block">Local (coming)</strong>
+                <strong className="block">Local{localAvailable ? '' : ' (not available)'}</strong>
                 <span className="text-ink-3">
-                  Stems on this device via File System Access — v0.2.
+                  {localAvailable
+                    ? 'Stems live in this browser only (OPFS). No sharing; no cloud copy.'
+                    : 'Needs a browser with OPFS — Chrome 86+, Safari 15+, Firefox 111+.'}
                 </span>
               </span>
             </label>

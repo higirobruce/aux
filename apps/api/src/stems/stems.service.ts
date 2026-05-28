@@ -3,6 +3,11 @@ import { Injectable, NotFoundException } from '@nestjs/common';
 import { SessionsService } from '../sessions/sessions.service.js';
 import { StorageService } from '../storage/storage.service.js';
 
+/** Stems stored client-side via OPFS carry this prefix on s3_key. The server
+ *  treats such keys as opaque markers — no signing, no S3 calls. */
+const OPFS_KEY_PREFIX = 'opfs:';
+const isLocalKey = (k: string | null | undefined) => !!k && k.startsWith(OPFS_KEY_PREFIX);
+
 export interface SignUploadInput {
   userId: string;
   sessionId: string;
@@ -76,7 +81,11 @@ export class StemsService {
     });
   }
 
-  /** List + a 1-hour signed download URL per stem, for browser playback. */
+  /**
+   * List + a 1-hour signed download URL per stem, for browser playback.
+   * Local-mode stems (s3Key prefixed `opfs:`) return downloadUrl: null —
+   * the client reads them from OPFS and never goes through R2.
+   */
   async listForSessionWithUrls(userId: string, sessionId: string) {
     await this.sessions.assertOwnership(userId, sessionId);
     const stems = await this.db.stem.findMany({
@@ -86,7 +95,10 @@ export class StemsService {
     return Promise.all(
       stems.map(async (stem) => ({
         ...stem,
-        downloadUrl: stem.s3Key ? await this.storage.signGetUrl(stem.s3Key, 3600) : null,
+        downloadUrl:
+          stem.s3Key && !isLocalKey(stem.s3Key)
+            ? await this.storage.signGetUrl(stem.s3Key, 3600)
+            : null,
       }))
     );
   }
@@ -117,8 +129,9 @@ export class StemsService {
       },
     });
 
-    if (oldS3Key && oldS3Key !== input.s3Key) {
-      // Best-effort cleanup — don't fail the swap if storage delete trips.
+    if (oldS3Key && oldS3Key !== input.s3Key && !isLocalKey(oldS3Key)) {
+      // Cloud only — for opfs:* keys the audio lives in the client's browser
+      // and the client handles its own cleanup.
       this.storage.deleteObject(oldS3Key).catch(() => {});
     }
     return updated;
@@ -130,7 +143,8 @@ export class StemsService {
       where: { id: stemId, sessionId },
     });
     if (!stem) throw new NotFoundException('Stem not found');
-    if (stem.s3Key) {
+    if (stem.s3Key && !isLocalKey(stem.s3Key)) {
+      // Cloud only — see swapSource for the local-mode rationale.
       await this.storage.deleteObject(stem.s3Key);
     }
     await this.db.stem.delete({ where: { id: stemId } });

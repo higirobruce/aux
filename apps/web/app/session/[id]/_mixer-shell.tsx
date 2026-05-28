@@ -1,5 +1,6 @@
 'use client';
 
+import { isLocalKey, resolveStemStore } from '@/lib/stem-store';
 import type { Stem, StemWithUrl } from '@/lib/types';
 import { AudioHost, Eq8BandType } from '@aux/audio-engine';
 import {
@@ -18,7 +19,7 @@ import './mixer.css';
 interface Props {
   sessionId: string;
   sessionName: string;
-  storageMode: string;
+  storageMode: 'cloud' | 'local';
   initialStems: Stem[];
   initialMixState: unknown;
 }
@@ -290,25 +291,40 @@ export function MixerShell({
     const fetched = (await res.json()) as StemWithUrl[];
 
     const host = await ensureHost();
-    const downloadable = fetched.filter((s) => s.downloadUrl);
+    const localStore = storageMode === 'local' ? resolveStemStore('local') : null;
+
+    // A stem is "loadable" if we can reach its audio from this browser:
+    //   - cloud: any stem with a downloadUrl
+    //   - local: any stem whose s3Key is an opfs:* key (we'll read OPFS)
+    const loadable = fetched.filter((s) =>
+      storageMode === 'local' ? isLocalKey(s.s3Key) : !!s.downloadUrl
+    );
 
     await Promise.all(
-      downloadable.map(async (stem) => {
-        if (host.isLoaded(stem.id) || !stem.downloadUrl) return;
-        const audioRes = await fetch(stem.downloadUrl);
-        if (!audioRes.ok) throw new Error(`fetch ${stem.name} failed`);
-        const audioData = await audioRes.arrayBuffer();
+      loadable.map(async (stem) => {
+        if (host.isLoaded(stem.id)) return;
+        let audioData: ArrayBuffer;
+        if (localStore && isLocalKey(stem.s3Key)) {
+          const file = await localStore.getStem(stem.s3Key as string);
+          audioData = await file.arrayBuffer();
+        } else if (stem.downloadUrl) {
+          const audioRes = await fetch(stem.downloadUrl);
+          if (!audioRes.ok) throw new Error(`fetch ${stem.name} failed`);
+          audioData = await audioRes.arrayBuffer();
+        } else {
+          return; // not loadable
+        }
         await host.loadStem(stem.id, audioData);
       })
     );
 
     setStems(fetched);
-    setLoadedIds(new Set(downloadable.map((s) => s.id)));
+    setLoadedIds(new Set(loadable.map((s) => s.id)));
     setDuration(host.durationSeconds);
 
     setChannelState((prev) => {
       const next = { ...prev };
-      for (const stem of downloadable) {
+      for (const stem of loadable) {
         if (!next[stem.id]) next[stem.id] = { ...DEFAULT_CHANNEL };
       }
       return next;
@@ -318,7 +334,7 @@ export function MixerShell({
     // this, the host's GainNode + StereoPannerNode start at defaults even when
     // we just restored a mix from autosave.
     const latest = channelStateRef.current;
-    for (const stem of downloadable) {
+    for (const stem of loadable) {
       const ch = latest[stem.id];
       if (!ch) continue;
       host.setChannelVolume(stem.id, ch.volume, 0);
@@ -594,7 +610,11 @@ export function MixerShell({
           </button>
         </div>
         <div className="stems-drawer-body">
-          <StemDropZone sessionId={sessionId} initialStems={initialStems} />
+          <StemDropZone
+            sessionId={sessionId}
+            storageMode={storageMode}
+            initialStems={initialStems}
+          />
         </div>
       </aside>
 

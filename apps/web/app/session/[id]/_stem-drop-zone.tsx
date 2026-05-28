@@ -2,6 +2,7 @@
 
 import { extractMetadata } from '@/lib/audio-metadata';
 import { type FileMetadata, MATCH_UNCERTAIN, matchStems } from '@/lib/stem-match';
+import { resolveStemStore } from '@/lib/stem-store';
 import type { Stem } from '@/lib/types';
 import { Button } from '@aux/ui';
 import { useRouter } from 'next/navigation';
@@ -10,6 +11,7 @@ import { StemSwapDialog, type SwapDecision } from './_stem-swap-dialog';
 
 interface Props {
   sessionId: string;
+  storageMode: 'cloud' | 'local';
   initialStems: Stem[];
 }
 
@@ -54,7 +56,7 @@ function formatDb(db: number): string {
   return `${sign}${Math.abs(db).toFixed(1)} dB`;
 }
 
-export function StemDropZone({ sessionId, initialStems }: Props) {
+export function StemDropZone({ sessionId, storageMode, initialStems }: Props) {
   const router = useRouter();
   const [stems, setStems] = useState<Stem[]>(initialStems);
   const [uploads, setUploads] = useState<Record<string, UploadState>>({});
@@ -66,6 +68,9 @@ export function StemDropZone({ sessionId, initialStems }: Props) {
   } | null>(null);
 
   type Metadata = Awaited<ReturnType<typeof extractMetadata>>;
+
+  /** Stem store for the session's storageMode. Null for cloud (uses fetch). */
+  const stemStore = storageMode === 'local' ? resolveStemStore('local') : null;
 
   /**
    * Upload a file and either register it as a new stem (no target) or
@@ -86,28 +91,36 @@ export function StemDropZone({ sessionId, initialStems }: Props) {
     try {
       setStatus('uploading');
 
-      const signRes = await fetch('/api/stems/sign', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        credentials: 'include',
-        body: JSON.stringify({
-          sessionId,
-          filename: file.name,
-          contentType: file.type || 'application/octet-stream',
-        }),
-      });
-      if (!signRes.ok) throw new Error(`sign failed (${signRes.status})`);
-      const { uploadUrl, key: s3Key } = (await signRes.json()) as {
-        uploadUrl: string;
-        key: string;
-      };
+      let s3Key: string;
+      if (stemStore) {
+        // Local: write into OPFS, no network round-trip for the audio.
+        s3Key = await stemStore.putStem(sessionId, file);
+      } else {
+        // Cloud: sign → PUT directly to R2/MinIO.
+        const signRes = await fetch('/api/stems/sign', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          credentials: 'include',
+          body: JSON.stringify({
+            sessionId,
+            filename: file.name,
+            contentType: file.type || 'application/octet-stream',
+          }),
+        });
+        if (!signRes.ok) throw new Error(`sign failed (${signRes.status})`);
+        const { uploadUrl, key } = (await signRes.json()) as {
+          uploadUrl: string;
+          key: string;
+        };
+        s3Key = key;
 
-      const putRes = await fetch(uploadUrl, {
-        method: 'PUT',
-        headers: { 'Content-Type': file.type || 'application/octet-stream' },
-        body: file,
-      });
-      if (!putRes.ok) throw new Error(`upload failed (${putRes.status})`);
+        const putRes = await fetch(uploadUrl, {
+          method: 'PUT',
+          headers: { 'Content-Type': file.type || 'application/octet-stream' },
+          body: file,
+        });
+        if (!putRes.ok) throw new Error(`upload failed (${putRes.status})`);
+      }
 
       const audioBody = {
         s3Key,
@@ -121,6 +134,12 @@ export function StemDropZone({ sessionId, initialStems }: Props) {
       if (targetStemId) {
         // Swap: replace the source on the existing stem. Name + id stay.
         setStatus('swapping');
+        // For local sessions we need the previous OPFS key so we can clean it
+        // up — the server can't see OPFS. Snapshot it before the swap PUT
+        // overwrites the row.
+        const previousKey = stemStore
+          ? (stems.find((s) => s.id === targetStemId)?.s3Key ?? null)
+          : null;
         const swapRes = await fetch(
           `/api/sessions/${sessionId}/stems/${targetStemId}/swap-source`,
           {
@@ -135,6 +154,9 @@ export function StemDropZone({ sessionId, initialStems }: Props) {
           throw new Error(data?.message ?? `swap failed (${swapRes.status})`);
         }
         const updated: Stem = await swapRes.json();
+        if (stemStore && previousKey) {
+          await stemStore.deleteStem(previousKey).catch(() => {});
+        }
         setStems((prev) => prev.map((s) => (s.id === updated.id ? updated : s)));
         window.dispatchEvent(new CustomEvent<Stem>('aux:stem-swapped', { detail: updated }));
         setStatus('done');
@@ -262,11 +284,15 @@ export function StemDropZone({ sessionId, initialStems }: Props) {
 
   async function handleDelete(stemId: string) {
     if (!confirm('Remove this stem?')) return;
+    // For local sessions the API can't reach OPFS, so grab the key before
+    // the DELETE clears the row and clean it up after the API acknowledges.
+    const localKey = stemStore ? (stems.find((s) => s.id === stemId)?.s3Key ?? null) : null;
     const res = await fetch(`/api/sessions/${sessionId}/stems/${stemId}`, {
       method: 'DELETE',
       credentials: 'include',
     });
     if (res.ok) {
+      if (stemStore && localKey) await stemStore.deleteStem(localKey).catch(() => {});
       setStems((prev) => prev.filter((s) => s.id !== stemId));
       window.dispatchEvent(new CustomEvent<string>('aux:stem-removed', { detail: stemId }));
     }
