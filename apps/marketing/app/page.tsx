@@ -18,7 +18,7 @@ export default function LandingPage() {
       </p>
       <div className="flex flex-wrap gap-3">
         <Link
-          href="http://localhost:3000"
+          href="http://localhost:3100"
           className="inline-flex items-center px-5 py-2.5 text-sm font-medium bg-ink text-paper rounded-md hover:bg-ink-2 transition-colors"
         >
           Open the mixer

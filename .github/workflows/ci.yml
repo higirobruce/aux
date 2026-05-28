@@ -33,6 +33,13 @@ jobs:
       - name: Install
         run: pnpm install --frozen-lockfile
 
+      - name: Generate Prisma client
+        run: pnpm --filter @aux/db generate
+        env:
+          # Prisma 6 doesn't need a real URL for `generate`, but some checks
+          # still expect the env var to exist. CI placeholder only.
+          DATABASE_URL: postgres://ci:ci@localhost:5432/aux
+
       - name: Lint (Biome)
         run: pnpm lint
 

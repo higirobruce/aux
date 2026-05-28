@@ -38,8 +38,8 @@ pnpm install
 pnpm dev
 
 # Run a single app.
-pnpm --filter @aux/web dev          # mixer at http://localhost:3000
-pnpm --filter @aux/marketing dev    # landing at http://localhost:3001
+pnpm --filter @aux/web dev          # mixer at http://localhost:3100
+pnpm --filter @aux/marketing dev    # landing at http://localhost:3101
 pnpm --filter @aux/api dev          # api at http://localhost:4000
 ```
 
