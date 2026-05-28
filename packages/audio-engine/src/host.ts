@@ -107,6 +107,48 @@ export interface AudioHostOptions {
 /** Which reverb DSP fills the bus's single reverb slot. */
 export type ReverbKind = 'plate' | 'hall';
 
+/**
+ * Reference Room — a small set of monitoring presets that filter the
+ * post-master signal to simulate common playback systems. Engineers flip
+ * between them mid-mix to spot-check translation ("does this still work
+ * on AirPods?"). Implemented as a cascade of native BiquadFilterNodes
+ * inserted between the master fader and the final worklet output, so
+ * the meter / limiter still see the true mix.
+ */
+export type ReferenceRoomPreset = 'off' | 'laptop' | 'earbuds' | 'car';
+
+interface BiquadSpec {
+  type: BiquadFilterType;
+  freq: number;
+  gainDb?: number;
+  q?: number;
+}
+
+const REFERENCE_ROOM_FILTERS: Record<ReferenceRoomPreset, BiquadSpec[]> = {
+  off: [],
+  // Laptop speakers: brutal high-pass (no bass extension), midrange bump
+  // (tinny / boxed sound), rolled-off treble.
+  laptop: [
+    { type: 'highpass', freq: 200, q: 0.7 },
+    { type: 'peaking', freq: 1500, gainDb: 4, q: 1.5 },
+    { type: 'lowpass', freq: 10_000, q: 0.7 },
+  ],
+  // Earbuds / AirPods: gentle high-pass, presence boost around 3 kHz,
+  // mild treble lift. Closer to flat than the laptop but still coloured.
+  earbuds: [
+    { type: 'highpass', freq: 80, q: 0.7 },
+    { type: 'peaking', freq: 3500, gainDb: 3, q: 1.5 },
+    { type: 'highshelf', freq: 8000, gainDb: 2 },
+  ],
+  // Car stereo: bass boost (subs), midrange scoop (cabin nulls), treble
+  // roll-off (absorbent interior).
+  car: [
+    { type: 'lowshelf', freq: 100, gainDb: 6 },
+    { type: 'peaking', freq: 400, gainDb: -4, q: 1.0 },
+    { type: 'highshelf', freq: 8000, gainDb: -3 },
+  ],
+};
+
 /** Numeric band-type enum, mirrors @aux/dsp-eq8's BandType. */
 export const Eq8BandType = {
   Bypass: 0,
@@ -237,6 +279,12 @@ export class AudioHost {
   private deessWasmModule: WebAssembly.Module | null = null;
   /** Imager — per-channel insert. */
   private imagerWasmModule: WebAssembly.Module | null = null;
+
+  /** Reference Room monitoring filter — between masterGain and the final
+   *  worklet output. A list of BiquadFilterNodes wired in series; empty
+   *  when preset = 'off'. Native Web Audio, no worklet involved. */
+  private referenceRoomFilters: BiquadFilterNode[] = [];
+  private referenceRoomPreset: ReferenceRoomPreset = 'off';
 
   private channels = new Map<string, ChannelInternals>();
   private buses = new Map<string, BusInternals>();
@@ -407,6 +455,15 @@ export class AudioHost {
       bus.analyser.disconnect();
     }
     this.buses.clear();
+    for (const node of this.referenceRoomFilters) {
+      try {
+        node.disconnect();
+      } catch {
+        // ignore
+      }
+    }
+    this.referenceRoomFilters = [];
+    this.referenceRoomPreset = 'off';
     if (this.workletNode) {
       this.workletNode.disconnect();
       this.workletNode = null;
@@ -1006,6 +1063,71 @@ export class AudioHost {
   /** Most recent gain-reduction in dB from the master limiter (≥ 0). */
   getMasterLimiterGr(): number {
     return this.buses.get(MASTER_BUS_ID)?.limiterGrDb ?? 0;
+  }
+
+  // ────────────────────────────────────────────────────────────────────
+  // Master Reference Room (monitoring preset)
+  // ────────────────────────────────────────────────────────────────────
+
+  /**
+   * Insert a Reference Room preset between masterGain and the final
+   * worklet output. Setting `'off'` removes any filters. Calling with
+   * the same preset is a no-op. The meter / limiter sit before this
+   * stage in the chain, so they continue to show the true mix —
+   * Reference Rooms only affect what the engineer monitors.
+   */
+  setMasterReferenceRoom(preset: ReferenceRoomPreset): void {
+    if (!this.ctx || !this.masterGain || !this.workletNode) return;
+    if (preset === this.referenceRoomPreset) return;
+
+    // Tear down: disconnect masterGain from whichever node currently
+    // follows it (either the head of the old filter chain, or directly
+    // to the worklet), and disconnect every filter.
+    try {
+      this.masterGain.disconnect();
+    } catch {
+      // ignore — node may already be detached
+    }
+    for (const node of this.referenceRoomFilters) {
+      try {
+        node.disconnect();
+      } catch {
+        // ignore
+      }
+    }
+    this.referenceRoomFilters = [];
+
+    // Rebuild for the new preset.
+    const specs = REFERENCE_ROOM_FILTERS[preset];
+    if (specs.length === 0) {
+      this.masterGain.connect(this.workletNode);
+    } else {
+      const nodes = specs.map((spec) => this.buildBiquad(spec));
+      this.referenceRoomFilters = nodes;
+      let cursor: AudioNode = this.masterGain;
+      for (const node of nodes) {
+        cursor.connect(node);
+        cursor = node;
+      }
+      cursor.connect(this.workletNode);
+    }
+
+    this.referenceRoomPreset = preset;
+  }
+
+  /** Currently active Reference Room preset. */
+  getMasterReferenceRoom(): ReferenceRoomPreset {
+    return this.referenceRoomPreset;
+  }
+
+  private buildBiquad(spec: BiquadSpec): BiquadFilterNode {
+    if (!this.ctx) throw new Error('AudioHost not started');
+    const node = this.ctx.createBiquadFilter();
+    node.type = spec.type;
+    node.frequency.value = spec.freq;
+    if (spec.gainDb != null) node.gain.value = spec.gainDb;
+    if (spec.q != null) node.Q.value = spec.q;
+    return node;
   }
 
   // ────────────────────────────────────────────────────────────────────

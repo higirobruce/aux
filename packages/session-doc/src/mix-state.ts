@@ -19,9 +19,10 @@ import { z } from 'zod';
  * v9  — bus reverb slot generalised with `kind: 'plate' | 'hall'`.
  * v10 — adds per-channel `transient` (attack/sustain shaper + bypass).
  * v11 — adds per-channel `deess` (split-band) + `imager` (M/S width).
+ * v12 — adds masterChain.referenceRoom (monitoring preset).
  */
 
-export const MIX_STATE_VERSION = 11;
+export const MIX_STATE_VERSION = 12;
 
 /** Stable id for the always-present Master bus. Sessions can omit it from
  *  their `buses` record; the client treats it as if explicitly present. */
@@ -133,8 +134,21 @@ export const LimiterStateSchema = z.object({
   bypassed: z.boolean(),
 });
 
+/**
+ * Reference Room — monitoring preset that filters the post-master signal
+ * (between masterGain and the final output) to simulate common playback
+ * systems. "off" disables the filter chain entirely.
+ */
+export const ReferenceRoomPresetSchema = z.enum(['off', 'laptop', 'earbuds', 'car']);
+export type ReferenceRoomPreset = z.infer<typeof ReferenceRoomPresetSchema>;
+
+export const ReferenceRoomStateSchema = z.object({
+  preset: ReferenceRoomPresetSchema,
+});
+
 export const MasterChainSchema = z.object({
   limiter: LimiterStateSchema,
+  referenceRoom: ReferenceRoomStateSchema,
 });
 
 export const MixStateSchema = z.object({
@@ -187,8 +201,13 @@ export const DEFAULT_LIMITER_STATE: LimiterState = {
   bypassed: false,
 };
 
+export const DEFAULT_REFERENCE_ROOM = {
+  preset: 'off',
+} as const;
+
 export const DEFAULT_MASTER_CHAIN: MasterChain = {
   limiter: { ...DEFAULT_LIMITER_STATE },
+  referenceRoom: { preset: 'off' },
 };
 
 /** Default Master bus, added in hydration when absent. */
@@ -255,6 +274,9 @@ export function emptyMixState(): MixState {
     version: MIX_STATE_VERSION,
     channels: {},
     buses: { [MASTER_BUS_ID]: { ...DEFAULT_MASTER_BUS } },
-    masterChain: { limiter: { ...DEFAULT_LIMITER_STATE } },
+    masterChain: {
+      limiter: { ...DEFAULT_LIMITER_STATE },
+      referenceRoom: { preset: 'off' },
+    },
   };
 }

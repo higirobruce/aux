@@ -1834,3 +1834,54 @@
   border-color: #000;
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.18), 0 0 6px rgba(46, 95, 168, 0.35);
 }
+
+/* ─── Reference Room (Master strip only) ────────────────────────────── */
+
+.bus-ref-room {
+  padding: 8px 6px;
+  border-bottom: 1px solid #0a0c10;
+  background: rgba(46, 95, 168, 0.06);
+}
+
+.bus-ref-room-label {
+  font-family: var(--font-mono);
+  font-size: 9px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: #6b7280;
+  margin-bottom: 6px;
+  text-align: center;
+}
+
+.bus-ref-room-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 3px;
+}
+
+.bus-ref-room-btn {
+  height: 18px;
+  padding: 0 4px;
+  font-family: var(--font-mono);
+  font-size: 9px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  background: linear-gradient(180deg, #2a3038, #14171c);
+  border: 1px solid #0a0c10;
+  border-radius: 2px;
+  color: #6b7280;
+  cursor: pointer;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.06);
+  transition: color 100ms ease, background 100ms ease;
+}
+
+.bus-ref-room-btn:hover:not(.on) {
+  color: #c5d5ec;
+}
+
+.bus-ref-room-btn.on {
+  background: linear-gradient(180deg, #3a4860, #1c2638);
+  color: #dce7f5;
+  border-color: rgba(46, 95, 168, 0.45);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.14), 0 0 6px rgba(46, 95, 168, 0.3);
+}

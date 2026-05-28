@@ -2,7 +2,13 @@
 
 import { isLocalKey, resolveStemStore } from '@/lib/stem-store';
 import type { Stem, StemWithUrl } from '@/lib/types';
-import { AudioHost, Eq8BandType, MASTER_BUS_ID, type ReverbKind } from '@aux/audio-engine';
+import {
+  AudioHost,
+  Eq8BandType,
+  MASTER_BUS_ID,
+  type ReferenceRoomPreset,
+  type ReverbKind,
+} from '@aux/audio-engine';
 import {
   type BusState,
   COMP_COLOR_DEFAULTS,
@@ -115,7 +121,10 @@ function hydrateMixState(raw: unknown): HydratedMix {
   const empty: HydratedMix = {
     channels: {},
     buses: { [MASTER_BUS_ID]: { ...DEFAULT_MASTER_BUS } },
-    masterChain: { limiter: { ...DEFAULT_LIMITER_STATE } },
+    masterChain: {
+      limiter: { ...DEFAULT_LIMITER_STATE },
+      referenceRoom: { preset: 'off' },
+    },
   };
 
   if (raw == null) return empty;
@@ -201,10 +210,32 @@ function hydrateMixState(raw: unknown): HydratedMix {
     }
   }
 
+  // Preserve the older doc's limiter if it has well-shaped values — the
+  // upgrade path was previously wiping it back to defaults whenever the
+  // version bumped, which surprised users who had tuned the master limiter.
+  const rawMaster = (raw as { masterChain?: { limiter?: Partial<LimiterState> } }).masterChain;
+  const oldLim = rawMaster?.limiter;
+  const preservedLimiter: LimiterState =
+    oldLim &&
+    typeof oldLim.thresholdDb === 'number' &&
+    typeof oldLim.releaseMs === 'number' &&
+    typeof oldLim.makeupDb === 'number' &&
+    typeof oldLim.bypassed === 'boolean'
+      ? {
+          thresholdDb: oldLim.thresholdDb,
+          releaseMs: oldLim.releaseMs,
+          makeupDb: oldLim.makeupDb,
+          bypassed: oldLim.bypassed,
+        }
+      : { ...DEFAULT_LIMITER_STATE };
+
   return {
     channels: upgradedChannels,
     buses: upgradedBuses,
-    masterChain: { ...DEFAULT_MASTER_CHAIN, limiter: { ...DEFAULT_LIMITER_STATE } },
+    masterChain: {
+      ...DEFAULT_MASTER_CHAIN,
+      limiter: preservedLimiter,
+    },
   };
 }
 
@@ -594,6 +625,9 @@ export function MixerShell({
     host.setMasterLimiter(lim.thresholdDb, lim.releaseMs, lim.makeupDb);
     host.setMasterLimiterBypassed(lim.bypassed);
 
+    // Reference Room preset — restore the saved monitoring filter.
+    host.setMasterReferenceRoom(masterChainRef.current.referenceRoom.preset);
+
     // Route channels to their saved bus. The host's addChannel defaults to
     // Master, so this only does work for non-Master targets — but it's safe
     // to call across the board (no-op on a same-bus reconnect).
@@ -808,6 +842,14 @@ export function MixerShell({
       const bypassed = !prev.limiter.bypassed;
       hostRef.current?.setMasterLimiterBypassed(bypassed);
       return { ...prev, limiter: { ...prev.limiter, bypassed } };
+    });
+  }, []);
+
+  const setReferenceRoom = useCallback((preset: ReferenceRoomPreset) => {
+    setMasterChain((prev) => {
+      if (prev.referenceRoom.preset === preset) return prev;
+      hostRef.current?.setMasterReferenceRoom(preset);
+      return { ...prev, referenceRoom: { preset } };
     });
   }, []);
 
@@ -1231,6 +1273,8 @@ export function MixerShell({
                 limiter={masterChain.limiter}
                 onLimiter={setLimiter}
                 onLimiterBypass={toggleLimiterBypass}
+                referenceRoom={masterChain.referenceRoom.preset}
+                onReferenceRoom={setReferenceRoom}
               />
             )}
           </div>
