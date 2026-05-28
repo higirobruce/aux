@@ -1,0 +1,23 @@
+{
+  "name": "@aux/dsp-eq8",
+  "version": "0.1.0",
+  "private": true,
+  "description": "8-band parametric EQ — Rust DSP compiled to WASM, exposed as ES module.",
+  "type": "module",
+  "main": "./wasm/eq8.js",
+  "types": "./wasm/eq8.d.ts",
+  "files": ["wasm"],
+  "exports": {
+    ".": {
+      "types": "./wasm/eq8.d.ts",
+      "default": "./wasm/eq8.js"
+    },
+    "./eq8_bg.wasm": "./wasm/eq8_bg.wasm",
+    "./package.json": "./package.json"
+  },
+  "scripts": {
+    "build": "wasm-pack build --release --target web --out-dir wasm --out-name eq8 && rm -f wasm/.gitignore wasm/package.json",
+    "test:rust": "cargo test --release",
+    "clean": "rm -rf wasm target"
+  }
+}

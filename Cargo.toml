@@ -1,0 +1,11 @@
+[workspace]
+resolver = "2"
+members = ["packages/dsp-eq8"]
+
+# Optimize WASM size + perf for release builds.
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1
+panic = "abort"
+strip = true

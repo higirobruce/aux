@@ -1,0 +1,20 @@
+[package]
+name = "aux-dsp-eq8"
+version = "0.1.0"
+edition = "2021"
+license = "Apache-2.0"
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+wasm-bindgen = "0.2"
+
+[dev-dependencies]
+# (none yet)
+
+# Skip wasm-opt — the bundled wasm-opt rejects bulk-memory ops emitted by
+# current rustc. Release profile (LTO + opt-level=3 at the workspace root)
+# already produces a small + fast binary.
+[package.metadata.wasm-pack.profile.release]
+wasm-opt = false
