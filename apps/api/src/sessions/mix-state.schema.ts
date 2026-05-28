@@ -7,23 +7,28 @@ import { z } from 'zod';
  * Versioning
  * ----------
  * v1 — volume / pan / mute / solo (autosave slice, 5d36165).
- * v2 — adds EQ state: LO (low-shelf), MID (peak), HI (high-shelf) in dB
- *      (slice #58 + #59). Stored under `eq` per channel.
+ * v2 — adds EQ state: LO (low-shelf), MID (peak), HI (high-shelf) in dB.
+ * v3 — adds Comp-Clean state per channel: threshold + ratio (the two knobs
+ *      surfaced in the strip UI). attack/release/makeup/mix stay at the
+ *      v0.2 default until the deep-edit panel ships.
  *
- * The server only accepts v2 from clients that have been updated. v1 docs in
- * the database are migrated client-side at hydration time (older shape gets
- * an empty EQ section added).
+ * The server only accepts the current version. Older docs in the DB are
+ * migrated client-side at hydration time (defaults added in-memory).
  */
 
-export const MIX_STATE_VERSION = 2;
+export const MIX_STATE_VERSION = 3;
 
 export const ChannelEqSchema = z.object({
-  /** Low-shelf gain in dB (band 1, freq 100 Hz). */
   lo: z.number().min(-24).max(24),
-  /** Mid-peak gain in dB (band 3, freq 1 kHz). */
   mid: z.number().min(-24).max(24),
-  /** High-shelf gain in dB (band 6, freq 8 kHz). */
   hi: z.number().min(-24).max(24),
+});
+
+export const ChannelCompSchema = z.object({
+  /** Threshold in dB, −80..+12. */
+  threshold: z.number().min(-80).max(12),
+  /** Ratio 1..20; 1 = no compression (fast-path passthrough in DSP). */
+  ratio: z.number().min(1).max(20),
 });
 
 export const ChannelStateSchema = z.object({
@@ -32,6 +37,7 @@ export const ChannelStateSchema = z.object({
   muted: z.boolean(),
   soloed: z.boolean(),
   eq: ChannelEqSchema,
+  comp: ChannelCompSchema,
 });
 
 export const MixStateSchema = z.object({
@@ -40,4 +46,5 @@ export const MixStateSchema = z.object({
 });
 
 export type ChannelEq = z.infer<typeof ChannelEqSchema>;
+export type ChannelComp = z.infer<typeof ChannelCompSchema>;
 export type MixState = z.infer<typeof MixStateSchema>;

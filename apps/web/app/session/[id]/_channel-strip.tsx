@@ -19,15 +19,30 @@ interface Props {
   onMute: () => void;
   onSolo: () => void;
   onEq: (band: EqBand, gainDb: number) => void;
+  onComp: (field: 'threshold' | 'ratio', value: number) => void;
 }
 
 const EQ_KNOB_MIN_DB = -12;
 const EQ_KNOB_MAX_DB = 12;
 
+const COMP_THRESH_MIN = -40;
+const COMP_THRESH_MAX = 0;
+const COMP_RATIO_MIN = 1;
+const COMP_RATIO_MAX = 10;
+
 function formatEqDb(db: number): string {
   if (Math.abs(db) < 0.05) return '0';
   const sign = db > 0 ? '+' : '−';
   return `${sign}${Math.abs(db).toFixed(1)}`;
+}
+
+function formatThresh(db: number): string {
+  if (Math.abs(db) < 0.05) return '0';
+  return `−${Math.abs(db).toFixed(0)}`;
+}
+
+function formatRatio(r: number): string {
+  return r < 1.05 ? '1:1' : `${r.toFixed(1)}:1`;
 }
 
 // ─── dB <-> linear ──────────────────────────────────────────────────────
@@ -91,6 +106,7 @@ export function ChannelStrip({
   onMute,
   onSolo,
   onEq,
+  onComp,
 }: Props) {
   const effectivelyMuted = state.muted || (anySoloed && !state.soloed);
 
@@ -140,6 +156,33 @@ export function ChannelStrip({
           />
           <span className="knob-label">Hi</span>
           <span className="knob-readout">{formatEqDb(state.eq.hi)}</span>
+        </div>
+      </div>
+
+      <div className="ch-comp">
+        <div className="knob-wrap">
+          <Knob
+            value={state.comp.threshold}
+            min={COMP_THRESH_MIN}
+            max={COMP_THRESH_MAX}
+            defaultValue={0}
+            ariaLabel={`${stem.name} comp threshold`}
+            onChange={(v) => onComp('threshold', v)}
+          />
+          <span className="knob-label">Th</span>
+          <span className="knob-readout">{formatThresh(state.comp.threshold)}</span>
+        </div>
+        <div className="knob-wrap">
+          <Knob
+            value={state.comp.ratio}
+            min={COMP_RATIO_MIN}
+            max={COMP_RATIO_MAX}
+            defaultValue={1}
+            ariaLabel={`${stem.name} comp ratio`}
+            onChange={(v) => onComp('ratio', v)}
+          />
+          <span className="knob-label">Rt</span>
+          <span className="knob-readout">{formatRatio(state.comp.ratio)}</span>
         </div>
       </div>
 

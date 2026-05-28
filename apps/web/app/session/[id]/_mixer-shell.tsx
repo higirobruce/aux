@@ -2,7 +2,13 @@
 
 import type { Stem, StemWithUrl } from '@/lib/types';
 import { AudioHost, Eq8BandType } from '@aux/audio-engine';
-import { DEFAULT_CHANNEL_EQ, MIX_STATE_VERSION, MixStateSchema } from '@aux/session-doc';
+import {
+  COMP_DEFAULTS,
+  DEFAULT_CHANNEL_COMP,
+  DEFAULT_CHANNEL_EQ,
+  MIX_STATE_VERSION,
+  MixStateSchema,
+} from '@aux/session-doc';
 import Link from 'next/link';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ChannelStrip } from './_channel-strip';
@@ -26,6 +32,7 @@ export interface ChannelState {
   muted: boolean;
   soloed: boolean;
   eq: { lo: number; mid: number; hi: number }; // dB, ±24
+  comp: { threshold: number; ratio: number }; // dB threshold + n:1 ratio
 }
 
 const DEFAULT_CHANNEL: ChannelState = {
@@ -34,6 +41,7 @@ const DEFAULT_CHANNEL: ChannelState = {
   muted: false,
   soloed: false,
   eq: { ...DEFAULT_CHANNEL_EQ },
+  comp: { ...DEFAULT_CHANNEL_COMP },
 };
 const AUTOSAVE_DEBOUNCE_MS = 600;
 
@@ -60,47 +68,45 @@ function formatTime(seconds: number): string {
  * Parse the server-provided mix state. Tolerates missing / malformed data —
  * an unknown schema or invalid payload just yields an empty channel map.
  *
- * v1 (volume/pan/mute/solo only) docs are upgraded in memory by adding the
- * default EQ section to each channel — no zod import on the client, so the
- * v1 shape is checked structurally.
+ * Backcompat: older docs (v1 = pre-EQ, v2 = pre-comp) are upgraded in
+ * memory by filling in defaults for the missing sections. Next autosave
+ * promotes the doc to the current version.
  */
 function hydrateChannelState(raw: unknown): Record<string, ChannelState> {
   if (raw == null) return {};
 
-  const v2 = MixStateSchema.safeParse(raw);
-  if (v2.success) return v2.data.channels;
+  const current = MixStateSchema.safeParse(raw);
+  if (current.success) return current.data.channels;
 
-  if (
-    typeof raw === 'object' &&
-    raw !== null &&
-    'version' in raw &&
-    (raw as { version: unknown }).version === 1 &&
-    'channels' in raw
-  ) {
-    const channels = (raw as { channels: Record<string, unknown> }).channels;
-    const upgraded: Record<string, ChannelState> = {};
-    for (const [id, ch] of Object.entries(channels)) {
-      if (!ch || typeof ch !== 'object') continue;
-      const c = ch as Partial<ChannelState>;
-      if (
-        typeof c.volume === 'number' &&
-        typeof c.pan === 'number' &&
-        typeof c.muted === 'boolean' &&
-        typeof c.soloed === 'boolean'
-      ) {
-        upgraded[id] = {
-          volume: c.volume,
-          pan: c.pan,
-          muted: c.muted,
-          soloed: c.soloed,
-          eq: { ...DEFAULT_CHANNEL_EQ },
-        };
-      }
-    }
-    return upgraded;
+  if (typeof raw !== 'object' || raw === null || !('version' in raw) || !('channels' in raw)) {
+    return {};
   }
+  const ver = (raw as { version: unknown }).version;
+  if (typeof ver !== 'number' || ver < 1 || ver > 2) return {};
 
-  return {};
+  const channels = (raw as { channels: Record<string, unknown> }).channels;
+  const upgraded: Record<string, ChannelState> = {};
+  for (const [id, ch] of Object.entries(channels)) {
+    if (!ch || typeof ch !== 'object') continue;
+    const c = ch as Partial<ChannelState>;
+    if (
+      typeof c.volume !== 'number' ||
+      typeof c.pan !== 'number' ||
+      typeof c.muted !== 'boolean' ||
+      typeof c.soloed !== 'boolean'
+    ) {
+      continue;
+    }
+    upgraded[id] = {
+      volume: c.volume,
+      pan: c.pan,
+      muted: c.muted,
+      soloed: c.soloed,
+      eq: c.eq ?? { ...DEFAULT_CHANNEL_EQ },
+      comp: c.comp ?? { ...DEFAULT_CHANNEL_COMP },
+    };
+  }
+  return upgraded;
 }
 
 export function MixerShell({
@@ -323,6 +329,15 @@ export function MixerShell({
         const { idx, type, freq, q } = EQ_BANDS[band];
         host.setChannelEqBand(stem.id, idx, type, freq, ch.eq[band], q);
       }
+      host.setChannelComp(
+        stem.id,
+        ch.comp.threshold,
+        ch.comp.ratio,
+        COMP_DEFAULTS.attackMs,
+        COMP_DEFAULTS.releaseMs,
+        COMP_DEFAULTS.makeupDb,
+        COMP_DEFAULTS.mix
+      );
     }
   }
 
@@ -385,6 +400,23 @@ export function MixerShell({
         ...prev,
         [stemId]: { ...current, eq: { ...current.eq, [band]: gainDb } },
       };
+    });
+  }, []);
+
+  const setComp = useCallback((stemId: string, field: 'threshold' | 'ratio', value: number) => {
+    setChannelState((prev) => {
+      const current = prev[stemId] ?? DEFAULT_CHANNEL;
+      const nextComp = { ...current.comp, [field]: value };
+      hostRef.current?.setChannelComp(
+        stemId,
+        nextComp.threshold,
+        nextComp.ratio,
+        COMP_DEFAULTS.attackMs,
+        COMP_DEFAULTS.releaseMs,
+        COMP_DEFAULTS.makeupDb,
+        COMP_DEFAULTS.mix
+      );
+      return { ...prev, [stemId]: { ...current, comp: nextComp } };
     });
   }, []);
 
@@ -494,6 +526,7 @@ export function MixerShell({
                     onMute={() => toggleMute(stem.id)}
                     onSolo={() => toggleSolo(stem.id)}
                     onEq={(band, db) => setEq(stem.id, band, db)}
+                    onComp={(field, value) => setComp(stem.id, field, value)}
                   />
                 );
               })

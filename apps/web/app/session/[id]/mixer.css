@@ -380,6 +380,35 @@
   color: #939aa5;
 }
 
+/* ─── Comp row (Threshold + Ratio knobs) ───────────────────────────── */
+
+.ch-comp {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 4px;
+  padding: 8px 6px;
+  border-bottom: 1px solid #0a0c10;
+  background: rgba(0, 0, 0, 0.22);
+}
+
+.ch-comp .knob-wrap {
+  gap: 3px;
+}
+
+.ch-comp .knob {
+  width: 22px;
+  height: 22px;
+}
+
+.ch-comp .knob-label {
+  font-size: 7px;
+}
+
+.ch-comp .knob-readout {
+  font-size: 8px;
+  color: #939aa5;
+}
+
 /* ─── Pan row (knob) ───────────────────────────────────────────────── */
 
 .ch-pan-row {
