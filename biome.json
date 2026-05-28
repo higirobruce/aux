@@ -19,7 +19,8 @@
       "**/public/comp-color-worklet.js",
       "**/public/limiter-worklet.js",
       "**/public/plate-worklet.js",
-      "**/public/hall-worklet.js"
+      "**/public/hall-worklet.js",
+      "**/public/transient-worklet.js"
     ]
   },
   "vcs": {

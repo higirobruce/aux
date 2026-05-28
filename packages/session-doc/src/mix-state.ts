@@ -8,21 +8,19 @@ import { z } from 'zod';
  *
  * Versioning
  * ----------
- * v1 — volume / pan / mute / solo  (autosave slice, 5d36165).
- * v2 — adds EQ state per channel.
- * v3 — adds Comp-Clean state per channel.
- * v4 — adds compType.
- * v5 — adds buses + channel.outputBusId.
- * v6 — adds channel.sends.
- * v7 — adds masterChain (limiter on Master).
- * v8 — buses gain an optional `plate` field (Dattorro plate reverb).
- * v9 — generalises the per-bus reverb to a discriminated `reverb` slot
- *      with `kind: 'plate' | 'hall'`. The `plate` field is dropped — the
- *      client migrates v8 docs by promoting `bus.plate` to
- *      `bus.reverb: { kind: 'plate', ... }` in memory.
+ * v1  — volume / pan / mute / solo.
+ * v2  — adds EQ state per channel.
+ * v3  — adds Comp-Clean state per channel.
+ * v4  — adds compType.
+ * v5  — adds buses + channel.outputBusId.
+ * v6  — adds channel.sends.
+ * v7  — adds masterChain (limiter on Master).
+ * v8  — buses gain an optional `plate` field.
+ * v9  — bus reverb slot generalised with `kind: 'plate' | 'hall'`.
+ * v10 — adds per-channel `transient` (attack/sustain shaper + bypass).
  */
 
-export const MIX_STATE_VERSION = 9;
+export const MIX_STATE_VERSION = 10;
 
 /** Stable id for the always-present Master bus. Sessions can omit it from
  *  their `buses` record; the client treats it as if explicitly present. */
@@ -84,6 +82,15 @@ export const ChannelCompSchema = z.object({
 /** Post-fader aux sends keyed by destination bus id; value = linear gain. */
 export const ChannelSendsSchema = z.record(z.string(), z.number().min(0).max(2));
 
+/** Transient designer per channel — attack/sustain shaper. */
+export const ChannelTransientSchema = z.object({
+  /** Attack scaling, -1..1. 0 = no change. */
+  attack: z.number().min(-1).max(1),
+  /** Sustain scaling, -1..1. 0 = no change. */
+  sustain: z.number().min(-1).max(1),
+  bypassed: z.boolean(),
+});
+
 export const ChannelStateSchema = z.object({
   volume: z.number().min(0).max(8),
   pan: z.number().min(-1).max(1),
@@ -94,6 +101,7 @@ export const ChannelStateSchema = z.object({
   compType: CompTypeSchema,
   outputBusId: z.string().min(1),
   sends: ChannelSendsSchema,
+  transient: ChannelTransientSchema,
 });
 
 export const LimiterStateSchema = z.object({
@@ -178,6 +186,13 @@ export const DEFAULT_CHANNEL_EQ: ChannelEq = { lo: 0, mid: 0, hi: 0 };
  * passthrough, so a fresh channel is acoustically transparent.
  */
 export const DEFAULT_CHANNEL_COMP: ChannelComp = { threshold: 0, ratio: 1 };
+
+/** Default Transient state — both knobs at 0 = passthrough. */
+export const DEFAULT_CHANNEL_TRANSIENT = {
+  attack: 0,
+  sustain: 0,
+  bypassed: false,
+} as const;
 
 /** Default comp flavour for new channels. */
 export const DEFAULT_COMP_TYPE: CompType = 'clean';

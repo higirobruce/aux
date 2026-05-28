@@ -10,6 +10,7 @@ import {
   type CompType,
   DEFAULT_CHANNEL_COMP,
   DEFAULT_CHANNEL_EQ,
+  DEFAULT_CHANNEL_TRANSIENT,
   DEFAULT_COMP_TYPE,
   DEFAULT_LIMITER_STATE,
   DEFAULT_MASTER_BUS,
@@ -50,6 +51,8 @@ export interface ChannelState {
   outputBusId: string;
   /** Post-fader aux sends keyed by destination bus id (linear 0..2). */
   sends: Record<string, number>;
+  /** Transient designer — both knobs ∈ [-1, 1]. */
+  transient: { attack: number; sustain: number; bypassed: boolean };
 }
 
 const DEFAULT_CHANNEL: ChannelState = {
@@ -62,6 +65,7 @@ const DEFAULT_CHANNEL: ChannelState = {
   compType: DEFAULT_COMP_TYPE,
   outputBusId: MASTER_BUS_ID,
   sends: {},
+  transient: { ...DEFAULT_CHANNEL_TRANSIENT },
 };
 const AUTOSAVE_DEBOUNCE_MS = 600;
 
@@ -123,7 +127,7 @@ function hydrateMixState(raw: unknown): HydratedMix {
     return empty;
   }
   const ver = (raw as { version: unknown }).version;
-  if (typeof ver !== 'number' || ver < 1 || ver > 8) return empty;
+  if (typeof ver !== 'number' || ver < 1 || ver > 9) return empty;
 
   const channels = (raw as { channels: Record<string, unknown> }).channels;
   const upgradedChannels: Record<string, ChannelState> = {};
@@ -148,6 +152,7 @@ function hydrateMixState(raw: unknown): HydratedMix {
       compType: c.compType ?? DEFAULT_COMP_TYPE,
       outputBusId: c.outputBusId ?? MASTER_BUS_ID,
       sends: c.sends ?? {},
+      transient: c.transient ?? { ...DEFAULT_CHANNEL_TRANSIENT },
     };
   }
   // Bus migration. v5+ docs already have a `buses` field; older docs don't.
@@ -427,6 +432,8 @@ export function MixerShell({
       plateWasmUrl: '/plate_bg.wasm',
       hallWorkletUrl: '/hall-worklet.js',
       hallWasmUrl: '/hall_bg.wasm',
+      transientWorkletUrl: '/transient-worklet.js',
+      transientWasmUrl: '/transient_bg.wasm',
     });
     await host.start();
     hostRef.current = host;
@@ -494,6 +501,8 @@ export function MixerShell({
         host.setChannelEqBand(stem.id, idx, type, freq, ch.eq[band], q);
       }
       applyCompToHost(host, stem.id, ch.comp.threshold, ch.comp.ratio, ch.compType);
+      host.setChannelTransient(stem.id, ch.transient.attack, ch.transient.sustain);
+      host.setChannelTransientBypassed(stem.id, ch.transient.bypassed);
     }
 
     // Ensure user-defined buses exist on the host (Master is auto-created)
@@ -619,6 +628,27 @@ export function MixerShell({
       const host = hostRef.current;
       if (host) applyCompToHost(host, stemId, current.comp.threshold, current.comp.ratio, compType);
       return { ...prev, [stemId]: { ...current, compType } };
+    });
+  }, []);
+
+  const setTransient = useCallback((stemId: string, field: 'attack' | 'sustain', value: number) => {
+    setChannelState((prev) => {
+      const current = prev[stemId] ?? DEFAULT_CHANNEL;
+      const nextTransient = { ...current.transient, [field]: value };
+      hostRef.current?.setChannelTransient(stemId, nextTransient.attack, nextTransient.sustain);
+      return { ...prev, [stemId]: { ...current, transient: nextTransient } };
+    });
+  }, []);
+
+  const toggleTransientBypass = useCallback((stemId: string) => {
+    setChannelState((prev) => {
+      const current = prev[stemId] ?? DEFAULT_CHANNEL;
+      const bypassed = !current.transient.bypassed;
+      hostRef.current?.setChannelTransientBypassed(stemId, bypassed);
+      return {
+        ...prev,
+        [stemId]: { ...current, transient: { ...current.transient, bypassed } },
+      };
     });
   }, []);
 
@@ -952,6 +982,8 @@ export function MixerShell({
                     onOutput={(busId) => setChannelOutput(stem.id, busId)}
                     onSend={(busId, level) => setChannelSend(stem.id, busId, level)}
                     onRemoveSend={(busId) => removeChannelSend(stem.id, busId)}
+                    onTransient={(field, value) => setTransient(stem.id, field, value)}
+                    onTransientBypass={() => toggleTransientBypass(stem.id)}
                   />
                 );
               })

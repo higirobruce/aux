@@ -78,6 +78,14 @@ export interface AudioHostOptions {
   hallWorkletUrl?: string | URL;
   /** URL to hall_bg.wasm. */
   hallWasmUrl?: string | URL;
+  /**
+   * URL to the Transient-designer worklet (attack/sustain shaper). When
+   * loaded, every channel gets a Transient node spliced between Comp-Color
+   * and gain. Audio path is silent when both params are 0.
+   */
+  transientWorkletUrl?: string | URL;
+  /** URL to transient_bg.wasm. */
+  transientWasmUrl?: string | URL;
   /** Sample rate (default: AudioContext default). */
   sampleRate?: number;
 }
@@ -161,8 +169,10 @@ interface ChannelInternals {
    *  Output feeds `compColor` if present, else `gain`. */
   comp: AudioWorkletNode | null;
   /** Comp-Color worklet — receives `comp` output (or source / eq if neither
-   *  Clean nor EQ is configured). Output feeds `gain`. */
+   *  Clean nor EQ is configured). Output feeds `transient` if present, else `gain`. */
   compColor: AudioWorkletNode | null;
+  /** Optional Transient designer between Comp-Color and gain. */
+  transient: AudioWorkletNode | null;
   /** Latest gain reduction (≥ 0) from whichever comp is currently active. */
   compGrDb: number;
   /** Latest GR from the Color-flavor comp, surfaced separately for the meter. */
@@ -203,6 +213,8 @@ export class AudioHost {
   private limiterWasmModule: WebAssembly.Module | null = null;
   /** Plate / Hall reverb modules — keyed by kind so addBusReverb can pick. */
   private reverbWasmModules: Partial<Record<ReverbKind, WebAssembly.Module>> = {};
+  /** Transient designer — per-channel insert. */
+  private transientWasmModule: WebAssembly.Module | null = null;
 
   private channels = new Map<string, ChannelInternals>();
   private buses = new Map<string, BusInternals>();
@@ -293,6 +305,17 @@ export class AudioHost {
       );
     }
 
+    if (this.options.transientWorkletUrl && this.options.transientWasmUrl) {
+      await this.ctx.audioWorklet.addModule(this.options.transientWorkletUrl);
+      const res = await fetch(this.options.transientWasmUrl);
+      if (!res.ok) throw new Error(`transient wasm fetch failed (${res.status})`);
+      this.transientWasmModule = await WebAssembly.compileStreaming(
+        new Response(await res.arrayBuffer(), {
+          headers: { 'Content-Type': 'application/wasm' },
+        })
+      );
+    }
+
     this.workletNode = new AudioWorkletNode(this.ctx, 'aux-processor', {
       numberOfInputs: 1,
       numberOfOutputs: 1,
@@ -322,6 +345,7 @@ export class AudioHost {
       if (channel.eq8) channel.eq8.disconnect();
       if (channel.comp) channel.comp.disconnect();
       if (channel.compColor) channel.compColor.disconnect();
+      if (channel.transient) channel.transient.disconnect();
       for (const send of channel.sends.values()) send.disconnect();
       channel.sends.clear();
       channel.gain.disconnect();
@@ -379,11 +403,22 @@ export class AudioHost {
     // straightforward: each new node connects to the previous "front" and
     // becomes the new front; the source ultimately connects to `front`.
     //
-    //   source → [eq8] → [comp] → [compColor] → gain → panner → analyser → master
+    //   source → [eq8] → [comp] → [compColor] → [transient] → gain → panner → analyser → bus
     //
     // Bracketed nodes are conditional: they only exist if the corresponding
     // WASM module was loaded at start(). With everything off the routing
     // reduces to source → gain → ... as before.
+    let transient: AudioWorkletNode | null = null;
+    if (this.transientWasmModule) {
+      transient = new AudioWorkletNode(this.ctx, 'aux-transient-processor', {
+        numberOfInputs: 1,
+        numberOfOutputs: 1,
+        outputChannelCount: [2],
+        processorOptions: { wasmModule: this.transientWasmModule },
+      });
+      transient.connect(gain);
+    }
+
     let compColor: AudioWorkletNode | null = null;
     if (this.compColorWasmModule) {
       compColor = new AudioWorkletNode(this.ctx, 'aux-comp-color-processor', {
@@ -392,7 +427,7 @@ export class AudioHost {
         outputChannelCount: [2],
         processorOptions: { wasmModule: this.compColorWasmModule },
       });
-      compColor.connect(gain);
+      compColor.connect(transient ?? gain);
     }
 
     let comp: AudioWorkletNode | null = null;
@@ -403,7 +438,7 @@ export class AudioHost {
         outputChannelCount: [2],
         processorOptions: { wasmModule: this.compWasmModule },
       });
-      comp.connect(compColor ?? gain);
+      comp.connect(compColor ?? transient ?? gain);
     }
 
     let eq8: AudioWorkletNode | null = null;
@@ -414,7 +449,7 @@ export class AudioHost {
         outputChannelCount: [2],
         processorOptions: { wasmModule: this.eq8WasmModule },
       });
-      eq8.connect(comp ?? compColor ?? gain);
+      eq8.connect(comp ?? compColor ?? transient ?? gain);
     }
 
     // gain → panner → analyser → outputBus.input
@@ -428,6 +463,7 @@ export class AudioHost {
       eq8,
       comp,
       compColor,
+      transient,
       compGrDb: 0,
       compColorGrDb: 0,
       gain,
@@ -487,12 +523,30 @@ export class AudioHost {
     if (channel.eq8) channel.eq8.disconnect();
     if (channel.comp) channel.comp.disconnect();
     if (channel.compColor) channel.compColor.disconnect();
+    if (channel.transient) channel.transient.disconnect();
     for (const send of channel.sends.values()) send.disconnect();
     channel.sends.clear();
     channel.gain.disconnect();
     channel.panner.disconnect();
     channel.analyser.disconnect();
     this.channels.delete(stemId);
+  }
+
+  // ────────────────────────────────────────────────────────────────────
+  // Per-channel Transient designer
+  // ────────────────────────────────────────────────────────────────────
+
+  /** Push attack/sustain params (both ∈ [-1, 1]) to a channel's transient. */
+  setChannelTransient(stemId: string, attack: number, sustain: number): void {
+    const transient = this.channels.get(stemId)?.transient;
+    if (!transient) return;
+    transient.port.postMessage({ type: 'set-params', attack, sustain });
+  }
+
+  setChannelTransientBypassed(stemId: string, bypassed: boolean): void {
+    const transient = this.channels.get(stemId)?.transient;
+    if (!transient) return;
+    transient.port.postMessage({ type: 'set-bypassed', bypassed });
   }
 
   // ────────────────────────────────────────────────────────────────────
@@ -1005,7 +1059,9 @@ export class AudioHost {
       src.buffer = channel.buffer;
       // Routing front: prefer eq8 if present, else comp, else gain.
       // addChannel() chains eq8 → comp → gain when both inserts exist.
-      src.connect(channel.eq8 ?? channel.comp ?? channel.compColor ?? channel.gain);
+      src.connect(
+        channel.eq8 ?? channel.comp ?? channel.compColor ?? channel.transient ?? channel.gain
+      );
       src.onended = () => {
         if (channel.source === src) channel.source = null;
       };

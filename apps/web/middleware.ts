@@ -25,6 +25,8 @@ const PUBLIC_PATHS = [
   '/plate_bg.wasm',
   '/hall-worklet.js',
   '/hall_bg.wasm',
+  '/transient-worklet.js',
+  '/transient_bg.wasm',
 ];
 
 export function middleware(req: NextRequest) {

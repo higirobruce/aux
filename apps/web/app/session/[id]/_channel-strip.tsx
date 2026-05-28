@@ -29,6 +29,9 @@ interface Props {
   onSend: (busId: string, level: number) => void;
   /** Remove a post-fader aux send. */
   onRemoveSend: (busId: string) => void;
+  /** Transient designer params (attack / sustain ∈ [-1, 1]). */
+  onTransient: (field: 'attack' | 'sustain', value: number) => void;
+  onTransientBypass: () => void;
 }
 
 const EQ_KNOB_MIN_DB = -12;
@@ -52,6 +55,12 @@ function formatThresh(db: number): string {
 
 function formatRatio(r: number): string {
   return r < 1.05 ? '1:1' : `${r.toFixed(1)}:1`;
+}
+
+function formatTransient(v: number): string {
+  if (Math.abs(v) < 0.02) return '0';
+  const sign = v > 0 ? '+' : '−';
+  return `${sign}${Math.round(Math.abs(v) * 100)}`;
 }
 
 // ─── dB <-> linear ──────────────────────────────────────────────────────
@@ -121,6 +130,8 @@ export function ChannelStrip({
   onOutput,
   onSend,
   onRemoveSend,
+  onTransient,
+  onTransientBypass,
 }: Props) {
   const effectivelyMuted = state.muted || (anySoloed && !state.soloed);
 
@@ -223,6 +234,46 @@ export function ChannelStrip({
             />
             <span className="knob-label">Rt</span>
             <span className="knob-readout">{formatRatio(state.comp.ratio)}</span>
+          </div>
+        </div>
+      </div>
+
+      <div className="ch-transient">
+        <button
+          type="button"
+          className={`ch-transient-toggle ${state.transient.bypassed ? '' : 'on'}`}
+          onClick={onTransientBypass}
+          aria-pressed={!state.transient.bypassed}
+          title={
+            state.transient.bypassed ? 'Transient bypassed — click to engage' : 'Transient active'
+          }
+        >
+          Trans
+        </button>
+        <div className="ch-transient-knobs">
+          <div className="knob-wrap">
+            <Knob
+              value={state.transient.attack}
+              min={-1}
+              max={1}
+              defaultValue={0}
+              ariaLabel={`${stem.name} transient attack`}
+              onChange={(v) => onTransient('attack', v)}
+            />
+            <span className="knob-label">Att</span>
+            <span className="knob-readout">{formatTransient(state.transient.attack)}</span>
+          </div>
+          <div className="knob-wrap">
+            <Knob
+              value={state.transient.sustain}
+              min={-1}
+              max={1}
+              defaultValue={0}
+              ariaLabel={`${stem.name} transient sustain`}
+              onChange={(v) => onTransient('sustain', v)}
+            />
+            <span className="knob-label">Sus</span>
+            <span className="knob-readout">{formatTransient(state.transient.sustain)}</span>
           </div>
         </div>
       </div>
