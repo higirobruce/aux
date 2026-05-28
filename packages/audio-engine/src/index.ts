@@ -1,4 +1,10 @@
-export { AudioHost, type AudioHostOptions, Eq8BandType } from './host';
+export {
+  AudioHost,
+  type AudioHostOptions,
+  type BusInit,
+  Eq8BandType,
+  MASTER_BUS_ID,
+} from './host';
 export type {
   AudioGraph,
   GraphNode,

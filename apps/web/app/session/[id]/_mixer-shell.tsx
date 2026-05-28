@@ -2,19 +2,22 @@
 
 import { isLocalKey, resolveStemStore } from '@/lib/stem-store';
 import type { Stem, StemWithUrl } from '@/lib/types';
-import { AudioHost, Eq8BandType } from '@aux/audio-engine';
+import { AudioHost, Eq8BandType, MASTER_BUS_ID } from '@aux/audio-engine';
 import {
+  type BusState,
   COMP_COLOR_DEFAULTS,
   COMP_DEFAULTS,
   type CompType,
   DEFAULT_CHANNEL_COMP,
   DEFAULT_CHANNEL_EQ,
   DEFAULT_COMP_TYPE,
+  DEFAULT_MASTER_BUS,
   MIX_STATE_VERSION,
   MixStateSchema,
 } from '@aux/session-doc';
 import Link from 'next/link';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { BusStrip } from './_bus-strip';
 import { ChannelStrip } from './_channel-strip';
 import { StemDropZone } from './_stem-drop-zone';
 import './mixer.css';
@@ -38,6 +41,7 @@ export interface ChannelState {
   eq: { lo: number; mid: number; hi: number }; // dB, ±24
   comp: { threshold: number; ratio: number }; // dB threshold + n:1 ratio
   compType: CompType; // 'clean' (VCA) or 'color' (FET)
+  outputBusId: string;
 }
 
 const DEFAULT_CHANNEL: ChannelState = {
@@ -48,6 +52,7 @@ const DEFAULT_CHANNEL: ChannelState = {
   eq: { ...DEFAULT_CHANNEL_EQ },
   comp: { ...DEFAULT_CHANNEL_COMP },
   compType: DEFAULT_COMP_TYPE,
+  outputBusId: MASTER_BUS_ID,
 };
 const AUTOSAVE_DEBOUNCE_MS = 600;
 
@@ -70,28 +75,43 @@ function formatTime(seconds: number): string {
   return `${m}:${s.toString().padStart(2, '0')}`;
 }
 
+interface HydratedMix {
+  channels: Record<string, ChannelState>;
+  buses: Record<string, BusState>;
+}
+
 /**
  * Parse the server-provided mix state. Tolerates missing / malformed data —
- * an unknown schema or invalid payload just yields an empty channel map.
+ * an unknown schema or invalid payload yields the empty default.
  *
- * Backcompat: older docs (v1 pre-EQ, v2 pre-comp, v3 pre-comp-type) are
- * upgraded in memory by filling in defaults for the missing sections. The
- * next autosave promotes the doc to the current version.
+ * Backcompat: older docs (v1 pre-EQ, v2 pre-comp, v3 pre-comp-type, v4
+ * pre-buses) are upgraded in memory by filling in defaults for the missing
+ * sections. The next autosave promotes the doc to the current version.
  */
-function hydrateChannelState(raw: unknown): Record<string, ChannelState> {
-  if (raw == null) return {};
+function hydrateMixState(raw: unknown): HydratedMix {
+  const empty: HydratedMix = {
+    channels: {},
+    buses: { [MASTER_BUS_ID]: { ...DEFAULT_MASTER_BUS } },
+  };
+
+  if (raw == null) return empty;
 
   const current = MixStateSchema.safeParse(raw);
-  if (current.success) return current.data.channels;
+  if (current.success) {
+    // Ensure Master exists even if a malformed v5 doc dropped it.
+    const buses = { ...current.data.buses };
+    if (!buses[MASTER_BUS_ID]) buses[MASTER_BUS_ID] = { ...DEFAULT_MASTER_BUS };
+    return { channels: current.data.channels, buses };
+  }
 
   if (typeof raw !== 'object' || raw === null || !('version' in raw) || !('channels' in raw)) {
-    return {};
+    return empty;
   }
   const ver = (raw as { version: unknown }).version;
-  if (typeof ver !== 'number' || ver < 1 || ver > 3) return {};
+  if (typeof ver !== 'number' || ver < 1 || ver > 4) return empty;
 
   const channels = (raw as { channels: Record<string, unknown> }).channels;
-  const upgraded: Record<string, ChannelState> = {};
+  const upgradedChannels: Record<string, ChannelState> = {};
   for (const [id, ch] of Object.entries(channels)) {
     if (!ch || typeof ch !== 'object') continue;
     const c = ch as Partial<ChannelState>;
@@ -103,7 +123,7 @@ function hydrateChannelState(raw: unknown): Record<string, ChannelState> {
     ) {
       continue;
     }
-    upgraded[id] = {
+    upgradedChannels[id] = {
       volume: c.volume,
       pan: c.pan,
       muted: c.muted,
@@ -111,9 +131,10 @@ function hydrateChannelState(raw: unknown): Record<string, ChannelState> {
       eq: c.eq ?? { ...DEFAULT_CHANNEL_EQ },
       comp: c.comp ?? { ...DEFAULT_CHANNEL_COMP },
       compType: c.compType ?? DEFAULT_COMP_TYPE,
+      outputBusId: c.outputBusId ?? MASTER_BUS_ID,
     };
   }
-  return upgraded;
+  return { channels: upgradedChannels, buses: { [MASTER_BUS_ID]: { ...DEFAULT_MASTER_BUS } } };
 }
 
 /**
@@ -174,9 +195,11 @@ export function MixerShell({
   const [duration, setDuration] = useState(0);
   const [position, setPosition] = useState(0);
   const [error, setError] = useState<string | null>(null);
-  const [channelState, setChannelState] = useState<Record<string, ChannelState>>(() =>
-    hydrateChannelState(initialMixState)
+  const hydrated = useMemo(() => hydrateMixState(initialMixState), [initialMixState]);
+  const [channelState, setChannelState] = useState<Record<string, ChannelState>>(
+    () => hydrated.channels
   );
+  const [busState, setBusState] = useState<Record<string, BusState>>(() => hydrated.buses);
   const [loadedIds, setLoadedIds] = useState<Set<string>>(new Set());
   const [stemsOpen, setStemsOpen] = useState(initialStems.length === 0);
   const [saveStatus, setSaveStatus] = useState<SaveStatus>('idle');
@@ -193,12 +216,16 @@ export function MixerShell({
     setTransport('idle');
   }, []);
 
-  // Keep a live ref to channelState so async helpers (loadStems, the autosave
-  // flush) read the current value without re-binding.
+  // Keep live refs to channelState + busState so async helpers (loadStems,
+  // the autosave flush) read the current value without re-binding.
   const channelStateRef = useRef(channelState);
   useEffect(() => {
     channelStateRef.current = channelState;
   }, [channelState]);
+  const busStateRef = useRef(busState);
+  useEffect(() => {
+    busStateRef.current = busState;
+  }, [busState]);
 
   // Tear down on unmount.
   useEffect(() => {
@@ -241,6 +268,7 @@ export function MixerShell({
           body: JSON.stringify({
             version: MIX_STATE_VERSION,
             channels: channelStateRef.current,
+            buses: busStateRef.current,
           }),
         });
         if (!res.ok) throw new Error(`save failed (${res.status})`);
@@ -257,7 +285,7 @@ export function MixerShell({
         saveTimer.current = null;
       }
     };
-  }, [channelState, sessionId]);
+  }, [channelState, busState, sessionId]);
 
   // Flush any pending debounced save before the page unloads. `pagehide` is
   // more reliable than `beforeunload` (especially on Safari / mobile). The
@@ -279,6 +307,7 @@ export function MixerShell({
           body: JSON.stringify({
             version: MIX_STATE_VERSION,
             channels: channelStateRef.current,
+            buses: busStateRef.current,
           }),
         });
       } catch {
@@ -398,6 +427,13 @@ export function MixerShell({
       }
       applyCompToHost(host, stem.id, ch.comp.threshold, ch.comp.ratio, ch.compType);
     }
+
+    // Apply bus state (gain + mute) to the host. The Master bus always
+    // exists; user-created buses (slice #77) will also flow through here.
+    for (const bus of Object.values(busStateRef.current)) {
+      host.setBusGain(bus.id, bus.gain, 0);
+      host.setBusMute(bus.id, bus.muted, 0);
+    }
   }
 
   async function handlePlay() {
@@ -478,6 +514,25 @@ export function MixerShell({
       const host = hostRef.current;
       if (host) applyCompToHost(host, stemId, current.comp.threshold, current.comp.ratio, compType);
       return { ...prev, [stemId]: { ...current, compType } };
+    });
+  }, []);
+
+  const setBusGain = useCallback((busId: string, gain: number) => {
+    hostRef.current?.setBusGain(busId, gain);
+    setBusState((prev) => {
+      const current = prev[busId];
+      if (!current) return prev;
+      return { ...prev, [busId]: { ...current, gain } };
+    });
+  }, []);
+
+  const toggleBusMute = useCallback((busId: string) => {
+    setBusState((prev) => {
+      const current = prev[busId];
+      if (!current) return prev;
+      const muted = !current.muted;
+      hostRef.current?.setBusMute(busId, muted);
+      return { ...prev, [busId]: { ...current, muted } };
     });
   }, []);
 
@@ -628,6 +683,20 @@ export function MixerShell({
               </div>
             )}
           </div>
+          {/* Buses on the right of the console — separated by a thin divider.
+              Today this is just Master; user-created buses land beside it in
+              the next slice. */}
+          {busState[MASTER_BUS_ID] && (
+            <div className="mixer-buses">
+              <BusStrip
+                bus={busState[MASTER_BUS_ID]}
+                host={hostRef.current}
+                active={transport === 'playing'}
+                onGain={(v) => setBusGain(MASTER_BUS_ID, v)}
+                onMute={() => toggleBusMute(MASTER_BUS_ID)}
+              />
+            </div>
+          )}
         </div>
       </div>
 

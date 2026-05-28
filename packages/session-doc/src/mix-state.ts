@@ -9,15 +9,29 @@ import { z } from 'zod';
  * Versioning
  * ----------
  * v1 — volume / pan / mute / solo  (autosave slice, 5d36165).
- * v2 — adds EQ state: LO (low-shelf), MID (peak), HI (high-shelf) in dB.
+ * v2 — adds EQ state per channel.
  * v3 — adds Comp-Clean state: { threshold, ratio } per channel.
- * v4 — adds compType ∈ { 'clean', 'color' }. The same { threshold, ratio }
- *      pair drives whichever flavour is active; the inactive one is bypassed
- *      in the audio thread. Color also runs with a fixed drive default
- *      (6 dB) until the deep-edit panel lands in a later v0.3 slice.
+ * v4 — adds compType ∈ { 'clean', 'color' }.
+ * v5 — adds buses (a record of bus rows) + channel.outputBusId. The Master
+ *      bus is implicit — sessions don't need to list it, the client adds
+ *      a default Master in hydration so older docs round-trip cleanly.
  */
 
-export const MIX_STATE_VERSION = 4;
+export const MIX_STATE_VERSION = 5;
+
+/** Stable id for the always-present Master bus. Sessions can omit it from
+ *  their `buses` record; the client treats it as if explicitly present. */
+export const MASTER_BUS_ID = 'master';
+
+export const BusStateSchema = z.object({
+  id: z.string().min(1),
+  name: z.string().min(1).max(80),
+  /** Linear gain 0..2; 1 = 0 dB. */
+  gain: z.number().min(0).max(4),
+  muted: z.boolean(),
+});
+
+export const BusesSchema = z.record(z.string(), BusStateSchema);
 
 export const CompTypeSchema = z.enum(['clean', 'color']);
 export type CompType = z.infer<typeof CompTypeSchema>;
@@ -46,17 +60,28 @@ export const ChannelStateSchema = z.object({
   eq: ChannelEqSchema,
   comp: ChannelCompSchema,
   compType: CompTypeSchema,
+  outputBusId: z.string().min(1),
 });
 
 export const MixStateSchema = z.object({
   version: z.literal(MIX_STATE_VERSION),
   channels: z.record(z.string(), ChannelStateSchema),
+  buses: BusesSchema,
 });
 
 export type ChannelEq = z.infer<typeof ChannelEqSchema>;
 export type ChannelComp = z.infer<typeof ChannelCompSchema>;
 export type ChannelStateDoc = z.infer<typeof ChannelStateSchema>;
+export type BusState = z.infer<typeof BusStateSchema>;
 export type MixState = z.infer<typeof MixStateSchema>;
+
+/** Default Master bus, added in hydration when absent. */
+export const DEFAULT_MASTER_BUS: BusState = {
+  id: MASTER_BUS_ID,
+  name: 'Master',
+  gain: 1,
+  muted: false,
+};
 
 export const DEFAULT_CHANNEL_EQ: ChannelEq = { lo: 0, mid: 0, hi: 0 };
 /**
@@ -90,5 +115,9 @@ export const COMP_COLOR_DEFAULTS = {
 } as const;
 
 export function emptyMixState(): MixState {
-  return { version: MIX_STATE_VERSION, channels: {} };
+  return {
+    version: MIX_STATE_VERSION,
+    channels: {},
+    buses: { [MASTER_BUS_ID]: { ...DEFAULT_MASTER_BUS } },
+  };
 }

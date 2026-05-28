@@ -5,18 +5,21 @@ import { useEffect, useRef } from 'react';
 
 interface Props {
   host: AudioHost | null;
+  /** Either a stem id (variant 'channel', default) or a bus id ('bus'). */
   stemId: string;
   /** Whether audio is currently playing — drives the RAF loop. */
   active: boolean;
+  /** Selects which AudioHost peak-level getter to poll. */
+  variant?: 'channel' | 'bus';
 }
 
 /**
- * Stereo-ish peak meter for one channel. The AnalyserNode is mono after
- * the StereoPannerNode summing; for v0.2 we drive both bars off the same
+ * Stereo-ish peak meter for one channel or bus. The AnalyserNode is mono
+ * after the StereoPannerNode summing; we drive both bars off the same
  * peak. Real L/R metering comes when the audio engine grows a proper
- * meter probe (post-v0.2).
+ * meter probe with split tap points.
  */
-export function Meter({ host, stemId, active }: Props) {
+export function Meter({ host, stemId, active, variant = 'channel' }: Props) {
   const leftRef = useRef<HTMLDivElement>(null);
   const rightRef = useRef<HTMLDivElement>(null);
   const peakRef = useRef(0);
@@ -32,7 +35,7 @@ export function Meter({ host, stemId, active }: Props) {
 
     let raf = 0;
     const tick = () => {
-      const linear = host.getChannelLevel(stemId);
+      const linear = variant === 'bus' ? host.getBusLevel(stemId) : host.getChannelLevel(stemId);
       // Smoothed release — fast attack, slow release. Avoids ugly meter chatter.
       const prev = peakRef.current;
       const next = linear > prev ? linear : prev * 0.85 + linear * 0.15;
@@ -49,7 +52,7 @@ export function Meter({ host, stemId, active }: Props) {
     };
     raf = requestAnimationFrame(tick);
     return () => cancelAnimationFrame(raf);
-  }, [host, stemId, active]);
+  }, [host, stemId, active, variant]);
 
   return (
     <div className="ch-meter">

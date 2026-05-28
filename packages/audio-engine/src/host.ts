@@ -75,6 +75,41 @@ export interface ChannelInit {
   volume?: number;
   /** Pan, -1..1; 0 = center. Default 0. */
   pan?: number;
+  /** Bus id this channel's main output routes to. Defaults to MASTER_BUS_ID. */
+  outputBusId?: string;
+}
+
+/**
+ * Stable id for the always-present Master bus. Sessions never need to mint
+ * this themselves — the host creates it during start() and exposes it as a
+ * known target for channels and other buses.
+ */
+export const MASTER_BUS_ID = 'master';
+
+export interface BusInit {
+  id: string;
+  /** Human-facing label. Server is the source of truth; defaults to `id`. */
+  name?: string;
+  /** Linear gain, 0..2. Default 1. */
+  gain?: number;
+}
+
+interface BusInternals {
+  id: string;
+  name: string;
+  /** Summing junction — channels and other buses connect here. */
+  input: GainNode;
+  /** Bus-level gain (fader). input → gainNode → outputTarget. */
+  gainNode: GainNode;
+  analyser: AnalyserNode;
+  meterBuffer: Float32Array<ArrayBuffer>;
+  gain: number;
+  muted: boolean;
+  /**
+   * Bus that this bus routes into. Null for the Master bus, whose output
+   * feeds the masterGain → worklet → destination chain directly.
+   */
+  outputBusId: string | null;
 }
 
 interface ChannelInternals {
@@ -101,6 +136,9 @@ interface ChannelInternals {
   pan: number;
   muted: boolean;
   soloed: boolean;
+  /** Id of the bus this channel routes to. Reconnections happen through
+   *  reroute(), which disconnects from the prior bus's input and reattaches. */
+  outputBusId: string;
   source: AudioBufferSourceNode | null;
 }
 
@@ -118,6 +156,7 @@ export class AudioHost {
   private compColorWasmModule: WebAssembly.Module | null = null;
 
   private channels = new Map<string, ChannelInternals>();
+  private buses = new Map<string, BusInternals>();
 
   constructor(private readonly options: AudioHostOptions) {}
 
@@ -186,6 +225,13 @@ export class AudioHost {
 
     this.masterGain.connect(this.workletNode);
     this.workletNode.connect(this.ctx.destination);
+
+    // The Master bus is the only bus that always exists; it's the implicit
+    // routing target for new channels. Its input + gain feed directly into
+    // masterGain (i.e. the existing final-stage node), so for v0.3 first
+    // slice nothing audibly changes — we've just made the topology explicit
+    // so user-created buses can plug into the same model.
+    this.addBus({ id: MASTER_BUS_ID, name: 'Master', gain: 1 });
   }
 
   async stop(): Promise<void> {
@@ -199,6 +245,12 @@ export class AudioHost {
       channel.analyser.disconnect();
     }
     this.channels.clear();
+    for (const bus of this.buses.values()) {
+      bus.input.disconnect();
+      bus.gainNode.disconnect();
+      bus.analyser.disconnect();
+    }
+    this.buses.clear();
     if (this.workletNode) {
       this.workletNode.disconnect();
       this.workletNode = null;
@@ -221,6 +273,10 @@ export class AudioHost {
   addChannel(init: ChannelInit): void {
     if (!this.ctx || !this.masterGain) throw new Error('AudioHost not started');
     if (this.channels.has(init.stemId)) return;
+
+    const outputBusId = init.outputBusId ?? MASTER_BUS_ID;
+    const outputBus = this.buses.get(outputBusId) ?? this.buses.get(MASTER_BUS_ID);
+    if (!outputBus) throw new Error('master bus missing — start() not run?');
 
     const gain = this.ctx.createGain();
     const panner = this.ctx.createStereoPanner();
@@ -275,10 +331,10 @@ export class AudioHost {
       eq8.connect(comp ?? compColor ?? gain);
     }
 
-    // gain → panner → analyser → master
+    // gain → panner → analyser → outputBus.input
     gain.connect(panner);
     panner.connect(analyser);
-    analyser.connect(this.masterGain);
+    analyser.connect(outputBus.input);
 
     const channelInternals: ChannelInternals = {
       stemId: init.stemId,
@@ -296,6 +352,7 @@ export class AudioHost {
       pan,
       muted: false,
       soloed: false,
+      outputBusId: outputBus.id,
       source: null,
     };
 
@@ -474,6 +531,121 @@ export class AudioHost {
 
   getChannelCompColorGr(stemId: string): number {
     return this.channels.get(stemId)?.compColorGrDb ?? 0;
+  }
+
+  // ────────────────────────────────────────────────────────────────────
+  // Buses
+  // ────────────────────────────────────────────────────────────────────
+
+  /**
+   * Create a new bus. The Master bus is created automatically by start();
+   * user-defined buses go through here. Idempotent (re-calling with the
+   * same id returns silently).
+   *
+   * Wiring: `input → gainNode → analyser → outputTarget`. For Master the
+   * outputTarget is the engine's existing masterGain node (so the final
+   * stage stays unchanged). For other buses the outputTarget is the
+   * master bus's `input` (single-level routing for now).
+   */
+  addBus(init: BusInit): void {
+    if (!this.ctx || !this.masterGain) throw new Error('AudioHost not started');
+    if (this.buses.has(init.id)) return;
+
+    const input = this.ctx.createGain();
+    const gainNode = this.ctx.createGain();
+    const analyser = this.ctx.createAnalyser();
+    analyser.fftSize = 256;
+    analyser.smoothingTimeConstant = 0.5;
+
+    const gain = init.gain ?? 1;
+    gainNode.gain.value = gain;
+
+    input.connect(gainNode);
+    gainNode.connect(analyser);
+
+    const isMaster = init.id === MASTER_BUS_ID;
+    if (isMaster) {
+      analyser.connect(this.masterGain);
+    } else {
+      const master = this.buses.get(MASTER_BUS_ID);
+      if (!master) throw new Error('master bus must exist before child buses');
+      analyser.connect(master.input);
+    }
+
+    this.buses.set(init.id, {
+      id: init.id,
+      name: init.name ?? init.id,
+      input,
+      gainNode,
+      analyser,
+      meterBuffer: new Float32Array(analyser.fftSize),
+      gain,
+      muted: false,
+      outputBusId: isMaster ? null : MASTER_BUS_ID,
+    });
+  }
+
+  removeBus(busId: string): void {
+    if (busId === MASTER_BUS_ID) return; // refuse to drop the only required bus
+    const bus = this.buses.get(busId);
+    if (!bus) return;
+    // Reroute any channels pointing here back to Master before tearing down.
+    for (const channel of this.channels.values()) {
+      if (channel.outputBusId === busId) this.setChannelOutput(channel.stemId, MASTER_BUS_ID);
+    }
+    bus.input.disconnect();
+    bus.gainNode.disconnect();
+    bus.analyser.disconnect();
+    this.buses.delete(busId);
+  }
+
+  setBusGain(busId: string, value: number, rampSec = 0.01): void {
+    const bus = this.buses.get(busId);
+    if (!bus || !this.ctx) return;
+    bus.gain = Math.max(0, Math.min(4, value));
+    bus.gainNode.gain.cancelScheduledValues(this.ctx.currentTime);
+    bus.gainNode.gain.linearRampToValueAtTime(
+      bus.muted ? 0 : bus.gain,
+      this.ctx.currentTime + rampSec
+    );
+  }
+
+  setBusMute(busId: string, muted: boolean, rampSec = 0.005): void {
+    const bus = this.buses.get(busId);
+    if (!bus || !this.ctx) return;
+    bus.muted = muted;
+    bus.gainNode.gain.cancelScheduledValues(this.ctx.currentTime);
+    bus.gainNode.gain.linearRampToValueAtTime(muted ? 0 : bus.gain, this.ctx.currentTime + rampSec);
+  }
+
+  /** Switch a channel's main output to a different bus. */
+  setChannelOutput(stemId: string, busId: string): void {
+    const channel = this.channels.get(stemId);
+    const target = this.buses.get(busId);
+    if (!channel || !target) return;
+    const previous = this.buses.get(channel.outputBusId);
+    if (previous) {
+      try {
+        channel.analyser.disconnect(previous.input);
+      } catch {
+        // Edge case: the connection wasn't there (e.g. first wire-up).
+      }
+    }
+    channel.analyser.connect(target.input);
+    channel.outputBusId = busId;
+  }
+
+  /** Peak amplitude (0..1) at the bus output — for the bus's live meter. */
+  getBusLevel(busId: string): number {
+    const bus = this.buses.get(busId);
+    if (!bus) return 0;
+    bus.analyser.getFloatTimeDomainData(bus.meterBuffer);
+    let peak = 0;
+    for (let i = 0; i < bus.meterBuffer.length; i++) {
+      const v = Math.abs(bus.meterBuffer[i] ?? 0);
+      if (v > peak) peak = v;
+    }
+    return peak;
   }
 
   /**
