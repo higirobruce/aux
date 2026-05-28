@@ -176,12 +176,13 @@
   flex: 1 1 auto;
   display: flex;
   gap: 0;
-  padding: 10px 6px;
-  /* Horizontal scroll for many strips; vertical scrolling is per-strip
-     (.ch-strip-body) so each strip's scribble-strip name stays in view. */
+  /* Bottom padding reserves space for the horizontal scrollbar so the
+     sticky scribble-strip name (.ch-name) doesn't render underneath it. */
+  padding: 10px 6px 18px;
   overflow-x: auto;
-  overflow-y: hidden;
+  overflow-y: auto;
   background: linear-gradient(180deg, #1c2028 0%, #14171c 100%);
+  scrollbar-gutter: stable;
 }
 
 /* ─── Bus rail (Master + future user buses) ────────────────────────── */
@@ -683,17 +684,6 @@
   min-width: 0;
 }
 
-/* Inner scroll body — everything except the name. When the timeline panel
-   shrinks the available mixer height, the controls scroll within the strip
-   so the name (sibling of this div, below) stays planted at the bottom. */
-.ch-strip-body {
-  flex: 1 1 auto;
-  min-height: 0;
-  overflow-y: auto;
-  overflow-x: hidden;
-  scrollbar-width: thin;
-}
-
 .ch-strip.muted {
   opacity: 0.5;
 }
@@ -703,11 +693,17 @@
 }
 
 .ch-name {
-  /* "Scribble strip" — physical-console convention: the track label lives
-     at the bottom of the strip, just under the fader. Sits outside the
-     scrollable .ch-strip-body so it's always visible, no matter how the
-     engineer has scrolled the controls above. */
+  /* "Scribble strip" — last flex child of .ch-strip. With position: sticky
+     and bottom: 0, the name pins to the bottom of the .mixer-console
+     scrollport so the track is always identifiable, even when the
+     engineer has scrolled the console down to see the lower controls.
+     margin-top: auto pushes the name to the strip's natural bottom when
+     the strip's content is shorter than the strip box. */
+  position: sticky;
+  bottom: 0;
+  z-index: 2;
   flex: 0 0 auto;
+  margin-top: auto;
   text-align: center;
   font-size: 10px;
   letter-spacing: 0.06em;

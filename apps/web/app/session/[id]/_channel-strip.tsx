@@ -161,295 +161,289 @@ export function ChannelStrip({
 
   return (
     <div className={`ch-strip ${effectivelyMuted ? 'muted' : ''}`}>
-      {/* All the controls live in an inner scroll body so they can overflow
-          when the timeline panel is open without pushing the name out of
-          view. The name (below) sits outside this scroll area and is always
-          visible at the bottom of the strip. */}
-      <div className="ch-strip-body">
-        <div className="ch-meta">
-          {stem.channels === 1 ? 'mono' : 'stereo'} · {Math.round(stem.sampleRate / 1000)}k
-          {!loaded && <div>(not loaded)</div>}
-        </div>
+      <div className="ch-meta">
+        {stem.channels === 1 ? 'mono' : 'stereo'} · {Math.round(stem.sampleRate / 1000)}k
+        {!loaded && <div>(not loaded)</div>}
+      </div>
 
-        <div className="ch-eq">
-          <div className="knob-wrap">
-            <Knob
-              value={state.eq.lo}
-              min={EQ_KNOB_MIN_DB}
-              max={EQ_KNOB_MAX_DB}
-              defaultValue={0}
-              ariaLabel={`${stem.name} EQ low`}
-              onChange={(v) => onEq('lo', v)}
-            />
-            <span className="knob-label">Lo</span>
-            <span className="knob-readout">{formatEqDb(state.eq.lo)}</span>
-          </div>
-          <div className="knob-wrap">
-            <Knob
-              value={state.eq.mid}
-              min={EQ_KNOB_MIN_DB}
-              max={EQ_KNOB_MAX_DB}
-              defaultValue={0}
-              ariaLabel={`${stem.name} EQ mid`}
-              onChange={(v) => onEq('mid', v)}
-            />
-            <span className="knob-label">Mid</span>
-            <span className="knob-readout">{formatEqDb(state.eq.mid)}</span>
-          </div>
-          <div className="knob-wrap">
-            <Knob
-              value={state.eq.hi}
-              min={EQ_KNOB_MIN_DB}
-              max={EQ_KNOB_MAX_DB}
-              defaultValue={0}
-              ariaLabel={`${stem.name} EQ high`}
-              onChange={(v) => onEq('hi', v)}
-            />
-            <span className="knob-label">Hi</span>
-            <span className="knob-readout">{formatEqDb(state.eq.hi)}</span>
-          </div>
-        </div>
-
-        <div className="ch-comp">
-          <fieldset className="ch-comp-type">
-            <legend className="sr-only">{stem.name} comp flavour</legend>
-            <label className={`ch-comp-type-btn ${state.compType === 'clean' ? 'on' : ''}`}>
-              <input
-                type="radio"
-                name={`comp-type-${stem.id}`}
-                value="clean"
-                checked={state.compType === 'clean'}
-                onChange={() => onCompType('clean')}
-                className="sr-only"
-              />
-              Clean
-            </label>
-            <label className={`ch-comp-type-btn ${state.compType === 'color' ? 'on' : ''}`}>
-              <input
-                type="radio"
-                name={`comp-type-${stem.id}`}
-                value="color"
-                checked={state.compType === 'color'}
-                onChange={() => onCompType('color')}
-                className="sr-only"
-              />
-              Color
-            </label>
-          </fieldset>
-          <div className="ch-comp-knobs">
-            <div className="knob-wrap">
-              <Knob
-                value={state.comp.threshold}
-                min={COMP_THRESH_MIN}
-                max={COMP_THRESH_MAX}
-                defaultValue={0}
-                ariaLabel={`${stem.name} comp threshold`}
-                onChange={(v) => onComp('threshold', v)}
-              />
-              <span className="knob-label">Th</span>
-              <span className="knob-readout">{formatThresh(state.comp.threshold)}</span>
-            </div>
-            <div className="knob-wrap">
-              <Knob
-                value={state.comp.ratio}
-                min={COMP_RATIO_MIN}
-                max={COMP_RATIO_MAX}
-                defaultValue={1}
-                ariaLabel={`${stem.name} comp ratio`}
-                onChange={(v) => onComp('ratio', v)}
-              />
-              <span className="knob-label">Rt</span>
-              <span className="knob-readout">{formatRatio(state.comp.ratio)}</span>
-            </div>
-          </div>
-        </div>
-
-        <div className="ch-transient">
-          <button
-            type="button"
-            className={`ch-transient-toggle ${state.transient.bypassed ? '' : 'on'}`}
-            onClick={onTransientBypass}
-            aria-pressed={!state.transient.bypassed}
-            title={
-              state.transient.bypassed ? 'Transient bypassed — click to engage' : 'Transient active'
-            }
-          >
-            Trans
-          </button>
-          <div className="ch-transient-knobs">
-            <div className="knob-wrap">
-              <Knob
-                value={state.transient.attack}
-                min={-1}
-                max={1}
-                defaultValue={0}
-                ariaLabel={`${stem.name} transient attack`}
-                onChange={(v) => onTransient('attack', v)}
-              />
-              <span className="knob-label">Att</span>
-              <span className="knob-readout">{formatTransient(state.transient.attack)}</span>
-            </div>
-            <div className="knob-wrap">
-              <Knob
-                value={state.transient.sustain}
-                min={-1}
-                max={1}
-                defaultValue={0}
-                ariaLabel={`${stem.name} transient sustain`}
-                onChange={(v) => onTransient('sustain', v)}
-              />
-              <span className="knob-label">Sus</span>
-              <span className="knob-readout">{formatTransient(state.transient.sustain)}</span>
-            </div>
-          </div>
-        </div>
-
-        <div className="ch-deess">
-          <button
-            type="button"
-            className={`ch-deess-toggle ${state.deess.bypassed ? '' : 'on'}`}
-            onClick={onDeEssBypass}
-            aria-pressed={!state.deess.bypassed}
-            title={state.deess.bypassed ? 'De-ess bypassed — click to engage' : 'De-ess active'}
-          >
-            DeEss
-          </button>
-          <div className="ch-deess-knobs">
-            <div className="knob-wrap">
-              <Knob
-                value={state.deess.freq}
-                min={2000}
-                max={12000}
-                defaultValue={6000}
-                ariaLabel={`${stem.name} de-ess frequency`}
-                onChange={(v) => onDeEss('freq', v)}
-              />
-              <span className="knob-label">Frq</span>
-              <span className="knob-readout">{formatDeEssFreq(state.deess.freq)}</span>
-            </div>
-            <div className="knob-wrap">
-              <Knob
-                value={state.deess.amount}
-                min={0}
-                max={1}
-                defaultValue={0}
-                ariaLabel={`${stem.name} de-ess amount`}
-                onChange={(v) => onDeEss('amount', v)}
-              />
-              <span className="knob-label">Amt</span>
-              <span className="knob-readout">{formatDeEssAmount(state.deess.amount)}</span>
-            </div>
-          </div>
-        </div>
-
-        <div className="ch-imager">
-          <button
-            type="button"
-            className={`ch-imager-toggle ${state.imager.bypassed ? '' : 'on'}`}
-            onClick={onImagerBypass}
-            aria-pressed={!state.imager.bypassed}
-            title={state.imager.bypassed ? 'Imager bypassed — click to engage' : 'Imager active'}
-          >
-            Img
-          </button>
-          <div className="ch-imager-knobs">
-            <div className="knob-wrap">
-              <Knob
-                value={state.imager.width}
-                min={0}
-                max={2}
-                defaultValue={1}
-                ariaLabel={`${stem.name} imager width`}
-                onChange={onImager}
-              />
-              <span className="knob-label">Wid</span>
-              <span className="knob-readout">{formatImagerWidth(state.imager.width)}</span>
-            </div>
-          </div>
-        </div>
-
-        <SendsSection
-          stemName={stem.name}
-          buses={buses}
-          outputBusId={state.outputBusId}
-          sends={state.sends}
-          onSend={onSend}
-          onRemoveSend={onRemoveSend}
-        />
-
-        <div className="ch-pan-row">
-          <div className="knob-wrap">
-            <Knob
-              variant="pan"
-              value={state.pan}
-              min={-1}
-              max={1}
-              defaultValue={0}
-              ariaLabel={`${stem.name} pan`}
-              onChange={onPan}
-            />
-            <span className="knob-label">Pan</span>
-            <span className="knob-readout">{formatPan(state.pan)}</span>
-          </div>
-        </div>
-
-        <div className="ch-fader-meter">
-          <Meter host={host} stemId={stem.id} active={active && loaded} />
-          <Fader
-            position={volumeToPosition(state.volume)}
-            ariaLabel={`${stem.name} volume`}
-            onChange={(pos) => onVolume(positionToVolume(pos))}
-            onReset={() => onVolume(1)}
+      <div className="ch-eq">
+        <div className="knob-wrap">
+          <Knob
+            value={state.eq.lo}
+            min={EQ_KNOB_MIN_DB}
+            max={EQ_KNOB_MAX_DB}
+            defaultValue={0}
+            ariaLabel={`${stem.name} EQ low`}
+            onChange={(v) => onEq('lo', v)}
           />
+          <span className="knob-label">Lo</span>
+          <span className="knob-readout">{formatEqDb(state.eq.lo)}</span>
         </div>
-
-        <div className="ch-buttons">
-          <button
-            type="button"
-            aria-label={`${stem.name} solo`}
-            aria-pressed={state.soloed}
-            onClick={onSolo}
-            className={`ch-btn solo ${state.soloed ? 'on' : ''}`}
-          >
-            S
-          </button>
-          <button
-            type="button"
-            aria-label={`${stem.name} mute`}
-            aria-pressed={state.muted}
-            onClick={onMute}
-            className={`ch-btn mute ${state.muted ? 'on' : ''}`}
-          >
-            M
-          </button>
+        <div className="knob-wrap">
+          <Knob
+            value={state.eq.mid}
+            min={EQ_KNOB_MIN_DB}
+            max={EQ_KNOB_MAX_DB}
+            defaultValue={0}
+            ariaLabel={`${stem.name} EQ mid`}
+            onChange={(v) => onEq('mid', v)}
+          />
+          <span className="knob-label">Mid</span>
+          <span className="knob-readout">{formatEqDb(state.eq.mid)}</span>
         </div>
-
-        <div className="ch-readout">
-          <div className="ch-db">{formatDb(state.volume)} dB</div>
-        </div>
-
-        <div className="ch-output">
-          <span className="ch-output-arrow" aria-hidden="true">
-            →
-          </span>
-          <select
-            aria-label={`${stem.name} output bus`}
-            className="ch-output-select"
-            value={state.outputBusId in buses ? state.outputBusId : 'master'}
-            onChange={(e) => onOutput(e.target.value)}
-          >
-            {Object.values(buses).map((b) => (
-              <option key={b.id} value={b.id}>
-                {b.name}
-              </option>
-            ))}
-          </select>
+        <div className="knob-wrap">
+          <Knob
+            value={state.eq.hi}
+            min={EQ_KNOB_MIN_DB}
+            max={EQ_KNOB_MAX_DB}
+            defaultValue={0}
+            ariaLabel={`${stem.name} EQ high`}
+            onChange={(v) => onEq('hi', v)}
+          />
+          <span className="knob-label">Hi</span>
+          <span className="knob-readout">{formatEqDb(state.eq.hi)}</span>
         </div>
       </div>
 
-      {/* Scribble-strip name — outside the scrollable body so it always sits
-          at the strip's bottom, regardless of how the engineer has scrolled
-          the controls above. */}
+      <div className="ch-comp">
+        <fieldset className="ch-comp-type">
+          <legend className="sr-only">{stem.name} comp flavour</legend>
+          <label className={`ch-comp-type-btn ${state.compType === 'clean' ? 'on' : ''}`}>
+            <input
+              type="radio"
+              name={`comp-type-${stem.id}`}
+              value="clean"
+              checked={state.compType === 'clean'}
+              onChange={() => onCompType('clean')}
+              className="sr-only"
+            />
+            Clean
+          </label>
+          <label className={`ch-comp-type-btn ${state.compType === 'color' ? 'on' : ''}`}>
+            <input
+              type="radio"
+              name={`comp-type-${stem.id}`}
+              value="color"
+              checked={state.compType === 'color'}
+              onChange={() => onCompType('color')}
+              className="sr-only"
+            />
+            Color
+          </label>
+        </fieldset>
+        <div className="ch-comp-knobs">
+          <div className="knob-wrap">
+            <Knob
+              value={state.comp.threshold}
+              min={COMP_THRESH_MIN}
+              max={COMP_THRESH_MAX}
+              defaultValue={0}
+              ariaLabel={`${stem.name} comp threshold`}
+              onChange={(v) => onComp('threshold', v)}
+            />
+            <span className="knob-label">Th</span>
+            <span className="knob-readout">{formatThresh(state.comp.threshold)}</span>
+          </div>
+          <div className="knob-wrap">
+            <Knob
+              value={state.comp.ratio}
+              min={COMP_RATIO_MIN}
+              max={COMP_RATIO_MAX}
+              defaultValue={1}
+              ariaLabel={`${stem.name} comp ratio`}
+              onChange={(v) => onComp('ratio', v)}
+            />
+            <span className="knob-label">Rt</span>
+            <span className="knob-readout">{formatRatio(state.comp.ratio)}</span>
+          </div>
+        </div>
+      </div>
+
+      <div className="ch-transient">
+        <button
+          type="button"
+          className={`ch-transient-toggle ${state.transient.bypassed ? '' : 'on'}`}
+          onClick={onTransientBypass}
+          aria-pressed={!state.transient.bypassed}
+          title={
+            state.transient.bypassed ? 'Transient bypassed — click to engage' : 'Transient active'
+          }
+        >
+          Trans
+        </button>
+        <div className="ch-transient-knobs">
+          <div className="knob-wrap">
+            <Knob
+              value={state.transient.attack}
+              min={-1}
+              max={1}
+              defaultValue={0}
+              ariaLabel={`${stem.name} transient attack`}
+              onChange={(v) => onTransient('attack', v)}
+            />
+            <span className="knob-label">Att</span>
+            <span className="knob-readout">{formatTransient(state.transient.attack)}</span>
+          </div>
+          <div className="knob-wrap">
+            <Knob
+              value={state.transient.sustain}
+              min={-1}
+              max={1}
+              defaultValue={0}
+              ariaLabel={`${stem.name} transient sustain`}
+              onChange={(v) => onTransient('sustain', v)}
+            />
+            <span className="knob-label">Sus</span>
+            <span className="knob-readout">{formatTransient(state.transient.sustain)}</span>
+          </div>
+        </div>
+      </div>
+
+      <div className="ch-deess">
+        <button
+          type="button"
+          className={`ch-deess-toggle ${state.deess.bypassed ? '' : 'on'}`}
+          onClick={onDeEssBypass}
+          aria-pressed={!state.deess.bypassed}
+          title={state.deess.bypassed ? 'De-ess bypassed — click to engage' : 'De-ess active'}
+        >
+          DeEss
+        </button>
+        <div className="ch-deess-knobs">
+          <div className="knob-wrap">
+            <Knob
+              value={state.deess.freq}
+              min={2000}
+              max={12000}
+              defaultValue={6000}
+              ariaLabel={`${stem.name} de-ess frequency`}
+              onChange={(v) => onDeEss('freq', v)}
+            />
+            <span className="knob-label">Frq</span>
+            <span className="knob-readout">{formatDeEssFreq(state.deess.freq)}</span>
+          </div>
+          <div className="knob-wrap">
+            <Knob
+              value={state.deess.amount}
+              min={0}
+              max={1}
+              defaultValue={0}
+              ariaLabel={`${stem.name} de-ess amount`}
+              onChange={(v) => onDeEss('amount', v)}
+            />
+            <span className="knob-label">Amt</span>
+            <span className="knob-readout">{formatDeEssAmount(state.deess.amount)}</span>
+          </div>
+        </div>
+      </div>
+
+      <div className="ch-imager">
+        <button
+          type="button"
+          className={`ch-imager-toggle ${state.imager.bypassed ? '' : 'on'}`}
+          onClick={onImagerBypass}
+          aria-pressed={!state.imager.bypassed}
+          title={state.imager.bypassed ? 'Imager bypassed — click to engage' : 'Imager active'}
+        >
+          Img
+        </button>
+        <div className="ch-imager-knobs">
+          <div className="knob-wrap">
+            <Knob
+              value={state.imager.width}
+              min={0}
+              max={2}
+              defaultValue={1}
+              ariaLabel={`${stem.name} imager width`}
+              onChange={onImager}
+            />
+            <span className="knob-label">Wid</span>
+            <span className="knob-readout">{formatImagerWidth(state.imager.width)}</span>
+          </div>
+        </div>
+      </div>
+
+      <SendsSection
+        stemName={stem.name}
+        buses={buses}
+        outputBusId={state.outputBusId}
+        sends={state.sends}
+        onSend={onSend}
+        onRemoveSend={onRemoveSend}
+      />
+
+      <div className="ch-pan-row">
+        <div className="knob-wrap">
+          <Knob
+            variant="pan"
+            value={state.pan}
+            min={-1}
+            max={1}
+            defaultValue={0}
+            ariaLabel={`${stem.name} pan`}
+            onChange={onPan}
+          />
+          <span className="knob-label">Pan</span>
+          <span className="knob-readout">{formatPan(state.pan)}</span>
+        </div>
+      </div>
+
+      <div className="ch-fader-meter">
+        <Meter host={host} stemId={stem.id} active={active && loaded} />
+        <Fader
+          position={volumeToPosition(state.volume)}
+          ariaLabel={`${stem.name} volume`}
+          onChange={(pos) => onVolume(positionToVolume(pos))}
+          onReset={() => onVolume(1)}
+        />
+      </div>
+
+      <div className="ch-buttons">
+        <button
+          type="button"
+          aria-label={`${stem.name} solo`}
+          aria-pressed={state.soloed}
+          onClick={onSolo}
+          className={`ch-btn solo ${state.soloed ? 'on' : ''}`}
+        >
+          S
+        </button>
+        <button
+          type="button"
+          aria-label={`${stem.name} mute`}
+          aria-pressed={state.muted}
+          onClick={onMute}
+          className={`ch-btn mute ${state.muted ? 'on' : ''}`}
+        >
+          M
+        </button>
+      </div>
+
+      <div className="ch-readout">
+        <div className="ch-db">{formatDb(state.volume)} dB</div>
+      </div>
+
+      <div className="ch-output">
+        <span className="ch-output-arrow" aria-hidden="true">
+          →
+        </span>
+        <select
+          aria-label={`${stem.name} output bus`}
+          className="ch-output-select"
+          value={state.outputBusId in buses ? state.outputBusId : 'master'}
+          onChange={(e) => onOutput(e.target.value)}
+        >
+          {Object.values(buses).map((b) => (
+            <option key={b.id} value={b.id}>
+              {b.name}
+            </option>
+          ))}
+        </select>
+      </div>
+
+      {/* Scribble-strip name — last flex child with position: sticky so it
+          stays pinned to the bottom of the mixer console as the engineer
+          scrolls vertically through all strips together. */}
       <div className="ch-name" title={stem.name}>
         {stem.name}
       </div>
