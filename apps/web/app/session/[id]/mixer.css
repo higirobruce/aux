@@ -686,23 +686,15 @@
   letter-spacing: 0.06em;
   font-weight: 500;
   color: #dce7f5;
-  padding: 6px 4px;
+  padding: 7px 6px;
   background: linear-gradient(180deg, #2a3038, #14171c);
   border-bottom: 1px solid #0a0c10;
   text-transform: uppercase;
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.05);
-  /* Wrap to at most two lines and ellipsis the rest — stem names are often
-     longer than the 88 px strip width, single-line truncation lost too much
-     context. Mid-word break-all is fine here because most stem names use
-     underscores / hyphens, which CSS doesn't treat as wrap opportunities. */
-  display: -webkit-box;
-  -webkit-line-clamp: 2;
-  -webkit-box-orient: vertical;
-  line-clamp: 2;
-  line-height: 1.25;
+  white-space: nowrap;
   overflow: hidden;
-  word-break: break-all;
-  min-height: calc(2 * 1.25em + 12px);
+  text-overflow: ellipsis;
+  /* The full name lives in the title attribute — hover for the long form. */
 }
 
 .ch-meta {
