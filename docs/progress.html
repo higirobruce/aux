@@ -194,15 +194,15 @@
         <div class="lbl">Must-ship plugins</div>
       </div>
       <div class="stat">
-        <div class="num">3<span style="color: var(--ink-3); font-size: var(--t-22);"> / 7</span></div>
+        <div class="num">4<span style="color: var(--ink-3); font-size: var(--t-22);"> / 7</span></div>
         <div class="lbl">v0.3 scope items done</div>
       </div>
       <div class="stat">
-        <div class="num">11</div>
+        <div class="num">19</div>
         <div class="lbl">v0.3 commits to date</div>
       </div>
       <div class="stat">
-        <div class="num">12</div>
+        <div class="num">11</div>
         <div class="lbl">MixState versions</div>
       </div>
     </div>
@@ -273,16 +273,21 @@
             <div class="lbl">Clip editing v1</div>
             <div class="why">Cut / move / trim per stem on the timeline. Stays inside one stem — no inserts, no MIDI.</div>
           </td>
-          <td class="status"><span class="pill-st pill-planned">Planned</span></td>
-          <td>Depends on the read-only stem timeline landing first.</td>
+          <td class="status"><span class="pill-st pill-next">Next (unblocked)</span></td>
+          <td>Stem timeline is in, so the surface to edit on exists. Still the heaviest unlanded v0.3 item.</td>
         </tr>
         <tr>
           <td>
             <div class="lbl">Stem timeline (read-only)</div>
             <div class="why">Horizontal lane per stem, sharing the mixer playhead. Waveform render + click-to-jump + mute/solo mirror.</div>
           </td>
-          <td class="status"><span class="pill-st pill-planned">Planned</span></td>
-          <td>Added to the v0.3 plan today. Foundation for clip editing v1.</td>
+          <td class="status"><span class="pill-st pill-shipped">Shipped</span></td>
+          <td>
+            Ruler + canvas lane per stem, peaks pre-decoded on mount, click-to-seek (restarts playback at offset
+            when playing), in/out shading + hairline markers, mute/solo mirror, timeline toggle in the transport bar.
+            Mixer also gained a global vertical scroll and a sibling names row so the scribble strip stays
+            visible regardless of how the controls are scrolled.
+          </td>
         </tr>
       </tbody>
     </table>
@@ -442,72 +447,82 @@
     <div class="callout callout-tip">
       <span class="mark">Pick one</span>
       <p>
-        Of the four open v0.3 lanes (3 plugins, Stem timeline, Smart EQ panel,
-        Reference Rooms, Clip editing), the highest-leverage next step is the
-        <strong>read-only Stem timeline</strong> — it unlocks Clip editing v1
-        downstream, and it's the only v0.3 feature that meaningfully changes
-        how the mixer looks. The plugin marathon is faster but boring; doing
-        timeline now means clip editing is reachable inside v0.3.
+        Stem timeline is in, so v0.3 has four lanes left: three remaining
+        plugins (Tape, Console, MB-Comp), Reference Rooms, Smart EQ panel,
+        and Clip editing v1 — newly unblocked. Cheapest is
+        <strong>Reference Rooms</strong> (one small worklet + a Master strip
+        toggle), highest-leverage is <strong>Clip editing v1</strong> (the
+        only feature on the v0.3 list that hasn't even started, and it's
+        large). A reasonable order: Reference Rooms → finish the plugin
+        marathon (Tape → Console → MB-Comp) → Smart EQ panel → Clip
+        editing. Reorder freely.
       </p>
     </div>
 
     <div class="grid-2">
       <div>
-        <h3 style="margin-top: 0;">Option A — Stem timeline (recommended)</h3>
+        <h3 style="margin-top: 0;">Option A — Reference Rooms (cheapest)</h3>
         <p>
-          Read-only horizontal lane per stem. Waveform render via OfflineAudioContext
-          + downsampled peaks, transport-synced playhead, click-to-jump, in/out
-          markers. Mirrors mute/solo from the channel strip.
+          A small set of EQ presets (laptop, earbuds, car, club) applied to
+          the Master, switchable from the Master strip. Spot-check
+          translation mid-mix without leaving the session.
         </p>
         <p class="caption">
-          <strong>Cost:</strong> ~1 medium slice. Touches the mixer shell layout
-          (third row above the console), a new <code>_timeline.tsx</code>, and a
-          small peaks worker. No DSP, no MixState change.
+          <strong>Cost:</strong> Smallest unlanded item. One small worklet
+          (or just a few cascaded biquads), one toggle group on the Master
+          strip, a tiny MixState bump.
         </p>
         <p class="caption">
-          <strong>Unlocks:</strong> Clip editing v1 has somewhere to live.
+          <strong>Unlocks:</strong> Real engineer workflow — &ldquo;does this
+          mix translate to AirPods?&rdquo;
         </p>
       </div>
       <div>
         <h3 style="margin-top: 0;">Option B — Finish the plugin suite</h3>
         <p>
           Three plugins to go: Tape (easy — single-stage saturation curve),
-          Console (medium — channel-style nonlinear coloration), MB-Comp (heavy
-          — 3 or 4 bands × compressor + Linkwitz-Riley crossovers).
+          Console (medium — channel-style nonlinear coloration), MB-Comp
+          (heavy — 3 or 4 bands × compressor + Linkwitz-Riley crossovers).
         </p>
         <p class="caption">
-          <strong>Cost:</strong> 3 slices, ~one each. The pattern is by-rote at
-          this point; the work is in tuning DSP not wiring it up.
+          <strong>Cost:</strong> 3 slices, roughly one each. The plugin
+          plumbing is by-rote at this point; the work is in tuning DSP not
+          wiring it up.
         </p>
         <p class="caption">
-          <strong>Unlocks:</strong> Closes "all 12 native plugins" on the v0.3
-          checklist.
+          <strong>Unlocks:</strong> Closes &ldquo;all 12 native plugins&rdquo; on
+          the v0.3 checklist; 9 / 13 → 12 / 13.
         </p>
       </div>
       <div>
-        <h3 style="margin-top: 0;">Option C — Smart EQ panel</h3>
+        <h3 style="margin-top: 0;">Option C — Clip editing v1 (heaviest)</h3>
         <p>
-          Polish the EQ-8 surface. Curve display, frequency-response plot,
-          draggable band nodes, expose all 8 bands (today only Lo / Mid / Hi
-          are surfaced on the channel strip).
+          Cut / move / trim per stem inside the timeline. Stays inside one
+          stem — no inserts, no MIDI. Drag handles on each lane, snap, undo
+          for edits.
+        </p>
+        <p class="caption">
+          <strong>Cost:</strong> Largest unlanded v0.3 lane. Edit-state in
+          MixState, drag interactions on each lane, undo/redo stack, and
+          host-side per-clip playback offsets in the audio engine.
+        </p>
+        <p class="caption">
+          <strong>Now unblocked:</strong> Stem timeline shipped, so the
+          editing surface exists.
+        </p>
+      </div>
+      <div>
+        <h3 style="margin-top: 0;">Option D — Smart EQ panel</h3>
+        <p>
+          Polished UI for the existing EQ-8 DSP — curve display,
+          frequency-response plot, draggable band nodes, all eight bands
+          exposed (today only Lo / Mid / Hi are surfaced on the channel
+          strip).
         </p>
         <p class="caption">
           <strong>Cost:</strong> Larger than the plugin slices because the
-          interaction model is bespoke (drag points on a canvas, frequency-log
-          axis). DSP is already done.
-        </p>
-      </div>
-      <div>
-        <h3 style="margin-top: 0;">Option D — Reference Rooms</h3>
-        <p>
-          A small set of EQ presets (laptop, earbuds, car, club) applied to the
-          Master, switchable from the Master strip. Spot-check translation
-          mid-mix.
-        </p>
-        <p class="caption">
-          <strong>Cost:</strong> Smallest of the four. One worklet (or even just
-          a few cascaded biquads in the existing chain), one toggle group on
-          the Master strip, a tiny MixState bump.
+          interaction model is bespoke (drag points on a log-frequency
+          canvas). DSP is already done.
         </p>
       </div>
     </div>
@@ -525,6 +540,14 @@
     </p>
 
     <div class="commitlog">
+<span class="sha">565f622</span> <span class="v03">v0.3</span> <span class="msg">Channel strip: names in a sibling row outside the console scroll</span>
+<span class="sha">70651b8</span> <span class="v03">v0.3</span> <span class="msg">Channel strip: drop sticky on name to stop covering the output</span>
+<span class="sha">286c1f9</span> <span class="v03">v0.3</span> <span class="msg">Channel strip: global console scroll + sticky scribble-strip name</span>
+<span class="sha">3d1d0c5</span> <span class="v03">v0.3</span> <span class="msg">Channel strip: per-strip scroll body so name is always visible</span>
+<span class="sha">79f9774</span> <span class="v03">v0.3</span> <span class="msg">Channel strip: scribble-strip name (sticky bottom)</span>
+<span class="sha">882cc50</span> <span class="v03">v0.3</span> <span class="msg">Stem timeline: single-line ellipsis on channel names</span>
+<span class="sha">79b66f4</span> <span class="v03">v0.3</span> <span class="msg">Stem timeline polish: mixer scroll, name wrap, peaks on mount</span>
+<span class="sha">b5c78d7</span> <span class="v03">v0.3</span> <span class="msg">Stem timeline (read-only) + living progress doc</span>
 <span class="sha">89a3a49</span> <span class="v03">v0.3</span> <span class="msg">DeEss + Imager: per-channel split-band de-esser and M/S width</span>
 <span class="sha">fcf6930</span> <span class="v03">v0.3</span> <span class="msg">Transient designer: per-channel attack/sustain shaper</span>
 <span class="sha">ebe3040</span> <span class="v03">v0.3</span> <span class="msg">Hall reverb + generalised per-bus reverb slot</span>
