@@ -12,15 +12,22 @@ datasource db {
 }
 
 model User {
-  id          String   @id @default(uuid())
-  email       String   @unique
-  createdAt   DateTime @default(now())
-  lastSeenAt  DateTime?
+  id            String    @id @default(uuid())
+  email         String    @unique
+  name          String?
+  emailVerified Boolean   @default(false) @map("email_verified")
+  image         String?
+  createdAt     DateTime  @default(now()) @map("created_at")
+  updatedAt     DateTime  @updatedAt      @map("updated_at")
+  lastSeenAt    DateTime? @map("last_seen_at")
 
   sessions       Session[]
   collaborators  Collaborator[]
   userPresets    UserPreset[]
   chainPresets   ChainPreset[]
+  shareLinks     ShareLink[]
+  authSessions   AuthSession[]
+  accounts       Account[]
 
   @@map("users")
 }
@@ -84,6 +91,7 @@ model Snapshot {
   parent      Snapshot?  @relation("SnapshotLineage", fields: [parentId], references: [id])
   children    Snapshot[] @relation("SnapshotLineage")
   shareLinks  ShareLink[]
+  renders     Render[]
 
   @@index([sessionId])
   @@index([parentId])
@@ -140,27 +148,31 @@ model Render {
   createdAt   DateTime      @default(now()) @map("created_at")
   finishedAt  DateTime?     @map("finished_at")
 
-  session     Session   @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  session   Session  @relation(fields: [sessionId],  references: [id], onDelete: Cascade)
+  snapshot  Snapshot @relation(fields: [snapshotId], references: [id], onDelete: Restrict)
 
   @@index([sessionId])
+  @@index([snapshotId])
   @@map("renders")
 }
 
 // Async sharing — per docs/implementation.html §05.
 model ShareLink {
-  id          String   @id @default(uuid())
-  sessionId   String   @map("session_id")
-  snapshotId  String   @map("snapshot_id")
-  createdBy   String   @map("created_by")
+  id          String    @id @default(uuid())
+  sessionId   String    @map("session_id")
+  snapshotId  String    @map("snapshot_id")
+  createdById String    @map("created_by")
   expiresAt   DateTime? @map("expires_at")
   revokedAt   DateTime? @map("revoked_at")
-  createdAt   DateTime @default(now()) @map("created_at")
+  createdAt   DateTime  @default(now()) @map("created_at")
 
-  session   Session  @relation(fields: [sessionId], references: [id], onDelete: Cascade)
-  snapshot  Snapshot @relation(fields: [snapshotId], references: [id], onDelete: Cascade)
+  session    Session  @relation(fields: [sessionId],   references: [id], onDelete: Cascade)
+  snapshot   Snapshot @relation(fields: [snapshotId],  references: [id], onDelete: Cascade)
+  createdBy  User     @relation(fields: [createdById], references: [id], onDelete: Restrict)
 
   @@index([sessionId])
   @@index([snapshotId])
+  @@index([createdById])
   @@map("share_links")
 }
 
@@ -194,4 +206,61 @@ model ChainPreset {
 
   @@index([ownerId])
   @@map("chain_presets")
+}
+
+// ============================================================================
+// AUTH — better-auth tables. Mapped to auth_* to keep the Session/Account
+// namespace free for the mix-session domain. Schema shape per better-auth
+// (https://better-auth.com/docs/concepts/database#core-schema).
+// ============================================================================
+
+model AuthSession {
+  id        String   @id @default(uuid())
+  userId    String   @map("user_id")
+  token     String   @unique
+  expiresAt DateTime @map("expires_at")
+  ipAddress String?  @map("ip_address")
+  userAgent String?  @map("user_agent")
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt       @map("updated_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([token])
+  @@map("auth_sessions")
+}
+
+model Account {
+  id                    String    @id @default(uuid())
+  userId                String    @map("user_id")
+  accountId             String    @map("account_id")     // provider-specific external id
+  providerId            String    @map("provider_id")    // 'magic-link', 'google', ...
+  accessToken           String?   @map("access_token")
+  refreshToken          String?   @map("refresh_token")
+  idToken               String?   @map("id_token")
+  accessTokenExpiresAt  DateTime? @map("access_token_expires_at")
+  refreshTokenExpiresAt DateTime? @map("refresh_token_expires_at")
+  scope                 String?
+  password              String?
+  createdAt             DateTime  @default(now()) @map("created_at")
+  updatedAt             DateTime  @updatedAt       @map("updated_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([providerId, accountId])
+  @@index([userId])
+  @@map("auth_accounts")
+}
+
+model Verification {
+  id         String   @id @default(uuid())
+  identifier String                                       // usually email
+  value      String                                       // the token (hashed by better-auth)
+  expiresAt  DateTime @map("expires_at")
+  createdAt  DateTime @default(now()) @map("created_at")
+  updatedAt  DateTime @updatedAt       @map("updated_at")
+
+  @@index([identifier])
+  @@map("auth_verifications")
 }

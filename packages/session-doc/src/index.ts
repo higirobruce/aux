@@ -1,2 +1,2 @@
-export * from './schema.js';
-export { readAtom, writeAtom, diffAtoms, type AtomDelta } from './atoms.js';
+export * from './schema';
+export { readAtom, writeAtom, diffAtoms, type AtomDelta } from './atoms';

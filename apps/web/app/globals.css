@@ -1,27 +1,40 @@
-@import 'tailwindcss';
-@import '@aux/design-system/tokens.css';
+@import "tailwindcss";
+@import "@aux/design-system/tokens.css";
 
-/* Tailwind 4 theme bridge — wire design-system tokens into Tailwind utilities. */
-@theme inline {
-  --color-paper: var(--paper);
-  --color-paper-2: var(--paper-2);
-  --color-paper-3: var(--paper-3);
-  --color-ink: var(--ink);
-  --color-ink-2: var(--ink-2);
-  --color-ink-3: var(--ink-3);
-  --color-ink-4: var(--ink-4);
-  --color-azure: var(--azure);
-  --color-azure-soft: var(--azure-soft);
-  --color-azure-deep: var(--azure-deep);
-  --color-line: var(--line);
+/* Tailwind 4 auto-scans the project root; workspace packages need an explicit
+ * @source so their class names are seen by the JIT compiler. */
+@source "../../../packages/ui/src";
 
-  --font-display: var(--font-display);
-  --font-sans: var(--font-sans);
-  --font-mono: var(--font-mono);
+@theme {
+  /* Color · paper & ink */
+  --color-paper: #eef2f7;
+  --color-paper-2: #e3eaf3;
+  --color-paper-3: #d2dce8;
+  --color-ink: #16181d;
+  --color-ink-2: #353a43;
+  --color-ink-3: #626973;
+  --color-ink-4: #939aa5;
 
-  --radius-sm: var(--r-1);
-  --radius-md: var(--r-2);
-  --radius-lg: var(--r-3);
+  /* Color · azure accent */
+  --color-azure: #2e5fa8;
+  --color-azure-soft: #c5d5ec;
+  --color-azure-deep: #14355f;
+
+  /* Color · semantic */
+  --color-line: #d3dce7;
+  --color-line-strong: #b5c2d2;
+  --color-highlight: #dce7f5;
+  --color-ring: #2e5fa8;
+
+  /* Fonts */
+  --font-display: "Tiempos", "Iowan Old Style", "Georgia", serif;
+  --font-sans: "Söhne", "Inter", -apple-system, BlinkMacSystemFont, "Helvetica Neue", sans-serif;
+  --font-mono: "JetBrains Mono", "SF Mono", "Menlo", monospace;
+
+  /* Radius */
+  --radius-sm: 2px;
+  --radius-md: 4px;
+  --radius-lg: 8px;
 }
 
 html,

@@ -1,5 +1,6 @@
-import { Body, Controller, Get, Post } from '@nestjs/common';
+import { Body, Controller, Get, Post, Req, UseGuards } from '@nestjs/common';
 import { z } from 'zod';
+import { AuthGuard, type AuthenticatedRequest } from '../auth/auth.guard.js';
 import { SessionsService } from './sessions.service.js';
 
 const CreateSessionSchema = z.object({
@@ -7,21 +8,21 @@ const CreateSessionSchema = z.object({
   storageMode: z.enum(['cloud', 'local']),
 });
 
+@UseGuards(AuthGuard)
 @Controller('sessions')
 export class SessionsController {
   constructor(private readonly sessions: SessionsService) {}
 
   @Get()
-  async list() {
-    // TODO: pull user_id from auth context.
-    return this.sessions.list('placeholder-user-id');
+  async list(@Req() req: AuthenticatedRequest) {
+    return this.sessions.list(req.user.id);
   }
 
   @Post()
-  async create(@Body() body: unknown) {
+  async create(@Req() req: AuthenticatedRequest, @Body() body: unknown) {
     const parsed = CreateSessionSchema.parse(body);
     return this.sessions.create({
-      ownerId: 'placeholder-user-id',
+      ownerId: req.user.id,
       name: parsed.name,
       storageMode: parsed.storageMode,
     });
