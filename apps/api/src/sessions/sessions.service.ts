@@ -1,6 +1,6 @@
 import { getPrismaClient } from '@aux/db';
+import { type MixState, MixStateSchema } from '@aux/session-doc';
 import { Injectable, NotFoundException } from '@nestjs/common';
-import { type MixState, MixStateSchema } from './mix-state.schema.js';
 
 /**
  * Session metadata service. Talks to Postgres via Prisma.

@@ -1,5 +1,5 @@
 import { getPrismaClient } from '@aux/db';
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import { SessionsService } from '../sessions/sessions.service.js';
 import { StorageService } from '../storage/storage.service.js';
 
@@ -7,6 +7,25 @@ import { StorageService } from '../storage/storage.service.js';
  *  treats such keys as opaque markers — no signing, no S3 calls. */
 const OPFS_KEY_PREFIX = 'opfs:';
 const isLocalKey = (k: string | null | undefined) => !!k && k.startsWith(OPFS_KEY_PREFIX);
+
+/**
+ * Defense-in-depth: the client picks the s3Key it wants written to the
+ * stems row, so we enforce that it points into the session's own namespace.
+ * Without this a malicious caller could write a key pointing at another
+ * user's R2 prefix on their own stem row and then download via the signed-
+ * URL endpoint.
+ *
+ * Valid forms:
+ *   stems/<sessionId>/...           — R2 key minted via /api/stems/sign
+ *   opfs:sessions/<sessionId>/...   — local OPFS file
+ */
+function assertOwnedKey(sessionId: string, s3Key: string): void {
+  const r2Ok = s3Key.startsWith(`stems/${sessionId}/`);
+  const opfsOk = s3Key.startsWith(`${OPFS_KEY_PREFIX}sessions/${sessionId}/`);
+  if (!r2Ok && !opfsOk) {
+    throw new BadRequestException('s3Key must belong to this session');
+  }
+}
 
 export interface SignUploadInput {
   userId: string;
@@ -58,6 +77,7 @@ export class StemsService {
 
   async register(input: RegisterStemInput) {
     await this.sessions.assertOwnership(input.userId, input.sessionId);
+    assertOwnedKey(input.sessionId, input.s3Key);
     return this.db.stem.create({
       data: {
         sessionId: input.sessionId,
@@ -111,6 +131,7 @@ export class StemsService {
    */
   async swapSource(input: SwapSourceInput) {
     await this.sessions.assertOwnership(input.userId, input.sessionId);
+    assertOwnedKey(input.sessionId, input.s3Key);
     const stem = await this.db.stem.findFirst({
       where: { id: input.stemId, sessionId: input.sessionId },
     });

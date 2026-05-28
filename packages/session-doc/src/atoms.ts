@@ -1,4 +1,4 @@
-import type { SessionDoc } from './schema';
+import type { SessionDoc } from './schema.js';
 
 /**
  * Atom-path helpers — read/write parameters via dot-notation paths.
@@ -40,7 +40,10 @@ export function writeAtom(doc: SessionDoc, path: AtomPath, value: unknown): Sess
   const parts = path.split('.');
   if (parts.length === 0) return doc;
 
-  const next = structuredClone(doc);
+  // SessionDoc is JSON-safe (primitives + plain objects + arrays), so a
+  // JSON clone is enough and avoids depending on structuredClone being in
+  // the consumer's lib at compile time.
+  const next = JSON.parse(JSON.stringify(doc)) as SessionDoc;
   let cur: unknown = next;
 
   for (let i = 0; i < parts.length - 1; i++) {
