@@ -3,6 +3,13 @@
 version = 4
 
 [[package]]
+name = "aux-dsp-comp-clean"
+version = "0.1.0"
+dependencies = [
+ "wasm-bindgen",
+]
+
+[[package]]
 name = "aux-dsp-eq8"
 version = "0.1.0"
 dependencies = [

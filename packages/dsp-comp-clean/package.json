@@ -1,0 +1,23 @@
+{
+  "name": "@aux/dsp-comp-clean",
+  "version": "0.1.0",
+  "private": true,
+  "description": "VCA-style compressor — Rust DSP compiled to WASM, exposed as ES module.",
+  "type": "module",
+  "main": "./wasm/comp_clean.js",
+  "types": "./wasm/comp_clean.d.ts",
+  "files": ["wasm"],
+  "exports": {
+    ".": {
+      "types": "./wasm/comp_clean.d.ts",
+      "default": "./wasm/comp_clean.js"
+    },
+    "./comp_clean_bg.wasm": "./wasm/comp_clean_bg.wasm",
+    "./package.json": "./package.json"
+  },
+  "scripts": {
+    "build": "wasm-pack build --release --target web --out-dir wasm --out-name comp_clean && rm -f wasm/.gitignore wasm/package.json",
+    "test:rust": "cargo test --release",
+    "clean": "rm -rf wasm target"
+  }
+}
