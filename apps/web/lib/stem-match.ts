@@ -143,11 +143,14 @@ export function nameScore(oldName: string, newName: string): number {
 
   // Role match — strong bonus if both names parse to the same role. Misses
   // cancel each other out (different roles → 0 bonus, not negative penalty).
+  // 0.6 is calibrated so pure-role matches with no token overlap (e.g.
+  // "kick" ↔ "kk", "snare" ↔ "sd2") clear MATCH_UNCERTAIN on their own; any
+  // additional token overlap lifts them toward MATCH_AUTO.
   const roleA = detectRole(a);
   const roleB = detectRole(b);
-  const roleBonus = roleA && roleA === roleB ? 0.35 : 0;
+  const roleBonus = roleA && roleA === roleB ? 0.6 : 0;
 
-  return Math.min(1, jaccard * 0.4 + edit * 0.4 + roleBonus);
+  return Math.min(1, jaccard * 0.35 + edit * 0.35 + roleBonus);
 }
 
 export function lengthScore(oldMs: number, newMs: number): number {
