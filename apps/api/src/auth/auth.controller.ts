@@ -12,7 +12,7 @@ import { getAuth } from './auth.js';
  * for the magic-link surface per the library docs.
  */
 @SkipThrottle()
-@Controller('api/auth')
+@Controller('auth')
 export class AuthController {
   @All('*')
   async handle(@Req() req: FastifyRequest, @Res() reply: FastifyReply) {

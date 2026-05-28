@@ -40,7 +40,10 @@ export function createAuth(): Auth {
     verification: { modelName: 'verification' },
 
     secret: process.env.AUTH_SECRET ?? 'dev-only-not-for-prod-replace-me',
-    baseURL: process.env.API_BASE_URL ?? 'http://localhost:4000',
+    // baseURL is the URL the BROWSER sees — magic-link URLs are minted with
+    // this prefix. We route /api/* through Next.js so cookies end up scoped
+    // to the web origin (cross-origin SameSite=Lax wouldn't be sent on fetch).
+    baseURL: process.env.PUBLIC_BASE_URL ?? 'http://localhost:3100',
 
     trustedOrigins: [process.env.WEB_ORIGIN ?? 'http://localhost:3100'],
 

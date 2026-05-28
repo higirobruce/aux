@@ -20,6 +20,9 @@ async function bootstrap() {
     credentials: true,
   });
 
+  // Global /api prefix so the Next.js proxy can rewrite /api/* → here cleanly.
+  app.setGlobalPrefix('api');
+
   app.useGlobalFilters(new ZodExceptionFilter());
 
   const port = Number(process.env.PORT ?? 4000);
