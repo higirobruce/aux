@@ -141,7 +141,7 @@
        HEADER
        ============================================================ -->
   <section class="section">
-    <p class="eyebrow">aux · progress snapshot · 2026-05-28</p>
+    <p class="eyebrow">aux · progress snapshot · 2026-05-29</p>
     <h1>v0.3 — Real mixing</h1>
     <p style="font-size: var(--t-18); color: var(--ink-2); max-width: 64ch;">
       A living view of what's shipped against
@@ -194,15 +194,15 @@
         <div class="lbl">Must-ship plugins</div>
       </div>
       <div class="stat">
-        <div class="num">4<span style="color: var(--ink-3); font-size: var(--t-22);"> / 7</span></div>
+        <div class="num">5<span style="color: var(--ink-3); font-size: var(--t-22);"> / 7</span></div>
         <div class="lbl">v0.3 scope items done</div>
       </div>
       <div class="stat">
-        <div class="num">19</div>
+        <div class="num">20</div>
         <div class="lbl">v0.3 commits to date</div>
       </div>
       <div class="stat">
-        <div class="num">11</div>
+        <div class="num">12</div>
         <div class="lbl">MixState versions</div>
       </div>
     </div>
@@ -257,8 +257,13 @@
             <div class="lbl">Reference Rooms</div>
             <div class="why">Filter presets that simulate playback on car / laptop / earbud systems, applied to the Master so you can spot-check translation while mixing.</div>
           </td>
-          <td class="status"><span class="pill-st pill-planned">Planned</span></td>
-          <td>Not started. Cheap to build — a small FIR / IIR per room loaded after the Master limiter, with one-knob A/B switching.</td>
+          <td class="status"><span class="pill-st pill-shipped">Shipped</span></td>
+          <td>
+            Four presets (Off / Laptop / Earbuds / Car) as native BiquadFilterNode cascades inserted between
+            masterGain and the final output — meter + limiter still see the true mix, only what's monitored is
+            coloured. 2×2 toggle grid on the Master strip. Hydration also fixed in passing to preserve a saved
+            limiter on version bumps rather than wiping it.
+          </td>
         </tr>
         <tr>
           <td>
@@ -447,59 +452,55 @@
     <div class="callout callout-tip">
       <span class="mark">Pick one</span>
       <p>
-        Stem timeline is in, so v0.3 has four lanes left: three remaining
-        plugins (Tape, Console, MB-Comp), Reference Rooms, Smart EQ panel,
-        and Clip editing v1 — newly unblocked. Cheapest is
-        <strong>Reference Rooms</strong> (one small worklet + a Master strip
-        toggle), highest-leverage is <strong>Clip editing v1</strong> (the
-        only feature on the v0.3 list that hasn't even started, and it's
-        large). A reasonable order: Reference Rooms → finish the plugin
-        marathon (Tape → Console → MB-Comp) → Smart EQ panel → Clip
-        editing. Reorder freely.
+        Reference Rooms shipped, so v0.3 has three lanes left: finish the
+        plugin marathon (Tape · Console · MB-Comp), Smart EQ panel, and
+        Clip editing v1. The plugin marathon closes the headline
+        &ldquo;all 12 native plugins&rdquo; checkbox on the v0.3 list, with
+        Tape as the easiest first step. Smart EQ panel is the only
+        remaining UI-heavy item; Clip editing v1 is the largest unlanded
+        feature, now reachable on top of the stem timeline.
       </p>
     </div>
 
     <div class="grid-2">
       <div>
-        <h3 style="margin-top: 0;">Option A — Reference Rooms (cheapest)</h3>
+        <h3 style="margin-top: 0;">Option A — Tape (cheapest plugin)</h3>
         <p>
-          A small set of EQ presets (laptop, earbuds, car, club) applied to
-          the Master, switchable from the Master strip. Spot-check
-          translation mid-mix without leaving the session.
+          Single-stage tape-style saturation. Smooth nonlinearity (typically
+          tanh / soft-clip), drive + bias + low-shelf bias to model the
+          tape head's frequency-dependent compression. Mono per channel.
         </p>
         <p class="caption">
-          <strong>Cost:</strong> Smallest unlanded item. One small worklet
-          (or just a few cascaded biquads), one toggle group on the Master
-          strip, a tiny MixState bump.
+          <strong>Cost:</strong> Small Rust crate, the plugin plumbing is
+          by-rote at this point. Probably a single slice.
         </p>
         <p class="caption">
-          <strong>Unlocks:</strong> Real engineer workflow — &ldquo;does this
-          mix translate to AirPods?&rdquo;
+          <strong>Progress:</strong> 9 / 13 must-ship plugins → 10 / 13.
         </p>
       </div>
       <div>
         <h3 style="margin-top: 0;">Option B — Finish the plugin suite</h3>
         <p>
-          Three plugins to go: Tape (easy — single-stage saturation curve),
-          Console (medium — channel-style nonlinear coloration), MB-Comp
-          (heavy — 3 or 4 bands × compressor + Linkwitz-Riley crossovers).
+          Three plugins to go: Tape (easy — single-stage saturation
+          curve), Console (medium — channel-style nonlinear coloration),
+          MB-Comp (heavy — 3 or 4 bands × compressor + Linkwitz-Riley
+          crossovers). Tape first, then Console, then MB-Comp.
         </p>
         <p class="caption">
-          <strong>Cost:</strong> 3 slices, roughly one each. The plugin
-          plumbing is by-rote at this point; the work is in tuning DSP not
-          wiring it up.
+          <strong>Cost:</strong> 3 slices, roughly one each. Work is in
+          tuning the DSP, not wiring it up.
         </p>
         <p class="caption">
-          <strong>Unlocks:</strong> Closes &ldquo;all 12 native plugins&rdquo; on
-          the v0.3 checklist; 9 / 13 → 12 / 13.
+          <strong>Unlocks:</strong> Closes &ldquo;all 12 native
+          plugins&rdquo; on the v0.3 checklist; 9 / 13 → 12 / 13.
         </p>
       </div>
       <div>
         <h3 style="margin-top: 0;">Option C — Clip editing v1 (heaviest)</h3>
         <p>
           Cut / move / trim per stem inside the timeline. Stays inside one
-          stem — no inserts, no MIDI. Drag handles on each lane, snap, undo
-          for edits.
+          stem — no inserts, no MIDI. Drag handles on each lane, snap,
+          undo for edits.
         </p>
         <p class="caption">
           <strong>Cost:</strong> Largest unlanded v0.3 lane. Edit-state in
@@ -507,7 +508,7 @@
           host-side per-clip playback offsets in the audio engine.
         </p>
         <p class="caption">
-          <strong>Now unblocked:</strong> Stem timeline shipped, so the
+          <strong>Unblocked since:</strong> Stem timeline shipped, so the
           editing surface exists.
         </p>
       </div>
@@ -540,6 +541,7 @@
     </p>
 
     <div class="commitlog">
+<span class="sha">862e7bd</span> <span class="v03">v0.3</span> <span class="msg">Reference Rooms: monitoring presets on the Master strip</span>
 <span class="sha">565f622</span> <span class="v03">v0.3</span> <span class="msg">Channel strip: names in a sibling row outside the console scroll</span>
 <span class="sha">70651b8</span> <span class="v03">v0.3</span> <span class="msg">Channel strip: drop sticky on name to stop covering the output</span>
 <span class="sha">286c1f9</span> <span class="v03">v0.3</span> <span class="msg">Channel strip: global console scroll + sticky scribble-strip name</span>
