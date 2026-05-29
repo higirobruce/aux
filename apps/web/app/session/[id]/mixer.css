@@ -1753,7 +1753,10 @@
 }
 
 .stem-lane-btn.split {
-  letter-spacing: -1px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
 }
 
 .stem-lane-btn.split:hover:not(:disabled) {
