@@ -108,6 +108,14 @@ export interface AudioHostOptions {
   tapeWorkletUrl?: string | URL;
   /** URL to tape_bg.wasm. */
   tapeWasmUrl?: string | URL;
+  /**
+   * URL to the Console worklet (asymmetric-clip saturation). Inserts
+   * after Tape so the channel chain ends with two cascaded saturators —
+   * symmetric "tape" then asymmetric "console" — before the fader.
+   */
+  consoleWorkletUrl?: string | URL;
+  /** URL to console_bg.wasm. */
+  consoleWasmUrl?: string | URL;
   /** Sample rate (default: AudioContext default). */
   sampleRate?: number;
 }
@@ -241,8 +249,10 @@ interface ChannelInternals {
   deess: AudioWorkletNode | null;
   /** Optional Imager (M/S width). */
   imager: AudioWorkletNode | null;
-  /** Optional Tape saturation — last channel insert before gain. */
+  /** Optional Tape saturation. */
   tape: AudioWorkletNode | null;
+  /** Optional Console saturation — last channel insert before gain. */
+  console: AudioWorkletNode | null;
   /** Latest gain reduction (≥ 0) from whichever comp is currently active. */
   compGrDb: number;
   /** Latest GR from the Color-flavor comp, surfaced separately for the meter. */
@@ -291,6 +301,8 @@ export class AudioHost {
   private imagerWasmModule: WebAssembly.Module | null = null;
   /** Tape — per-channel insert. */
   private tapeWasmModule: WebAssembly.Module | null = null;
+  /** Console — per-channel insert. */
+  private consoleWasmModule: WebAssembly.Module | null = null;
 
   /** Reference Room monitoring filter — between masterGain and the final
    *  worklet output. A list of BiquadFilterNodes wired in series; empty
@@ -431,6 +443,17 @@ export class AudioHost {
       );
     }
 
+    if (this.options.consoleWorkletUrl && this.options.consoleWasmUrl) {
+      await this.ctx.audioWorklet.addModule(this.options.consoleWorkletUrl);
+      const res = await fetch(this.options.consoleWasmUrl);
+      if (!res.ok) throw new Error(`console wasm fetch failed (${res.status})`);
+      this.consoleWasmModule = await WebAssembly.compileStreaming(
+        new Response(await res.arrayBuffer(), {
+          headers: { 'Content-Type': 'application/wasm' },
+        })
+      );
+    }
+
     this.workletNode = new AudioWorkletNode(this.ctx, 'aux-processor', {
       numberOfInputs: 1,
       numberOfOutputs: 1,
@@ -464,6 +487,7 @@ export class AudioHost {
       if (channel.deess) channel.deess.disconnect();
       if (channel.imager) channel.imager.disconnect();
       if (channel.tape) channel.tape.disconnect();
+      if (channel.console) channel.console.disconnect();
       for (const send of channel.sends.values()) send.disconnect();
       channel.sends.clear();
       channel.gain.disconnect();
@@ -530,11 +554,22 @@ export class AudioHost {
     // straightforward: each new node connects to the previous "front" and
     // becomes the new front; the source ultimately connects to `front`.
     //
-    //   source → [eq8] → [comp] → [compColor] → [transient] → [deess] → [imager] → [tape] → gain → panner → analyser → bus
+    //   source → [eq8] → [comp] → [compColor] → [transient] → [deess] → [imager] → [tape] → [console] → gain → panner → analyser → bus
     //
     // Bracketed nodes are conditional: they only exist if the corresponding
     // WASM module was loaded at start(). With everything off the routing
     // reduces to source → gain → ... as before.
+    let consoleNode: AudioWorkletNode | null = null;
+    if (this.consoleWasmModule) {
+      consoleNode = new AudioWorkletNode(this.ctx, 'aux-console-processor', {
+        numberOfInputs: 1,
+        numberOfOutputs: 1,
+        outputChannelCount: [2],
+        processorOptions: { wasmModule: this.consoleWasmModule },
+      });
+      consoleNode.connect(gain);
+    }
+
     let tape: AudioWorkletNode | null = null;
     if (this.tapeWasmModule) {
       tape = new AudioWorkletNode(this.ctx, 'aux-tape-processor', {
@@ -543,7 +578,7 @@ export class AudioHost {
         outputChannelCount: [2],
         processorOptions: { wasmModule: this.tapeWasmModule },
       });
-      tape.connect(gain);
+      tape.connect(consoleNode ?? gain);
     }
 
     let imager: AudioWorkletNode | null = null;
@@ -554,7 +589,7 @@ export class AudioHost {
         outputChannelCount: [2],
         processorOptions: { wasmModule: this.imagerWasmModule },
       });
-      imager.connect(tape ?? gain);
+      imager.connect(tape ?? consoleNode ?? gain);
     }
 
     let deess: AudioWorkletNode | null = null;
@@ -565,7 +600,7 @@ export class AudioHost {
         outputChannelCount: [2],
         processorOptions: { wasmModule: this.deessWasmModule },
       });
-      deess.connect(imager ?? tape ?? gain);
+      deess.connect(imager ?? tape ?? consoleNode ?? gain);
     }
 
     let transient: AudioWorkletNode | null = null;
@@ -576,7 +611,7 @@ export class AudioHost {
         outputChannelCount: [2],
         processorOptions: { wasmModule: this.transientWasmModule },
       });
-      transient.connect(deess ?? imager ?? tape ?? gain);
+      transient.connect(deess ?? imager ?? tape ?? consoleNode ?? gain);
     }
 
     let compColor: AudioWorkletNode | null = null;
@@ -587,7 +622,7 @@ export class AudioHost {
         outputChannelCount: [2],
         processorOptions: { wasmModule: this.compColorWasmModule },
       });
-      compColor.connect(transient ?? deess ?? imager ?? tape ?? gain);
+      compColor.connect(transient ?? deess ?? imager ?? tape ?? consoleNode ?? gain);
     }
 
     let comp: AudioWorkletNode | null = null;
@@ -598,7 +633,7 @@ export class AudioHost {
         outputChannelCount: [2],
         processorOptions: { wasmModule: this.compWasmModule },
       });
-      comp.connect(compColor ?? transient ?? deess ?? imager ?? tape ?? gain);
+      comp.connect(compColor ?? transient ?? deess ?? imager ?? tape ?? consoleNode ?? gain);
     }
 
     let eq8: AudioWorkletNode | null = null;
@@ -609,7 +644,7 @@ export class AudioHost {
         outputChannelCount: [2],
         processorOptions: { wasmModule: this.eq8WasmModule },
       });
-      eq8.connect(comp ?? compColor ?? transient ?? deess ?? imager ?? tape ?? gain);
+      eq8.connect(comp ?? compColor ?? transient ?? deess ?? imager ?? tape ?? consoleNode ?? gain);
     }
 
     // gain → panner → analyser → outputBus.input
@@ -627,6 +662,7 @@ export class AudioHost {
       deess,
       imager,
       tape,
+      console: consoleNode,
       compGrDb: 0,
       compColorGrDb: 0,
       gain,
@@ -784,6 +820,7 @@ export class AudioHost {
     if (channel.deess) channel.deess.disconnect();
     if (channel.imager) channel.imager.disconnect();
     if (channel.tape) channel.tape.disconnect();
+    if (channel.console) channel.console.disconnect();
     for (const send of channel.sends.values()) send.disconnect();
     channel.sends.clear();
     channel.gain.disconnect();
@@ -858,6 +895,23 @@ export class AudioHost {
     const tape = this.channels.get(stemId)?.tape;
     if (!tape) return;
     tape.port.postMessage({ type: 'set-bypassed', bypassed });
+  }
+
+  // ────────────────────────────────────────────────────────────────────
+  // Per-channel Console (asymmetric saturation)
+  // ────────────────────────────────────────────────────────────────────
+
+  /** `driveDb` 0..24, `character` 0..1, `mix` 0..1 (0 = passthrough). */
+  setChannelConsole(stemId: string, driveDb: number, character: number, mix: number): void {
+    const node = this.channels.get(stemId)?.console;
+    if (!node) return;
+    node.port.postMessage({ type: 'set-params', driveDb, character, mix });
+  }
+
+  setChannelConsoleBypassed(stemId: string, bypassed: boolean): void {
+    const node = this.channels.get(stemId)?.console;
+    if (!node) return;
+    node.port.postMessage({ type: 'set-bypassed', bypassed });
   }
 
   // ────────────────────────────────────────────────────────────────────
@@ -1443,6 +1497,7 @@ export class AudioHost {
           channel.deess ??
           channel.imager ??
           channel.tape ??
+          channel.console ??
           channel.gain
       );
       src.onended = () => {

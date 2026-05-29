@@ -33,6 +33,8 @@ const PUBLIC_PATHS = [
   '/imager_bg.wasm',
   '/tape-worklet.js',
   '/tape_bg.wasm',
+  '/console-worklet.js',
+  '/console_bg.wasm',
 ];
 
 export function middleware(req: NextRequest) {

@@ -21,9 +21,11 @@ import { z } from 'zod';
  * v11 — adds per-channel `deess` (split-band) + `imager` (M/S width).
  * v12 — adds masterChain.referenceRoom (monitoring preset).
  * v13 — adds per-channel `tape` (saturation: drive / tone / mix + bypass).
+ * v14 — adds per-channel `console` (asymmetric saturation: drive /
+ *       character / mix + bypass).
  */
 
-export const MIX_STATE_VERSION = 13;
+export const MIX_STATE_VERSION = 14;
 
 /** Stable id for the always-present Master bus. Sessions can omit it from
  *  their `buses` record; the client treats it as if explicitly present. */
@@ -121,6 +123,18 @@ export const ChannelTapeSchema = z.object({
   bypassed: z.boolean(),
 });
 
+/** Console per channel — asymmetric soft-clip with iron-shelf bass + top-smooth. */
+export const ChannelConsoleSchema = z.object({
+  /** Pre-drive in dB, 0..24. 0 = clean. */
+  driveDb: z.number().min(0).max(24),
+  /** Console character, 0..1. 0 = symmetric tanh (no iron); 1 = full
+   *  asymmetric clip + +3 dB iron shelf + -2 dB top smooth. */
+  character: z.number().min(0).max(1),
+  /** Dry/wet mix, 0..1. 0 = dry passthrough. */
+  mix: z.number().min(0).max(1),
+  bypassed: z.boolean(),
+});
+
 export const ChannelStateSchema = z.object({
   volume: z.number().min(0).max(8),
   pan: z.number().min(-1).max(1),
@@ -135,6 +149,7 @@ export const ChannelStateSchema = z.object({
   deess: ChannelDeEssSchema,
   imager: ChannelImagerSchema,
   tape: ChannelTapeSchema,
+  console: ChannelConsoleSchema,
 });
 
 export const LimiterStateSchema = z.object({
@@ -262,6 +277,14 @@ export const DEFAULT_CHANNEL_IMAGER = {
 export const DEFAULT_CHANNEL_TAPE = {
   driveDb: 0,
   tone: 0,
+  mix: 0,
+  bypassed: false,
+} as const;
+
+/** Default Console — clean, dry. */
+export const DEFAULT_CHANNEL_CONSOLE = {
+  driveDb: 0,
+  character: 0,
   mix: 0,
   bypassed: false,
 } as const;

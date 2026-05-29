@@ -17,6 +17,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "aux-dsp-console"
+version = "0.1.0"
+dependencies = [
+ "wasm-bindgen",
+]
+
+[[package]]
 name = "aux-dsp-deess"
 version = "0.1.0"
 dependencies = [

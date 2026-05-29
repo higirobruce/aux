@@ -15,6 +15,7 @@ import {
   COMP_DEFAULTS,
   type CompType,
   DEFAULT_CHANNEL_COMP,
+  DEFAULT_CHANNEL_CONSOLE,
   DEFAULT_CHANNEL_DEESS,
   DEFAULT_CHANNEL_EQ,
   DEFAULT_CHANNEL_IMAGER,
@@ -69,6 +70,8 @@ export interface ChannelState {
   imager: { width: number; bypassed: boolean };
   /** Tape — single-stage saturation. */
   tape: { driveDb: number; tone: number; mix: number; bypassed: boolean };
+  /** Console — asymmetric channel-strip saturation. */
+  console: { driveDb: number; character: number; mix: number; bypassed: boolean };
 }
 
 const DEFAULT_CHANNEL: ChannelState = {
@@ -85,6 +88,7 @@ const DEFAULT_CHANNEL: ChannelState = {
   deess: { ...DEFAULT_CHANNEL_DEESS },
   imager: { ...DEFAULT_CHANNEL_IMAGER },
   tape: { ...DEFAULT_CHANNEL_TAPE },
+  console: { ...DEFAULT_CHANNEL_CONSOLE },
 };
 const AUTOSAVE_DEBOUNCE_MS = 600;
 
@@ -178,6 +182,7 @@ function hydrateMixState(raw: unknown): HydratedMix {
       deess: c.deess ?? { ...DEFAULT_CHANNEL_DEESS },
       imager: c.imager ?? { ...DEFAULT_CHANNEL_IMAGER },
       tape: c.tape ?? { ...DEFAULT_CHANNEL_TAPE },
+      console: c.console ?? { ...DEFAULT_CHANNEL_CONSOLE },
     };
   }
   // Bus migration. v5+ docs already have a `buses` field; older docs don't.
@@ -509,6 +514,8 @@ export function MixerShell({
       imagerWasmUrl: '/imager_bg.wasm',
       tapeWorkletUrl: '/tape-worklet.js',
       tapeWasmUrl: '/tape_bg.wasm',
+      consoleWorkletUrl: '/console-worklet.js',
+      consoleWasmUrl: '/console_bg.wasm',
     });
     await host.start();
     hostRef.current = host;
@@ -616,6 +623,8 @@ export function MixerShell({
       host.setChannelImagerBypassed(stem.id, ch.imager.bypassed);
       host.setChannelTape(stem.id, ch.tape.driveDb, ch.tape.tone, ch.tape.mix);
       host.setChannelTapeBypassed(stem.id, ch.tape.bypassed);
+      host.setChannelConsole(stem.id, ch.console.driveDb, ch.console.character, ch.console.mix);
+      host.setChannelConsoleBypassed(stem.id, ch.console.bypassed);
     }
 
     // Ensure user-defined buses exist on the host (Master is auto-created)
@@ -849,6 +858,35 @@ export function MixerShell({
       return {
         ...prev,
         [stemId]: { ...current, tape: { ...current.tape, bypassed } },
+      };
+    });
+  }, []);
+
+  const setConsole = useCallback(
+    (stemId: string, field: 'driveDb' | 'character' | 'mix', value: number) => {
+      setChannelState((prev) => {
+        const current = prev[stemId] ?? DEFAULT_CHANNEL;
+        const nextConsole = { ...current.console, [field]: value };
+        hostRef.current?.setChannelConsole(
+          stemId,
+          nextConsole.driveDb,
+          nextConsole.character,
+          nextConsole.mix
+        );
+        return { ...prev, [stemId]: { ...current, console: nextConsole } };
+      });
+    },
+    []
+  );
+
+  const toggleConsoleBypass = useCallback((stemId: string) => {
+    setChannelState((prev) => {
+      const current = prev[stemId] ?? DEFAULT_CHANNEL;
+      const bypassed = !current.console.bypassed;
+      hostRef.current?.setChannelConsoleBypassed(stemId, bypassed);
+      return {
+        ...prev,
+        [stemId]: { ...current, console: { ...current.console, bypassed } },
       };
     });
   }, []);
@@ -1255,6 +1293,8 @@ export function MixerShell({
                           onImagerBypass={() => toggleImagerBypass(stem.id)}
                           onTape={(field, value) => setTape(stem.id, field, value)}
                           onTapeBypass={() => toggleTapeBypass(stem.id)}
+                          onConsole={(field, value) => setConsole(stem.id, field, value)}
+                          onConsoleBypass={() => toggleConsoleBypass(stem.id)}
                         />
                       );
                     })

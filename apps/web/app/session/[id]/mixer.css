@@ -1994,3 +1994,64 @@
   font-size: 8px;
   color: #939aa5;
 }
+
+/* ─── Console row (asymmetric saturation) ─────────────────────────── */
+
+.ch-console {
+  padding: 6px 6px 8px;
+  border-bottom: 1px solid #0a0c10;
+  background: rgba(0, 0, 0, 0.2);
+}
+
+.ch-console-toggle {
+  width: 100%;
+  height: 16px;
+  margin-bottom: 6px;
+  font-family: var(--font-mono);
+  font-size: 8px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  background: linear-gradient(180deg, #2a3038, #14171c);
+  border: 1px solid #0a0c10;
+  border-radius: 2px;
+  color: #6b7280;
+  cursor: pointer;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.06);
+  transition: color 100ms ease, background 100ms ease;
+}
+
+.ch-console-toggle:hover:not(.on) {
+  color: #c5d5ec;
+}
+
+.ch-console-toggle.on {
+  /* Console = cool slate blue, distinguishable from Tape's warm amber */
+  background: linear-gradient(180deg, #3a4856, #1a232e);
+  color: #dce7f5;
+  border-color: rgba(120, 154, 200, 0.4);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.14), 0 0 6px rgba(120, 154, 200, 0.25);
+}
+
+.ch-console-knobs {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr;
+  gap: 3px;
+}
+
+.ch-console .knob-wrap {
+  gap: 3px;
+}
+
+.ch-console .knob {
+  width: 20px;
+  height: 20px;
+}
+
+.ch-console .knob-label {
+  font-size: 7px;
+}
+
+.ch-console .knob-readout {
+  font-size: 8px;
+  color: #939aa5;
+}

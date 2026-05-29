@@ -41,6 +41,9 @@ interface Props {
   /** Tape — driveDb (0..24), tone (-1..1), mix (0..1). */
   onTape: (field: 'driveDb' | 'tone' | 'mix', value: number) => void;
   onTapeBypass: () => void;
+  /** Console — driveDb (0..24), character (0..1), mix (0..1). */
+  onConsole: (field: 'driveDb' | 'character' | 'mix', value: number) => void;
+  onConsoleBypass: () => void;
 }
 
 const EQ_KNOB_MIN_DB = -12;
@@ -99,6 +102,10 @@ function formatTapeTone(v: number): string {
 
 function formatTapeMix(v: number): string {
   return v < 0.01 ? 'dry' : `${Math.round(v * 100)}`;
+}
+
+function formatConsoleCharacter(v: number): string {
+  return v < 0.01 ? '0' : `${Math.round(v * 100)}`;
 }
 
 // ─── dB <-> linear ──────────────────────────────────────────────────────
@@ -176,6 +183,8 @@ export function ChannelStrip({
   onImagerBypass,
   onTape,
   onTapeBypass,
+  onConsole,
+  onConsoleBypass,
 }: Props) {
   const effectivelyMuted = state.muted || (anySoloed && !state.soloed);
 
@@ -429,6 +438,56 @@ export function ChannelStrip({
             />
             <span className="knob-label">Mix</span>
             <span className="knob-readout">{formatTapeMix(state.tape.mix)}</span>
+          </div>
+        </div>
+      </div>
+
+      <div className="ch-console">
+        <button
+          type="button"
+          className={`ch-console-toggle ${state.console.bypassed ? '' : 'on'}`}
+          onClick={onConsoleBypass}
+          aria-pressed={!state.console.bypassed}
+          title={state.console.bypassed ? 'Console bypassed — click to engage' : 'Console active'}
+        >
+          Cons
+        </button>
+        <div className="ch-console-knobs">
+          <div className="knob-wrap">
+            <Knob
+              value={state.console.driveDb}
+              min={0}
+              max={24}
+              defaultValue={0}
+              ariaLabel={`${stem.name} console drive`}
+              onChange={(v) => onConsole('driveDb', v)}
+            />
+            <span className="knob-label">Drv</span>
+            <span className="knob-readout">{formatTapeDrive(state.console.driveDb)}</span>
+          </div>
+          <div className="knob-wrap">
+            <Knob
+              value={state.console.character}
+              min={0}
+              max={1}
+              defaultValue={0}
+              ariaLabel={`${stem.name} console character`}
+              onChange={(v) => onConsole('character', v)}
+            />
+            <span className="knob-label">Cha</span>
+            <span className="knob-readout">{formatConsoleCharacter(state.console.character)}</span>
+          </div>
+          <div className="knob-wrap">
+            <Knob
+              value={state.console.mix}
+              min={0}
+              max={1}
+              defaultValue={0}
+              ariaLabel={`${stem.name} console mix`}
+              onChange={(v) => onConsole('mix', v)}
+            />
+            <span className="knob-label">Mix</span>
+            <span className="knob-readout">{formatTapeMix(state.console.mix)}</span>
           </div>
         </div>
       </div>
