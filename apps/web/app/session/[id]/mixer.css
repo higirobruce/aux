@@ -251,14 +251,17 @@
 .bus-strip .ch-name {
   /* Bus strips show their name as a top header on the strip itself
      (different from the channel-strip names which live in their own
-     bottom row). Slightly bolder background + letter-spacing. */
+     bottom row). Tighter spacing + a small font bump + brighter colour
+     so the label reads cleanly inside the 96 px strip and matches the
+     weight of the VOCALS / MASTER pair regardless of glyph mix. */
   background: linear-gradient(180deg, #344058, #1c2638);
-  color: #dce7f5;
-  /* Tightened from 0.18em — "MASTER" was clipping the right edge of the
-     96 px bus strip. 0.12em keeps the engraved feel without the overflow. */
-  letter-spacing: 0.12em;
+  color: #f0f6ff;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  padding: 8px 4px;
   border-bottom: 1px solid #0a0c10;
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.05);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.08);
 }
 
 .bus-strip .ch-meta {
