@@ -23,6 +23,7 @@
  *     AudioContext.destination
  */
 
+import { type ClipRegion, clipsEndSample, planClipSchedule } from './clip-schedule';
 import type { AudioGraph, WorkletEvent, WorkletMessage } from './types';
 
 export interface AudioHostOptions {
@@ -284,7 +285,11 @@ interface ChannelInternals {
    * `input`. Live changes to the level write to the node's gain param.
    */
   sends: Map<string, GainNode>;
-  source: AudioBufferSourceNode | null;
+  /** Live buffer sources — one per scheduled clip (empty clips ⇒ one
+   *  whole-buffer source). Recreated on every play / seek / clip edit. */
+  sources: AudioBufferSourceNode[];
+  /** Timeline clips for this stem, in samples. Empty = whole buffer at t=0. */
+  clips: ClipRegion[];
 }
 
 export class AudioHost {
@@ -292,6 +297,11 @@ export class AudioHost {
   private masterGain: GainNode | null = null;
   private workletNode: AudioWorkletNode | null = null;
   private listeners = new Set<(e: WorkletEvent) => void>();
+  /** Transport tracking so a single channel can be re-scheduled mid-playback
+   *  (e.g. after a clip edit) from the correct playhead position. */
+  private playing = false;
+  private playOffsetSec = 0;
+  private playStartCtxTime = 0;
   /** Compiled WASM module shared across worklets via structured clone. Null
    *  until start() loads the EQ-8 module (or if EQ-8 URLs weren't supplied). */
   private eq8WasmModule: WebAssembly.Module | null = null;
@@ -715,7 +725,8 @@ export class AudioHost {
       soloed: false,
       outputBusId: outputBus.id,
       sends: new Map(),
-      source: null,
+      sources: [],
+      clips: [],
     };
 
     if (comp) {
@@ -843,16 +854,7 @@ export class AudioHost {
   removeChannel(stemId: string): void {
     const channel = this.channels.get(stemId);
     if (!channel) return;
-    if (channel.source) {
-      try {
-        channel.source.onended = null;
-        channel.source.stop(0);
-      } catch {
-        // already stopped
-      }
-      channel.source.disconnect();
-      channel.source = null;
-    }
+    this.stopChannelSources(channel);
     if (channel.eq8) channel.eq8.disconnect();
     if (channel.mbcomp) channel.mbcomp.disconnect();
     if (channel.comp) channel.comp.disconnect();
@@ -1541,60 +1543,113 @@ export class AudioHost {
   // Transport
   // ────────────────────────────────────────────────────────────────────
 
+  /** The node a channel's buffer source connects to — front of the insert
+   *  chain (eq8 first, falling through to gain when no inserts exist). */
+  private channelFront(channel: ChannelInternals): AudioNode {
+    return (
+      channel.eq8 ??
+      channel.mbcomp ??
+      channel.comp ??
+      channel.compColor ??
+      channel.transient ??
+      channel.deess ??
+      channel.imager ??
+      channel.tape ??
+      channel.console ??
+      channel.gain
+    );
+  }
+
+  /** Stop + disconnect a single channel's live sources, leaving the chain. */
+  private stopChannelSources(channel: ChannelInternals): void {
+    for (const src of channel.sources) {
+      try {
+        src.onended = null;
+        src.stop(0);
+      } catch {
+        // already stopped / ended
+      }
+      src.disconnect();
+    }
+    channel.sources = [];
+  }
+
+  /**
+   * Schedule one channel's clips from `fromSec` on the global timeline.
+   * Assumes the channel's existing sources have been stopped. Empty clips
+   * play the whole buffer at t=0 (today's behaviour).
+   */
+  private scheduleChannel(channel: ChannelInternals, fromSec: number): void {
+    if (!this.ctx || !channel.buffer) return;
+    const buffer = channel.buffer;
+    const front = this.channelFront(channel);
+    const t0 = this.ctx.currentTime;
+    const plan = planClipSchedule(channel.clips, buffer.length, buffer.sampleRate, fromSec);
+    for (const p of plan) {
+      const src = this.ctx.createBufferSource();
+      src.buffer = buffer;
+      src.connect(front);
+      src.onended = () => {
+        const i = channel.sources.indexOf(src);
+        if (i !== -1) channel.sources.splice(i, 1);
+      };
+      src.start(t0 + p.whenOffsetSec, p.offsetSec, p.durationSec);
+      channel.sources.push(src);
+    }
+  }
+
   /** Start every loaded channel from the given offset (in seconds). */
   playAll(offsetSeconds = 0): void {
     if (!this.ctx) throw new Error('AudioHost not started');
     if (this.ctx.state === 'suspended') void this.ctx.resume();
 
     this.stopAll();
+    this.playing = true;
+    this.playOffsetSec = offsetSeconds;
+    this.playStartCtxTime = this.ctx.currentTime;
 
     for (const channel of this.channels.values()) {
       if (!channel.buffer) continue;
-      const src = this.ctx.createBufferSource();
-      src.buffer = channel.buffer;
-      // Routing front: prefer eq8 if present, else comp, else gain.
-      // addChannel() chains eq8 → comp → gain when both inserts exist.
-      src.connect(
-        channel.eq8 ??
-          channel.mbcomp ??
-          channel.comp ??
-          channel.compColor ??
-          channel.transient ??
-          channel.deess ??
-          channel.imager ??
-          channel.tape ??
-          channel.console ??
-          channel.gain
-      );
-      src.onended = () => {
-        if (channel.source === src) channel.source = null;
-      };
-      src.start(0, Math.min(offsetSeconds, channel.buffer.duration));
-      channel.source = src;
+      this.scheduleChannel(channel, offsetSeconds);
     }
   }
 
-  /** Stop every currently-playing source. The channel chain stays intact. */
+  /** Stop every currently-playing source. The channel chains stay intact. */
   stopAll(): void {
+    this.playing = false;
     for (const channel of this.channels.values()) {
-      if (channel.source) {
-        try {
-          channel.source.onended = null;
-          channel.source.stop(0);
-        } catch {
-          // already stopped
-        }
-        channel.source.disconnect();
-        channel.source = null;
-      }
+      this.stopChannelSources(channel);
     }
   }
 
-  /** Duration of the longest loaded channel, in seconds. */
+  /** Current playhead on the global timeline, in seconds (0 when stopped). */
+  private currentPositionSec(): number {
+    if (!this.playing || !this.ctx) return 0;
+    return this.playOffsetSec + (this.ctx.currentTime - this.playStartCtxTime);
+  }
+
+  /**
+   * Replace a channel's timeline clips. If the transport is running, the
+   * channel is re-scheduled from the current playhead so the edit is audible
+   * immediately; otherwise it takes effect on the next play.
+   */
+  setChannelClips(stemId: string, clips: readonly ClipRegion[]): void {
+    const channel = this.channels.get(stemId);
+    if (!channel) return;
+    channel.clips = clips.map((c) => ({ ...c }));
+    if (this.playing && this.ctx) {
+      this.stopChannelSources(channel);
+      this.scheduleChannel(channel, this.currentPositionSec());
+    }
+  }
+
+  /** Duration of the longest channel, in seconds — honours edited clip ends. */
   get durationSeconds(): number {
     let max = 0;
     for (const c of this.channels.values()) {
-      if (c.buffer && c.buffer.duration > max) max = c.buffer.duration;
+      if (!c.buffer) continue;
+      const endSec = clipsEndSample(c.clips, c.buffer.length) / c.buffer.sampleRate;
+      if (endSec > max) max = endSec;
     }
     return max;
   }
@@ -1608,7 +1663,7 @@ export class AudioHost {
   }
 
   get isPlaying(): boolean {
-    for (const c of this.channels.values()) if (c.source) return true;
+    for (const c of this.channels.values()) if (c.sources.length > 0) return true;
     return false;
   }
 

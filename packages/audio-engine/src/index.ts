@@ -7,6 +7,12 @@ export {
   type ReferenceRoomPreset,
   type ReverbKind,
 } from './host';
+export {
+  type ClipRegion,
+  type ScheduledClip,
+  clipsEndSample,
+  planClipSchedule,
+} from './clip-schedule';
 export type {
   AudioGraph,
   GraphNode,
