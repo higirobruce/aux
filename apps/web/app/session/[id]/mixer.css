@@ -1854,17 +1854,20 @@
 }
 
 .bus-ref-room-grid {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
+  display: flex;
+  flex-direction: column;
   gap: 3px;
 }
 
 .bus-ref-room-btn {
+  width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
   height: 18px;
   padding: 0 4px;
   font-family: var(--font-mono);
   font-size: 9px;
-  letter-spacing: 0.06em;
+  letter-spacing: 0.08em;
   text-transform: uppercase;
   background: linear-gradient(180deg, #2a3038, #14171c);
   border: 1px solid #0a0c10;
@@ -1873,6 +1876,9 @@
   cursor: pointer;
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.06);
   transition: color 100ms ease, background 100ms ease;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .bus-ref-room-btn:hover:not(.on) {
