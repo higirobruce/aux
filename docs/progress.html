@@ -190,7 +190,7 @@
 
     <div class="summary-grid">
       <div class="stat">
-        <div class="num">9<span style="color: var(--ink-3); font-size: var(--t-22);"> / 13</span></div>
+        <div class="num">12<span style="color: var(--ink-3); font-size: var(--t-22);"> / 13</span></div>
         <div class="lbl">Must-ship plugins</div>
       </div>
       <div class="stat">
@@ -198,7 +198,7 @@
         <div class="lbl">v0.3 scope items done</div>
       </div>
       <div class="stat">
-        <div class="num">20</div>
+        <div class="num">21</div>
         <div class="lbl">v0.3 commits to date</div>
       </div>
       <div class="stat">
@@ -233,8 +233,8 @@
             <div class="lbl">All 12 native plugins</div>
             <div class="why">v1 suite — Rust crates compiled to WASM, lazy-loaded into AudioWorklets.</div>
           </td>
-          <td class="status"><span class="pill-st pill-flight">9 of 13</span></td>
-          <td>EQ-8 · Comp-Clean · Comp-Color · Plate · Hall · Limiter · Transient · DeEss · Imager shipped. MB-Comp · Tape · Console remaining (v1.1: Spring, Exciter, Tuner).</td>
+          <td class="status"><span class="pill-st pill-flight">12 of 13</span></td>
+          <td>EQ-8 · Comp-Clean · Comp-Color · Plate · Hall · Limiter · Transient · DeEss · Imager · Tape · Console · MB-Comp shipped — the v1 channel-plugin marathon is done. (v1.1: Spring, Exciter, Tuner.)</td>
         </tr>
         <tr>
           <td>
@@ -398,24 +398,24 @@
         </tr>
         <tr>
           <td><span class="lbl">MB-Comp</span></td>
-          <td>Multiband compressor</td>
+          <td>Multiband compressor — 3-band (lo / mid / hi) + shared ratio</td>
           <td>Must ship</td>
-          <td><span class="pill-st pill-planned">Planned</span></td>
-          <td class="commit">—</td>
+          <td><span class="pill-st pill-shipped">Shipped</span></td>
+          <td class="commit">16be651</td>
         </tr>
         <tr>
           <td><span class="lbl">Tape</span></td>
           <td>Tape saturation</td>
           <td>Must ship</td>
-          <td><span class="pill-st pill-planned">Planned</span></td>
-          <td class="commit">—</td>
+          <td><span class="pill-st pill-shipped">Shipped</span></td>
+          <td class="commit">243d03d</td>
         </tr>
         <tr>
           <td><span class="lbl">Console</span></td>
           <td>Console saturation</td>
           <td>Must ship</td>
-          <td><span class="pill-st pill-planned">Planned</span></td>
-          <td class="commit">—</td>
+          <td><span class="pill-st pill-shipped">Shipped</span></td>
+          <td class="commit">0443c89</td>
         </tr>
         <tr style="opacity: 0.7;">
           <td><span class="lbl">Spring</span></td>
@@ -452,13 +452,11 @@
     <div class="callout callout-tip">
       <span class="mark">Pick one</span>
       <p>
-        Reference Rooms shipped, so v0.3 has three lanes left: finish the
-        plugin marathon (Tape · Console · MB-Comp), Smart EQ panel, and
-        Clip editing v1. The plugin marathon closes the headline
-        &ldquo;all 12 native plugins&rdquo; checkbox on the v0.3 list, with
-        Tape as the easiest first step. Smart EQ panel is the only
-        remaining UI-heavy item; Clip editing v1 is the largest unlanded
-        feature, now reachable on top of the stem timeline.
+        The channel-plugin marathon is done — Tape, Console, and MB-Comp
+        all landed, closing the headline &ldquo;all native plugins&rdquo;
+        line on the v0.3 list. That leaves two v0.3 lanes: Smart EQ panel
+        (the only remaining UI-heavy item) and Clip editing v1 (the largest
+        unlanded feature, now reachable on top of the stem timeline).
       </p>
     </div>
 
@@ -541,6 +539,9 @@
     </p>
 
     <div class="commitlog">
+<span class="sha">16be651</span> <span class="v03">v0.3</span> <span class="msg">MB-Comp: per-channel multiband compressor (lo / mid / hi / ratio)</span>
+<span class="sha">0443c89</span> <span class="v03">v0.3</span> <span class="msg">Console: per-channel asymmetric saturation (drive / character / mix)</span>
+<span class="sha">243d03d</span> <span class="v03">v0.3</span> <span class="msg">Tape: per-channel tape saturation (drive / tone / mix)</span>
 <span class="sha">862e7bd</span> <span class="v03">v0.3</span> <span class="msg">Reference Rooms: monitoring presets on the Master strip</span>
 <span class="sha">565f622</span> <span class="v03">v0.3</span> <span class="msg">Channel strip: names in a sibling row outside the console scroll</span>
 <span class="sha">70651b8</span> <span class="v03">v0.3</span> <span class="msg">Channel strip: drop sticky on name to stop covering the output</span>

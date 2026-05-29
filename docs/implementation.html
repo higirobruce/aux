@@ -372,6 +372,7 @@
       <a href="#security-impl"><span class="n">18</span>Security implementation</a>
       <a href="#presets-impl"><span class="n">19</span>Plugin presets implementation</a>
       <a href="#perf-budgets"><span class="n">20</span>Performance budgets</a>
+      <a href="#clip-editing"><span class="n">21</span>Clip editing v1</a>
     </div>
   </section>
 
@@ -1854,8 +1855,152 @@ GET    /api/presets/builtin/:plugin   <span class="tok-com">// list curated buil
       <p>These budgets assume modern desktop hardware (the §16.07 reference machines). We don't optimize for old laptops or low-bandwidth mobile — brainstorm §02 commits us to desktop-only mixing. Don't quote these budgets as universal; quote the audience.</p>
     </div>
 
+  </section>
+
+  <!-- ============================================================
+       21 · CLIP EDITING V1
+       ============================================================ -->
+  <section class="section" id="clip-editing">
+    <p class="eyebrow">21 · Clip editing v1</p>
+    <h2 class="mt-0">Clip editing v1</h2>
+    <p>
+      The next v0.3 lane after the plugin marathon. Cut / move / trim per stem
+      on the existing stem timeline (§02), with snapping and undo. Scope stays
+      deliberately narrow: edits live <strong>inside a single stem</strong> — no
+      cross-stem moves, no inserts, no MIDI. Today a stem is implicitly one
+      region starting at t=0; <code>MixState</code> has no clip or
+      timeline-position concept at all. This section maps the feature onto the
+      code that exists.
+    </p>
+
+    <h3>Data model</h3>
+    <p>
+      A clip is a window into the stem's source buffer placed on the timeline,
+      expressed in <strong>samples</strong> (sample-accurate; avoids float-seconds
+      drift, and the engine already thinks in samples in <code>getStemPeaks</code>).
+      It adds a per-channel <code>clips</code> array to
+      <code>ChannelStateSchema</code> in <code>packages/session-doc/src/mix-state.ts</code>.
+      An absent/empty array means "play the whole buffer at t=0", so old sessions
+      stay correct with no rewrite.
+    </p>
+<pre><code><span class="tok-kw">Clip</span> = {
+  id: <span class="tok-kw">string</span>;             <span class="tok-com">// stable — React keys, drag targeting, undo deltas</span>
+  sourceIn:      <span class="tok-kw">number</span>;  <span class="tok-com">// first source sample played      (trim-left)</span>
+  sourceOut:     <span class="tok-kw">number</span>;  <span class="tok-com">// one-past-last source sample     (trim-right)</span>
+  timelineStart: <span class="tok-kw">number</span>;  <span class="tok-com">// global-timeline sample of sourceIn (move)</span>
+}                          <span class="tok-com">// refine: sourceOut &gt; sourceIn</span>
+
+<span class="tok-com">// ChannelStateSchema gains:  clips: Clip[]   (empty ⇒ whole buffer at t=0)</span>
+<span class="tok-com">// MIX_STATE_VERSION: 15 → 16</span></code></pre>
+    <p>
+      Migration is client-side in <code>hydrateMixState</code>
+      (<code>apps/web/app/session/[id]/_mixer-shell.tsx</code>): the field-by-field
+      upgrade loop gains <code>clips: c.clips ?? []</code>, promoting every v1–v15
+      doc to an empty-clips v16. Normalise <code>undefined → []</code> on the
+      successful-parse branch too, so the engine and UI treat both identically.
+    </p>
+
+    <div class="callout callout-warn">
+      <span class="mark">The version cutover is the sharp edge</span>
+      <p>
+        <code>version</code> is a <code>z.literal</code>, and the API
+        strict-parses every save (<code>MixStateSchema.parse</code> in
+        <code>apps/api/src/sessions/sessions.service.ts</code>). A v16 client
+        autosaving against a v15 API gets a 400, and vice-versa. Ship the bump in
+        <code>packages/session-doc</code> + <code>apps/api</code> together and
+        <strong>before</strong> any web UI writes clips; widen to
+        <code>z.union([z.literal(15), z.literal(16)])</code> for the one
+        transition release, then narrow back.
+      </p>
+    </div>
+
+    <h3>Timeline UI</h3>
+    <p>
+      The lane in <code>_stem-timeline.tsx</code> renders one continuous waveform
+      today (<code>StemLane</code> → <code>WaveCanvas</code>, read-only). With a
+      non-empty <code>clips</code> array, render N positioned
+      <code>.stem-clip</code> rectangles inside the lane, each windowing the
+      cached peaks to its <code>[sourceIn, sourceOut)</code> range — the
+      empty-clips path keeps today's exact rendering.
+    </p>
+    <ul>
+      <li><strong>Geometry</strong> from the shared <code>globalDuration</code> &amp; <code>sampleRate</code>: <code>leftPct = (timelineStart/sr)/globalDuration</code>, <code>widthPct = ((sourceOut−sourceIn)/sr)/globalDuration</code>.</li>
+      <li><strong>Move</strong> — drag the clip body; <code>timelineStart</code> changes, source window unchanged.</li>
+      <li><strong>Trim-in</strong> — left handle; <code>sourceIn</code> and <code>timelineStart</code> move together so the audio stays anchored. Clamp <code>sourceIn &lt; sourceOut</code>.</li>
+      <li><strong>Trim-out</strong> — right handle; <code>sourceOut</code> moves. Clamp <code>sourceOut &gt; sourceIn</code> and <code>≤ totalSamples</code>.</li>
+      <li><strong>Pointer events</strong> (<code>setPointerCapture</code> + window <code>pointermove/up</code>), not the lane's <code>onClick</code> seek. The full-width seek overlay (<code>div.stem-timeline-track</code>) must yield to clip drags via z-order / hit-testing while still seeking on empty regions — the trickiest wiring.</li>
+      <li><strong>Snapping</strong> within ~6px (converted to samples), priority: timeline zero → sibling clip boundaries on the same lane → playhead → ruler ticks (reuse <code>RulerMarks</code>). Hold Alt to disable. No cross-lane/grid snap in v1.</li>
+      <li><strong>Plumbing</strong> — clips live in <code>channelState[stemId].clips</code> in <code>MixerShell</code>; a new <code>setClips(stemId, next)</code> (sibling to <code>setVolume</code>) updates state (autosaves via the existing effect), pushes the engine update, and records one undo entry.</li>
+    </ul>
+
+    <h3>Audio engine</h3>
+    <p>
+      Move from "one source per channel" to <strong>one source per clip</strong>.
+      Replace <code>channel.source</code> with <code>channel.sources[]</code> in
+      <code>packages/audio-engine/src/host.ts</code>, add
+      <code>setChannelClips(stemId, clips)</code> (write-through; re-schedule that
+      channel if playing), and rewrite <code>playAll(offset)</code> to schedule
+      each clip with the three-arg <code>start(when, offset, duration)</code> form
+      — sample-accurate placement that auto-stops at the clip edge.
+    </p>
+<pre><code><span class="tok-kw">playAll</span>(offset):
+  t0 = ctx.currentTime;   head = offset * sr
+  <span class="tok-kw">for</span> each channel:
+    clips = channel.clips ?? [{ in:0, out:buffer.length, start:0 }]  <span class="tok-com">// default = today</span>
+    <span class="tok-kw">for</span> each clip:
+      clipStart = start;   clipEnd = start + (out − in)
+      <span class="tok-kw">if</span>   clipEnd  &lt;= head:   skip                                   <span class="tok-com">// already past</span>
+      <span class="tok-kw">elif</span> clipStart &gt;= head:   src.start(t0 + (clipStart−head)/sr,    <span class="tok-com">// fully ahead</span>
+                                          in/sr, (out−in)/sr)
+      <span class="tok-kw">else</span>:                     src.start(t0,                         <span class="tok-com">// straddles playhead</span>
+                                          (in + head−clipStart)/sr,
+                                          (clipEnd−head)/sr)</code></pre>
+    <ul>
+      <li><strong>Seek</strong> needs no new logic — <code>handleSeek</code> already re-calls <code>playAll(target)</code>, which re-derives the whole schedule (gap → next future clip; mid-clip → straddle case).</li>
+      <li><strong>Duration</strong> — <code>durationSeconds</code> becomes max <code>clipEnd</code> across channels when clips exist, falling back to longest-buffer when empty (drives the ruler, playhead %, and the seek clamp).</li>
+      <li><strong>Teardown</strong> — <code>stopAll</code> / <code>isPlaying</code> / <code>removeChannel</code> iterate <code>sources[]</code>; each source's <code>onended</code> clears only its own slot. The existing <code>.stop()</code> try/catch covers already-ended scheduled sources.</li>
+    </ul>
+
+    <h3>Undo / redo</h3>
+    <p>
+      None exists today (the <code>atoms.ts</code> dot-path machinery is a stub on
+      a different doc). Introduce the smallest thing that fits the non-jotai
+      mixer: a per-stem snapshot stack in <code>MixerShell</code> refs.
+    </p>
+    <ul>
+      <li><code>undoStack: { stemId, before: Clip[], after: Clip[] }[]</code> + a mirror <code>redoStack</code>. v1 edits are always single-stem, so per-stem snapshots stay clean.</li>
+      <li>Capture <code>before</code> on <code>pointerdown</code>, push one entry on <code>pointerup</code> — a whole drag gesture is one undo step (no 60/s spam from <code>pointermove</code>).</li>
+      <li><code>undo()</code>/<code>redo()</code> apply a snapshot through <code>setClips</code>, so autosave + the engine update ride along for free.</li>
+      <li>Keyboard at <code>MixerShell</code> level (Cmd/Ctrl+Z, +Shift for redo), guarded against firing while typing in inputs.</li>
+    </ul>
+
+    <h3>Slice plan</h3>
+    <p>Smallest first; each lands independently and stays shippable.</p>
+    <table>
+      <thead>
+        <tr><th style="width:1%;">#</th><th>Slice</th><th>What lands</th><th>Visible?</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>1</td><td>Schema + migration</td><td><code>ClipSchema</code>, optional <code>clips</code> on channel, bump to v16 (with the <code>z.union</code> transition), <code>hydrateMixState</code> default. Ship <code>session-doc</code> + <code>apps/api</code> together.</td><td>No — invisible, old sessions load unchanged</td></tr>
+        <tr><td>2</td><td>Engine clip scheduling</td><td><code>source</code> → <code>sources[]</code>, <code>setChannelClips</code>, per-clip <code>playAll</code>, <code>durationSeconds</code>. Unit tests for skip / ahead / straddle. Empty clips ⇒ identical to today.</td><td>No — behaviourally identical</td></tr>
+        <tr><td>3</td><td>Read-only clip render</td><td>Clip rects + windowed waveform in <code>StemLane</code>. Hand-seed clips to confirm visuals + engine honour them end-to-end.</td><td>Yes — seeded only</td></tr>
+        <tr><td>4</td><td>Move · trim · snap</td><td>Pointer handlers, seek-overlay coexistence, snapping. Writes <code>channelState.clips</code> → autosave + engine.</td><td>Yes — first real edit</td></tr>
+        <tr><td>5</td><td>Undo / redo</td><td>Snapshot stack + keyboard + gesture coalescing.</td><td>Yes — lands last, once edits exist</td></tr>
+      </tbody>
+    </table>
+
+    <h3>Risks &amp; tricky bits</h3>
+    <ul>
+      <li><strong>Version cutover</strong> — <code>z.literal</code> + strict server parse means no graceful skew without the <code>z.union</code> transition release. Stage the API before web.</li>
+      <li><strong>Seek overlay vs. clip drags</strong> — the single full-width click-seek layer must yield to clip drag/trim without breaking click-to-seek over empty timeline.</li>
+      <li><strong>Sample accuracy</strong> — store clips in samples, convert to seconds only at <code>start(when, offset, duration)</code>; clamp offset/duration to buffer bounds.</li>
+      <li><strong>Peaks on trim</strong> — window the <em>cached</em> peaks array by sample range at draw time; never call <code>getStemPeaks</code> per drag frame.</li>
+      <li><strong>Old-session hydration</strong> — normalise <code>undefined → []</code> at hydration so engine + UI treat "no clips" as one whole-buffer clip everywhere.</li>
+      <li><strong>Duration redefinition</strong> — max-clipEnd shifts ruler / playhead / seek clamp; the empty-clips fallback must still report buffer length.</li>
+    </ul>
+
     <hr class="hr-rule" />
-    <p class="caption">aux · implementation plan v0.3 · 2026-05-28 · Bruce Higiro</p>
+    <p class="caption">aux · implementation plan v0.3 · updated 2026-05-29 · §21 clip editing v1 added · Bruce Higiro</p>
   </section>
 
 </main>
