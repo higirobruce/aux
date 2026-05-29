@@ -12,6 +12,7 @@ import {
 import {
   type BusState,
   COMP_COLOR_DEFAULTS,
+  type StemClip,
   COMP_DEFAULTS,
   type CompType,
   DEFAULT_CHANNEL_COMP,
@@ -22,6 +23,7 @@ import {
   DEFAULT_CHANNEL_MBCOMP,
   DEFAULT_CHANNEL_TAPE,
   DEFAULT_CHANNEL_TRANSIENT,
+  DEFAULT_STEM_CLIPS,
   DEFAULT_COMP_TYPE,
   DEFAULT_LIMITER_STATE,
   DEFAULT_MASTER_BUS,
@@ -81,6 +83,9 @@ export interface ChannelState {
     ratio: number;
     bypassed: boolean;
   };
+  /** Timeline regions for this stem. Always concrete in memory (hydration
+   *  normalises absent/optional to []); empty = whole buffer at t=0. */
+  clips: StemClip[];
 }
 
 const DEFAULT_CHANNEL: ChannelState = {
@@ -99,6 +104,7 @@ const DEFAULT_CHANNEL: ChannelState = {
   tape: { ...DEFAULT_CHANNEL_TAPE },
   console: { ...DEFAULT_CHANNEL_CONSOLE },
   mbcomp: { ...DEFAULT_CHANNEL_MBCOMP },
+  clips: [...DEFAULT_STEM_CLIPS],
 };
 const AUTOSAVE_DEBOUNCE_MS = 600;
 
@@ -152,8 +158,14 @@ function hydrateMixState(raw: unknown): HydratedMix {
     // Ensure Master exists even if a malformed v7 doc dropped it.
     const buses = { ...current.data.buses };
     if (!buses[MASTER_BUS_ID]) buses[MASTER_BUS_ID] = { ...DEFAULT_MASTER_BUS };
+    // Normalise optional `clips` (absent on v15 docs) to a concrete [] so the
+    // engine + timeline can treat "no clips" uniformly as a whole-buffer clip.
+    const channels: Record<string, ChannelState> = {};
+    for (const [id, ch] of Object.entries(current.data.channels)) {
+      channels[id] = { ...ch, clips: ch.clips ?? [] };
+    }
     return {
-      channels: current.data.channels,
+      channels,
       buses,
       masterChain: current.data.masterChain,
     };
@@ -194,6 +206,7 @@ function hydrateMixState(raw: unknown): HydratedMix {
       tape: c.tape ?? { ...DEFAULT_CHANNEL_TAPE },
       console: c.console ?? { ...DEFAULT_CHANNEL_CONSOLE },
       mbcomp: c.mbcomp ?? { ...DEFAULT_CHANNEL_MBCOMP },
+      clips: c.clips ?? [],
     };
   }
   // Bus migration. v5+ docs already have a `buses` field; older docs don't.

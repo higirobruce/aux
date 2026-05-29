@@ -25,9 +25,20 @@ import { z } from 'zod';
  *       character / mix + bypass).
  * v15 — adds per-channel `mbcomp` (3-band multiband compressor: per-band
  *       lo/mid/hi thresholds + shared ratio + bypass).
+ * v16 — adds per-channel `clips` (timeline regions: sample-accurate
+ *       sourceIn/sourceOut + timelineStart). Absent/empty = whole buffer
+ *       at t=0, so v1–v15 docs stay correct without a rewrite.
  */
 
-export const MIX_STATE_VERSION = 15;
+export const MIX_STATE_VERSION = 16;
+
+/**
+ * Versions the strict parse still accepts. During the v15→v16 rollout we
+ * tolerate both so a client on either side of a deploy can still save (the
+ * API strict-parses with this same schema). Narrow back to a single
+ * `z.literal(MIX_STATE_VERSION)` once every deployed surface is on v16.
+ */
+const ACCEPTED_VERSIONS = [z.literal(15), z.literal(16)] as const;
 
 /** Stable id for the always-present Master bus. Sessions can omit it from
  *  their `buses` record; the client treats it as if explicitly present. */
@@ -137,6 +148,29 @@ export const ChannelConsoleSchema = z.object({
   bypassed: z.boolean(),
 });
 
+/**
+ * A clip is a window into the stem's source buffer placed on the timeline.
+ * All three positions are in SAMPLES (sample-accurate — avoids float-seconds
+ * drift, and the engine already reasons in samples). v1 scope: edits stay
+ * inside a single stem, so clips is an ordered per-channel array.
+ */
+export const StemClipSchema = z
+  .object({
+    /** Stable id — React keys, drag targeting, undo deltas. */
+    id: z.string().min(1),
+    /** First source-buffer sample the clip plays (trim-left). */
+    sourceIn: z.number().int().min(0),
+    /** One-past-last source-buffer sample (trim-right). */
+    sourceOut: z.number().int().min(1),
+    /** Global-timeline sample where `sourceIn` lands (move). */
+    timelineStart: z.number().int().min(0),
+  })
+  .refine((c) => c.sourceOut > c.sourceIn, {
+    message: 'clip sourceOut must be greater than sourceIn',
+  });
+
+export const StemClipsSchema = z.array(StemClipSchema);
+
 /** MB-Comp per channel — 3-band multiband compressor. */
 export const ChannelMbCompSchema = z.object({
   /** Low-band threshold in dB, -40..0. 0 = that band uncompressed. */
@@ -166,6 +200,10 @@ export const ChannelStateSchema = z.object({
   tape: ChannelTapeSchema,
   console: ChannelConsoleSchema,
   mbcomp: ChannelMbCompSchema,
+  /** Timeline regions for this stem. Optional/absent = whole buffer at t=0
+   *  (keeps v1–v15 docs valid under the strict parse). Hydration normalises
+   *  this to `[]` so the engine + UI can treat "no clips" uniformly. */
+  clips: StemClipsSchema.optional(),
 });
 
 export const LimiterStateSchema = z.object({
@@ -196,12 +234,14 @@ export const MasterChainSchema = z.object({
 });
 
 export const MixStateSchema = z.object({
-  version: z.literal(MIX_STATE_VERSION),
+  // Transition shim: accept v15 and v16 during rollout — see ACCEPTED_VERSIONS.
+  version: z.union(ACCEPTED_VERSIONS),
   channels: z.record(z.string(), ChannelStateSchema),
   buses: BusesSchema,
   masterChain: MasterChainSchema,
 });
 
+export type StemClip = z.infer<typeof StemClipSchema>;
 export type ChannelEq = z.infer<typeof ChannelEqSchema>;
 export type ChannelComp = z.infer<typeof ChannelCompSchema>;
 export type ChannelMbComp = z.infer<typeof ChannelMbCompSchema>;
@@ -314,6 +354,9 @@ export const DEFAULT_CHANNEL_MBCOMP = {
   ratio: 4,
   bypassed: false,
 } as const;
+
+/** Default clips — empty = play the whole stem buffer at t=0. */
+export const DEFAULT_STEM_CLIPS: StemClip[] = [];
 
 /** Default comp flavour for new channels. */
 export const DEFAULT_COMP_TYPE: CompType = 'clean';
