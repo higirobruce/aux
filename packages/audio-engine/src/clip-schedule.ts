@@ -40,7 +40,7 @@ export function planClipSchedule(
   clips: readonly ClipRegion[],
   bufferLength: number,
   sampleRate: number,
-  fromSec: number,
+  fromSec: number
 ): ScheduledClip[] {
   const head = Math.round(fromSec * sampleRate);
   const total = bufferLength;

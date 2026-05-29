@@ -12,7 +12,6 @@ import {
 import {
   type BusState,
   COMP_COLOR_DEFAULTS,
-  type StemClip,
   COMP_DEFAULTS,
   type CompType,
   DEFAULT_CHANNEL_COMP,
@@ -23,16 +22,17 @@ import {
   DEFAULT_CHANNEL_MBCOMP,
   DEFAULT_CHANNEL_TAPE,
   DEFAULT_CHANNEL_TRANSIENT,
-  DEFAULT_STEM_CLIPS,
   DEFAULT_COMP_TYPE,
   DEFAULT_LIMITER_STATE,
   DEFAULT_MASTER_BUS,
   DEFAULT_MASTER_CHAIN,
+  DEFAULT_STEM_CLIPS,
   type LimiterState,
   MIX_STATE_VERSION,
   type MasterChain,
   MixStateSchema,
   type ReverbState,
+  type StemClip,
   defaultReverb,
 } from '@aux/session-doc';
 import Link from 'next/link';
@@ -341,6 +341,8 @@ export function MixerShell({
   const [stemsOpen, setStemsOpen] = useState(initialStems.length === 0);
   const [timelineOpen, setTimelineOpen] = useState(true);
   const [peaks, setPeaks] = useState<Record<string, StemPeaks | undefined>>({});
+  /** Currently-selected timeline clip (for trim/move highlight + delete). */
+  const [selectedClip, setSelectedClip] = useState<{ stemId: string; clipId: string } | null>(null);
   const [saveStatus, setSaveStatus] = useState<SaveStatus>('idle');
   // First render is hydration; suppress that as an autosave trigger.
   const hasMounted = useRef(false);
@@ -737,6 +739,7 @@ export function MixerShell({
     (seconds: number) => {
       const target = Math.max(0, Math.min(seconds, duration));
       setPosition(target);
+      setSelectedClip(null); // clicking the timeline to seek clears any selection
       const host = hostRef.current;
       if (host?.isPlaying) {
         host.playAll(target);
@@ -745,6 +748,38 @@ export function MixerShell({
     },
     [duration]
   );
+
+  /** Replace a stem's clips: push to the engine, update state (autosaves),
+   *  and recompute the timeline duration (clips can extend / shorten it). */
+  const setClips = useCallback((stemId: string, clips: StemClip[]) => {
+    hostRef.current?.setChannelClips(stemId, clips);
+    setChannelState((prev) => ({
+      ...prev,
+      [stemId]: { ...(prev[stemId] ?? DEFAULT_CHANNEL), clips },
+    }));
+    const dur = hostRef.current?.durationSeconds;
+    if (typeof dur === 'number' && dur > 0) setDuration(dur);
+  }, []);
+
+  // Delete / Backspace removes the selected clip (ignored while typing).
+  useEffect(() => {
+    function onKey(e: KeyboardEvent) {
+      if (e.key !== 'Delete' && e.key !== 'Backspace') return;
+      if (!selectedClip) return;
+      const t = e.target as HTMLElement | null;
+      if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable)) return;
+      e.preventDefault();
+      const { stemId, clipId } = selectedClip;
+      const cur = channelStateRef.current[stemId]?.clips ?? [];
+      setClips(
+        stemId,
+        cur.filter((c) => c.id !== clipId)
+      );
+      setSelectedClip(null);
+    }
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [selectedClip, setClips]);
 
   const setVolume = useCallback((stemId: string, volume: number) => {
     hostRef.current?.setChannelVolume(stemId, volume);
@@ -1319,9 +1354,12 @@ export function MixerShell({
           duration={duration}
           position={position}
           playing={transport === 'playing'}
+          selectedClip={selectedClip}
           onMute={toggleMute}
           onSolo={toggleSolo}
           onSeek={handleSeek}
+          onClipsChange={setClips}
+          onSelectClip={setSelectedClip}
         />
 
         <div className="mixer-body">

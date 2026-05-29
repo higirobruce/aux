@@ -31,9 +31,7 @@ describe('planClipSchedule', () => {
   it('clip straddling the playhead starts now, mid-clip', () => {
     // source [1s, 4s) (trim-in 1s) placed at timeline 2s ⇒ spans [2s, 5s).
     // playhead at 3s ⇒ 1s into the clip.
-    const clips: ClipRegion[] = [
-      { sourceIn: 1 * SR, sourceOut: 4 * SR, timelineStart: 2 * SR },
-    ];
+    const clips: ClipRegion[] = [{ sourceIn: 1 * SR, sourceOut: 4 * SR, timelineStart: 2 * SR }];
     const plan = planClipSchedule(clips, LEN, SR, 3);
     // offset = sourceIn(1s) + into(1s) = 2s; duration = clipLen(3s) − into(1s) = 2s.
     expect(plan).toEqual([{ whenOffsetSec: 0, offsetSec: 2, durationSec: 2 }]);

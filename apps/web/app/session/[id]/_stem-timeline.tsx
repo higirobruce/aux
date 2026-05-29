@@ -27,7 +27,8 @@
 
 import type { Stem } from '@/lib/types';
 import type { StemClip } from '@aux/session-doc';
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
+import { moveClip, snapTargets, splitClipsAt, trimIn, trimOut } from './_clip-editing';
 
 export interface StemPeaks {
   /** Interleaved min/max pairs — length = 2 * bins. */
@@ -58,9 +59,15 @@ interface Props {
   position: number;
   /** Whether transport is currently playing — used only for cursor styling. */
   playing: boolean;
+  /** Currently-selected clip (for highlight); null when none. */
+  selectedClip: { stemId: string; clipId: string } | null;
   onMute: (stemId: string) => void;
   onSolo: (stemId: string) => void;
   onSeek: (seconds: number) => void;
+  /** Commit a new clips array for a stem (move / trim / split / delete). */
+  onClipsChange: (stemId: string, clips: StemClip[]) => void;
+  /** Select (or clear) a clip. */
+  onSelectClip: (sel: { stemId: string; clipId: string } | null) => void;
 }
 
 const LANE_HEIGHT = 56;
@@ -77,9 +84,12 @@ export function StemTimeline({
   duration,
   position,
   playing,
+  selectedClip,
   onMute,
   onSolo,
   onSeek,
+  onClipsChange,
+  onSelectClip,
 }: Props) {
   const trackRef = useRef<HTMLDivElement>(null);
 
@@ -124,11 +134,16 @@ export function StemTimeline({
               peaks={peaks[stem.id]}
               globalDuration={duration}
               clips={state?.clips ?? EMPTY_CLIPS}
+              position={position}
+              selectedClipId={selectedClip?.stemId === stem.id ? selectedClip.clipId : null}
               muted={state?.muted ?? false}
               soloed={state?.soloed ?? false}
               effectivelyMuted={effectivelyMuted}
               onMute={() => onMute(stem.id)}
               onSolo={() => onSolo(stem.id)}
+              onSeek={onSeek}
+              onClipsChange={(clips) => onClipsChange(stem.id, clips)}
+              onSelectClip={(clipId) => onSelectClip(clipId ? { stemId: stem.id, clipId } : null)}
             />
           );
         })}
@@ -220,24 +235,92 @@ interface LaneProps {
   peaks: StemPeaks | undefined;
   globalDuration: number;
   clips: StemClip[];
+  /** Playhead position in seconds — split point + a snap target. */
+  position: number;
+  /** Selected clip id on THIS lane, or null. */
+  selectedClipId: string | null;
   muted: boolean;
   soloed: boolean;
   effectivelyMuted: boolean;
   onMute: () => void;
   onSolo: () => void;
+  onSeek: (seconds: number) => void;
+  onClipsChange: (clips: StemClip[]) => void;
+  onSelectClip: (clipId: string | null) => void;
 }
+
+type DragMode = 'move' | 'in' | 'out';
 
 function StemLane({
   stem,
   peaks,
   globalDuration,
   clips,
+  position,
+  selectedClipId,
   muted,
   soloed,
   effectivelyMuted,
   onMute,
   onSolo,
+  onSeek,
+  onClipsChange,
+  onSelectClip,
 }: LaneProps) {
+  const clipsRef = useRef<HTMLDivElement>(null);
+  // Live geometry while dragging; null when idle. draftRef mirrors it so the
+  // pointerup commit reads the final value without a stale closure.
+  const [draft, setDraft] = useState<StemClip[] | null>(null);
+  const draftRef = useRef<StemClip[] | null>(null);
+
+  const sr = peaks?.sampleRate || 1;
+  const total = peaks?.totalSamples ?? 0;
+  // Total timeline length expressed in THIS stem's samples.
+  const timelineSamples = globalDuration > 0 ? globalDuration * sr : 0;
+  const renderClips = draft ?? clips;
+  const canEdit = !!peaks && total > 0 && timelineSamples > 0;
+
+  function beginDrag(e: React.PointerEvent, mode: DragMode, clip: StemClip) {
+    if (!canEdit) return;
+    e.stopPropagation();
+    e.preventDefault();
+    const widthPx = clipsRef.current?.getBoundingClientRect().width || 1;
+    onSelectClip(clip.id);
+    const startX = e.clientX;
+    const orig = clip;
+    let moved = false;
+
+    const onMove = (ev: PointerEvent) => {
+      const dPx = ev.clientX - startX;
+      if (Math.abs(dPx) > 1) moved = true;
+      const dSample = (dPx / widthPx) * timelineSamples;
+      const threshold = (6 / widthPx) * timelineSamples; // ~6px snap window
+      const targets = snapTargets(clips, orig.id, position * sr);
+      let updated: StemClip;
+      if (mode === 'move') updated = moveClip(orig, dSample, targets, threshold);
+      else if (mode === 'in') updated = trimIn(orig, dSample, targets, threshold);
+      else updated = trimOut(orig, dSample, total, targets, threshold);
+      const next = clips.map((c) => (c.id === orig.id ? updated : c));
+      draftRef.current = next;
+      setDraft(next);
+    };
+    const onUp = () => {
+      window.removeEventListener('pointermove', onMove);
+      window.removeEventListener('pointerup', onUp);
+      const committed = draftRef.current;
+      draftRef.current = null;
+      setDraft(null);
+      if (moved && committed) onClipsChange(committed);
+    };
+    window.addEventListener('pointermove', onMove);
+    window.addEventListener('pointerup', onUp);
+  }
+
+  function handleSplit() {
+    if (!canEdit) return;
+    onClipsChange(splitClipsAt(clips, total, Math.round(position * sr)));
+  }
+
   return (
     <div className={`stem-lane ${effectivelyMuted ? 'muted' : ''}`} style={{ height: LANE_HEIGHT }}>
       <div className="stem-lane-name" style={{ width: NAME_COL_WIDTH }}>
@@ -245,6 +328,19 @@ function StemLane({
           {stem.name}
         </span>
         <div className="stem-lane-btns">
+          <button
+            type="button"
+            className="stem-lane-btn split"
+            aria-label={`${stem.name} split at playhead`}
+            title="Split at playhead"
+            disabled={!canEdit}
+            onClick={(e) => {
+              e.stopPropagation();
+              handleSplit();
+            }}
+          >
+            ⊣⊢
+          </button>
           <button
             type="button"
             className={`stem-lane-btn solo ${soloed ? 'on' : ''}`}
@@ -271,25 +367,45 @@ function StemLane({
           </button>
         </div>
       </div>
-      <div className="stem-lane-wave">
+      {/* The wave area seeks on pointerdown. Clips/handles sit on top and
+          stopPropagation, so editing a clip never also seeks. */}
+      <div
+        className="stem-lane-wave"
+        onPointerDown={(e) => {
+          if (globalDuration <= 0) return;
+          const rect = e.currentTarget.getBoundingClientRect();
+          if (rect.width <= 0) return;
+          const ratio = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
+          onSeek(ratio * globalDuration);
+        }}
+      >
         {peaks ? (
-          clips.length > 0 ? (
-            <div className="stem-lane-clips">
-              {clips.map((clip) => {
-                const sr = peaks.sampleRate || 1;
+          renderClips.length > 0 ? (
+            <div className="stem-lane-clips" ref={clipsRef}>
+              {renderClips.map((clip) => {
                 const leftPct =
                   globalDuration > 0 ? (clip.timelineStart / sr / globalDuration) * 100 : 0;
                 const widthPct =
                   globalDuration > 0
                     ? ((clip.sourceOut - clip.sourceIn) / sr / globalDuration) * 100
                     : 0;
+                const selected = clip.id === selectedClipId;
                 return (
                   <div
                     key={clip.id}
-                    className="stem-clip"
+                    className={`stem-clip ${selected ? 'selected' : ''}`}
                     style={{ left: `${leftPct}%`, width: `${widthPct}%` }}
+                    onPointerDown={(e) => beginDrag(e, 'move', clip)}
                   >
                     <ClipCanvas peaks={peaks} inSample={clip.sourceIn} outSample={clip.sourceOut} />
+                    <div
+                      className="stem-clip-handle left"
+                      onPointerDown={(e) => beginDrag(e, 'in', clip)}
+                    />
+                    <div
+                      className="stem-clip-handle right"
+                      onPointerDown={(e) => beginDrag(e, 'out', clip)}
+                    />
                   </div>
                 );
               })}

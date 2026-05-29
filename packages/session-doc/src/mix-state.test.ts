@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  ChannelStateSchema,
   DEFAULT_CHANNEL_COMP,
   DEFAULT_CHANNEL_CONSOLE,
   DEFAULT_CHANNEL_DEESS,
@@ -13,7 +14,6 @@ import {
   MIX_STATE_VERSION,
   MixStateSchema,
   StemClipSchema,
-  ChannelStateSchema,
   emptyMixState,
 } from './mix-state.js';
 
@@ -47,17 +47,16 @@ describe('StemClipSchema', () => {
 
   it('rejects sourceOut <= sourceIn', () => {
     expect(
-      StemClipSchema.safeParse({ id: 'c', sourceIn: 100, sourceOut: 100, timelineStart: 0 })
-        .success,
+      StemClipSchema.safeParse({ id: 'c', sourceIn: 100, sourceOut: 100, timelineStart: 0 }).success
     ).toBe(false);
   });
 
   it('rejects negative / non-integer positions', () => {
     expect(
-      StemClipSchema.safeParse({ id: 'c', sourceIn: -1, sourceOut: 10, timelineStart: 0 }).success,
+      StemClipSchema.safeParse({ id: 'c', sourceIn: -1, sourceOut: 10, timelineStart: 0 }).success
     ).toBe(false);
     expect(
-      StemClipSchema.safeParse({ id: 'c', sourceIn: 0, sourceOut: 10.5, timelineStart: 0 }).success,
+      StemClipSchema.safeParse({ id: 'c', sourceIn: 0, sourceOut: 10.5, timelineStart: 0 }).success
     ).toBe(false);
   });
 });
