@@ -26,6 +26,7 @@
  */
 
 import type { Stem } from '@/lib/types';
+import type { StemClip } from '@aux/session-doc';
 import { useEffect, useRef } from 'react';
 
 export interface StemPeaks {
@@ -40,6 +41,8 @@ export interface StemPeaks {
 interface StemLaneState {
   muted: boolean;
   soloed: boolean;
+  /** Timeline clips for this stem. Absent/empty = whole buffer at t=0. */
+  clips?: StemClip[];
 }
 
 interface Props {
@@ -63,6 +66,8 @@ interface Props {
 const LANE_HEIGHT = 56;
 const NAME_COL_WIDTH = 132;
 const RULER_HEIGHT = 18;
+/** Stable empty-clips reference so lanes without clips don't re-render. */
+const EMPTY_CLIPS: StemClip[] = [];
 
 export function StemTimeline({
   stems,
@@ -118,6 +123,7 @@ export function StemTimeline({
               stem={stem}
               peaks={peaks[stem.id]}
               globalDuration={duration}
+              clips={state?.clips ?? EMPTY_CLIPS}
               muted={state?.muted ?? false}
               soloed={state?.soloed ?? false}
               effectivelyMuted={effectivelyMuted}
@@ -213,6 +219,7 @@ interface LaneProps {
   stem: Stem;
   peaks: StemPeaks | undefined;
   globalDuration: number;
+  clips: StemClip[];
   muted: boolean;
   soloed: boolean;
   effectivelyMuted: boolean;
@@ -224,6 +231,7 @@ function StemLane({
   stem,
   peaks,
   globalDuration,
+  clips,
   muted,
   soloed,
   effectivelyMuted,
@@ -265,11 +273,125 @@ function StemLane({
       </div>
       <div className="stem-lane-wave">
         {peaks ? (
-          <WaveCanvas peaks={peaks} globalDuration={globalDuration} />
+          clips.length > 0 ? (
+            <div className="stem-lane-clips">
+              {clips.map((clip) => {
+                const sr = peaks.sampleRate || 1;
+                const leftPct =
+                  globalDuration > 0 ? (clip.timelineStart / sr / globalDuration) * 100 : 0;
+                const widthPct =
+                  globalDuration > 0
+                    ? ((clip.sourceOut - clip.sourceIn) / sr / globalDuration) * 100
+                    : 0;
+                return (
+                  <div
+                    key={clip.id}
+                    className="stem-clip"
+                    style={{ left: `${leftPct}%`, width: `${widthPct}%` }}
+                  >
+                    <ClipCanvas peaks={peaks} inSample={clip.sourceIn} outSample={clip.sourceOut} />
+                  </div>
+                );
+              })}
+            </div>
+          ) : (
+            <WaveCanvas peaks={peaks} globalDuration={globalDuration} />
+          )
         ) : (
           <div className="stem-lane-loading">loading…</div>
         )}
       </div>
+    </div>
+  );
+}
+
+// ──────────────────────────────────────────────────────────────────────────
+// Clip canvas — windowed waveform for a single clip rectangle
+// ──────────────────────────────────────────────────────────────────────────
+
+/**
+ * Draws the source-buffer peaks for the sample window [inSample, outSample)
+ * stretched across the full width of its container (the positioned clip div).
+ * Reuses the cached peaks array — never recomputes from the buffer.
+ */
+function ClipCanvas({
+  peaks,
+  inSample,
+  outSample,
+}: {
+  peaks: StemPeaks;
+  inSample: number;
+  outSample: number;
+}) {
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+  const wrapRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    const wrap = wrapRef.current;
+    if (!canvas || !wrap) return;
+
+    function draw() {
+      if (!canvas || !wrap) return;
+      const ctx = canvas.getContext('2d');
+      if (!ctx) return;
+      const dpr = window.devicePixelRatio || 1;
+      const cssW = wrap.clientWidth;
+      const cssH = wrap.clientHeight;
+      const w = Math.max(1, Math.floor(cssW * dpr));
+      const h = Math.max(1, Math.floor(cssH * dpr));
+      if (canvas.width !== w) canvas.width = w;
+      if (canvas.height !== h) canvas.height = h;
+      canvas.style.width = `${cssW}px`;
+      canvas.style.height = `${cssH}px`;
+
+      const totalBins = peaks.peaks.length / 2;
+      ctx.clearRect(0, 0, w, h);
+      if (totalBins === 0 || peaks.totalSamples <= 0) return;
+
+      // Map the clip's sample window onto the peaks bin array.
+      const binStartIdx = Math.max(0, Math.floor((inSample / peaks.totalSamples) * totalBins));
+      const binEndIdx = Math.min(
+        totalBins,
+        Math.max(binStartIdx + 1, Math.ceil((outSample / peaks.totalSamples) * totalBins))
+      );
+      const span = binEndIdx - binStartIdx;
+      if (span <= 0) return;
+
+      ctx.strokeStyle = '#7cc0ff';
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      const midY = h / 2;
+      const halfH = midY - 1;
+      for (let x = 0; x < w; x++) {
+        const b0 = binStartIdx + Math.floor((x / w) * span);
+        const b1 = Math.max(b0 + 1, binStartIdx + Math.floor(((x + 1) / w) * span));
+        let lo = Number.POSITIVE_INFINITY;
+        let hi = Number.NEGATIVE_INFINITY;
+        for (let b = b0; b < b1 && b < binEndIdx; b++) {
+          const mn = peaks.peaks[b * 2] ?? 0;
+          const mx = peaks.peaks[b * 2 + 1] ?? 0;
+          if (mn < lo) lo = mn;
+          if (mx > hi) hi = mx;
+        }
+        if (!Number.isFinite(lo) || !Number.isFinite(hi)) continue;
+        const y1 = midY - hi * halfH;
+        const y2 = midY - lo * halfH;
+        ctx.moveTo(x + 0.5, y1);
+        ctx.lineTo(x + 0.5, Math.max(y2, y1 + 1));
+      }
+      ctx.stroke();
+    }
+
+    draw();
+    const ro = new ResizeObserver(draw);
+    ro.observe(wrap);
+    return () => ro.disconnect();
+  }, [peaks, inSample, outSample]);
+
+  return (
+    <div ref={wrapRef} className="stem-clip-canvas-wrap">
+      <canvas ref={canvasRef} className="stem-clip-canvas" />
     </div>
   );
 }

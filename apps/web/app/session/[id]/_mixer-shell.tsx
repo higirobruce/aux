@@ -659,7 +659,11 @@ export function MixerShell({
         ch.mbcomp.ratio
       );
       host.setChannelMbCompBypassed(stem.id, ch.mbcomp.bypassed);
+      host.setChannelClips(stem.id, ch.clips);
     }
+    // Clips can extend (or shorten) the effective timeline, so recompute the
+    // duration after they're applied — the earlier set used buffer lengths.
+    setDuration(host.durationSeconds);
 
     // Ensure user-defined buses exist on the host (Master is auto-created)
     // and apply gain + mute. addBus is idempotent — safe to call every load.

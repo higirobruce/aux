@@ -1784,6 +1784,37 @@
   color: #4a525e;
 }
 
+/* ─── Clips (timeline regions, v0.3 clip editing) ──────────────────── */
+
+/* Container spanning the lane; clip rects are absolutely placed within. */
+.stem-lane-clips {
+  position: absolute;
+  inset: 0;
+}
+
+/* A single clip region — positioned by left/width % of the global timeline. */
+.stem-clip {
+  position: absolute;
+  top: 2px;
+  bottom: 2px;
+  border: 1px solid rgba(124, 192, 255, 0.5);
+  border-radius: 2px;
+  background: rgba(124, 192, 255, 0.06);
+  box-sizing: border-box;
+  overflow: hidden;
+}
+
+.stem-clip-canvas-wrap {
+  position: absolute;
+  inset: 0;
+}
+
+.stem-clip-canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
 /* Track: invisible click-receiving overlay across all lanes. The playhead
    div sits on top of this (z-index 2) so the click target stays underneath. */
 .stem-timeline-track {
