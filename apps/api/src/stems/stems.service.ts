@@ -15,12 +15,13 @@ const isLocalKey = (k: string | null | undefined) => !!k && k.startsWith(OPFS_KE
  * user's R2 prefix on their own stem row and then download via the signed-
  * URL endpoint.
  *
- * Valid forms:
- *   stems/<sessionId>/...           — R2 key minted via /api/stems/sign
+ * Valid forms (both nest under the session's path so cross-session writes
+ * are impossible):
+ *   sessions/<sessionId>/stems/...  — R2 key minted via StorageService.stemKey
  *   opfs:sessions/<sessionId>/...   — local OPFS file
  */
 function assertOwnedKey(sessionId: string, s3Key: string): void {
-  const r2Ok = s3Key.startsWith(`stems/${sessionId}/`);
+  const r2Ok = s3Key.startsWith(`sessions/${sessionId}/stems/`);
   const opfsOk = s3Key.startsWith(`${OPFS_KEY_PREFIX}sessions/${sessionId}/`);
   if (!r2Ok && !opfsOk) {
     throw new BadRequestException('s3Key must belong to this session');

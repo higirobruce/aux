@@ -1,0 +1,575 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>aux — Progress</title>
+<style>
+  :root {
+    --paper:        #EEF2F7;
+    --paper-2:      #E3EAF3;
+    --paper-3:      #D2DCE8;
+    --ink:          #16181D;
+    --ink-2:        #353A43;
+    --ink-3:        #626973;
+    --ink-4:        #939AA5;
+    --azure:        #2E5FA8;
+    --azure-soft:   #C5D5EC;
+    --azure-deep:   #14355F;
+    --line:         #D3DCE7;
+    --line-strong:  #B5C2D2;
+    --highlight:    #DCE7F5;
+    --done:         #2E7D5B;
+    --done-soft:    #CDE6DA;
+    --done-deep:    #14422D;
+    --flight:       #B47B2E;
+    --flight-soft:  #F4E8D0;
+    --flight-deep:  #6B4716;
+    --next:         #2E5FA8;
+    --pending:      #939AA5;
+    --pending-soft: #E3EAF3;
+    --font-display: "Tiempos", "Iowan Old Style", "Georgia", serif;
+    --font-sans:    "Söhne", "Inter", -apple-system, BlinkMacSystemFont, "Helvetica Neue", sans-serif;
+    --font-mono:    "JetBrains Mono", "SF Mono", "Menlo", monospace;
+    --t-12: 0.75rem; --t-14: 0.875rem; --t-16: 1rem; --t-18: 1.125rem;
+    --t-22: 1.375rem; --t-28: 1.75rem; --t-36: 2.25rem; --t-48: 3rem;
+    --s-1: 4px; --s-2: 8px; --s-3: 12px; --s-4: 16px; --s-5: 24px;
+    --s-6: 32px; --s-7: 48px; --s-8: 64px; --s-9: 96px;
+    --r-1: 2px; --r-2: 4px; --r-3: 8px;
+  }
+  *, *::before, *::after { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--paper);
+    color: var(--ink);
+    font-family: var(--font-sans);
+    font-size: var(--t-16);
+    line-height: 1.6;
+    -webkit-font-smoothing: antialiased;
+  }
+  h1 { font-family: var(--font-display); font-size: var(--t-48); line-height: 1.05; letter-spacing: -0.02em; font-weight: 400; margin: 0 0 var(--s-3); }
+  h2 { font-family: var(--font-sans); font-size: var(--t-28); font-weight: 500; margin: var(--s-7) 0 var(--s-4); letter-spacing: -0.01em; }
+  h3 { font-family: var(--font-sans); font-size: var(--t-18); font-weight: 600; margin: var(--s-6) 0 var(--s-2); }
+  p  { margin: 0 0 var(--s-4); max-width: 68ch; color: var(--ink-2); }
+  .eyebrow { font-family: var(--font-mono); font-size: var(--t-12); letter-spacing: 0.12em; text-transform: uppercase; color: var(--ink-3); margin: 0 0 var(--s-3); }
+  small, .caption { font-size: var(--t-14); color: var(--ink-3); }
+
+  .page { max-width: 1100px; margin: 0 auto; padding: var(--s-8) var(--s-6); }
+  .section { padding: var(--s-7) 0; border-top: 1px solid var(--line); }
+  .section:first-of-type { border-top: 0; padding-top: var(--s-4); }
+
+  /* Phase strip */
+  .phases { display: grid; grid-template-columns: repeat(6, 1fr); gap: var(--s-3); margin: var(--s-5) 0 var(--s-3); }
+  @media (max-width: 760px) { .phases { grid-template-columns: repeat(3, 1fr); } }
+  .phase {
+    border: 1px solid var(--line);
+    border-radius: var(--r-3);
+    padding: var(--s-4);
+    background: #fff;
+    position: relative;
+  }
+  .phase .ver { font-family: var(--font-mono); font-size: var(--t-12); letter-spacing: 0.14em; text-transform: uppercase; color: var(--ink-3); }
+  .phase .name { font-weight: 600; font-size: var(--t-16); margin-top: 2px; }
+  .phase .months { font-size: var(--t-12); color: var(--ink-3); font-family: var(--font-mono); margin-top: 2px; }
+  .phase .pill { position: absolute; top: var(--s-3); right: var(--s-3); font-family: var(--font-mono); font-size: 10px; letter-spacing: 0.1em; padding: 2px 6px; border-radius: var(--r-1); text-transform: uppercase; }
+  .phase.shipped { background: var(--done-soft); border-color: var(--done); }
+  .phase.shipped .pill { background: var(--done); color: #fff; }
+  .phase.flight { background: var(--flight-soft); border-color: var(--flight); }
+  .phase.flight .pill { background: var(--flight); color: #fff; }
+  .phase.future { opacity: 0.7; }
+  .phase.future .pill { background: var(--pending-soft); color: var(--ink-3); }
+
+  /* Status pills (reusable) */
+  .pill-st { display: inline-flex; align-items: center; font-family: var(--font-mono); font-size: 10px; letter-spacing: 0.1em; padding: 3px 7px; border-radius: var(--r-1); text-transform: uppercase; line-height: 1; vertical-align: middle; }
+  .pill-shipped { background: var(--done-soft); color: var(--done-deep); border: 1px solid var(--done); }
+  .pill-flight  { background: var(--flight-soft); color: var(--flight-deep); border: 1px solid var(--flight); }
+  .pill-next    { background: var(--highlight); color: var(--azure-deep); border: 1px solid var(--azure); }
+  .pill-planned { background: var(--pending-soft); color: var(--ink-3); border: 1px solid var(--line-strong); }
+
+  /* Progress meter */
+  .meter { background: var(--paper-2); border-radius: var(--r-2); height: 8px; overflow: hidden; border: 1px solid var(--line); }
+  .meter .fill { height: 100%; background: linear-gradient(90deg, var(--azure) 0%, var(--done) 100%); }
+  .meter-row { display: grid; grid-template-columns: 160px 1fr 60px; gap: var(--s-3); align-items: center; margin: var(--s-2) 0; font-size: var(--t-14); }
+  .meter-row .label { color: var(--ink-2); }
+  .meter-row .pct { color: var(--ink-3); font-family: var(--font-mono); font-size: var(--t-12); text-align: right; }
+
+  /* Item table */
+  table { width: 100%; border-collapse: collapse; font-size: var(--t-14); margin: var(--s-3) 0; background: #fff; border: 1px solid var(--line); border-radius: var(--r-3); overflow: hidden; }
+  th, td { text-align: left; padding: var(--s-3) var(--s-4); border-bottom: 1px solid var(--line); vertical-align: top; }
+  tr:last-child td { border-bottom: 0; }
+  th { font-weight: 500; color: var(--ink-3); font-family: var(--font-mono); font-size: var(--t-12); letter-spacing: 0.08em; text-transform: uppercase; background: var(--paper-2); }
+  tr:hover td { background: var(--paper-2); }
+  td .lbl { font-weight: 500; color: var(--ink); }
+  td .why { color: var(--ink-3); font-size: var(--t-12); margin-top: 2px; }
+  td.status { white-space: nowrap; width: 1%; }
+  td.commit { white-space: nowrap; font-family: var(--font-mono); font-size: var(--t-12); color: var(--ink-3); width: 1%; }
+
+  /* Callout — matches implementation.html */
+  .callout { display: grid; grid-template-columns: auto 1fr; gap: var(--s-3); padding: var(--s-4) var(--s-5); border-radius: var(--r-3); background: var(--paper-2); border-left: 2px solid var(--ink-3); margin: var(--s-4) 0; }
+  .callout .mark { font-family: var(--font-mono); font-size: var(--t-12); letter-spacing: 0.1em; text-transform: uppercase; color: var(--ink-3); padding-top: 2px; }
+  .callout p:last-child { margin-bottom: 0; }
+  .callout-tip { border-left-color: var(--azure); background: var(--highlight); }
+  .callout-tip .mark { color: var(--azure-deep); }
+
+  /* Two-col layout */
+  .grid-2 { display: grid; grid-template-columns: repeat(2, minmax(0,1fr)); gap: var(--s-5); }
+  @media (max-width: 760px) { .grid-2 { grid-template-columns: 1fr; } }
+
+  code { font-family: var(--font-mono); font-size: 0.9em; background: var(--paper-2); padding: 2px 6px; border-radius: var(--r-1); border: 1px solid var(--line); }
+
+  .summary-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: var(--s-3); margin: var(--s-5) 0; }
+  @media (max-width: 760px) { .summary-grid { grid-template-columns: repeat(2, 1fr); } }
+  .stat {
+    background: #fff;
+    border: 1px solid var(--line);
+    border-radius: var(--r-3);
+    padding: var(--s-4);
+  }
+  .stat .num { font-family: var(--font-display); font-size: var(--t-36); line-height: 1; color: var(--ink); }
+  .stat .lbl { font-family: var(--font-mono); font-size: var(--t-12); letter-spacing: 0.1em; text-transform: uppercase; color: var(--ink-3); margin-top: var(--s-2); }
+
+  .commitlog { background: #1A1A1A; color: #DCE7F5; border-radius: var(--r-3); padding: var(--s-4) var(--s-5); font-family: var(--font-mono); font-size: var(--t-12); line-height: 1.65; overflow-x: auto; }
+  .commitlog .sha { color: #C9B453; margin-right: var(--s-3); }
+  .commitlog .msg { color: #DCE7F5; }
+  .commitlog .v03 { color: #7AC3E0; }
+</style>
+</head>
+<body>
+<main class="page">
+
+  <!-- ============================================================
+       HEADER
+       ============================================================ -->
+  <section class="section">
+    <p class="eyebrow">aux · progress snapshot · 2026-05-29</p>
+    <h1>v0.3 — Real mixing</h1>
+    <p style="font-size: var(--t-18); color: var(--ink-2); max-width: 64ch;">
+      A living view of what's shipped against
+      <a href="./implementation.html" style="color: var(--ink); text-decoration-color: var(--line-strong);">the implementation plan</a>.
+      Updated as work lands. v0.1 and v0.2 are sealed; v0.3 is the current phase.
+    </p>
+
+    <div class="phases">
+      <div class="phase shipped">
+        <div class="ver">v0.1</div>
+        <div class="name">Foundation</div>
+        <div class="months">Months 1–2</div>
+        <span class="pill">Shipped</span>
+      </div>
+      <div class="phase shipped">
+        <div class="ver">v0.2</div>
+        <div class="name">Minimum mix</div>
+        <div class="months">Months 3–5</div>
+        <span class="pill">Shipped</span>
+      </div>
+      <div class="phase flight">
+        <div class="ver">v0.3</div>
+        <div class="name">Real mixing</div>
+        <div class="months">Months 6–8</div>
+        <span class="pill">In flight</span>
+      </div>
+      <div class="phase future">
+        <div class="ver">v0.4</div>
+        <div class="name">Delivery</div>
+        <div class="months">Months 9–10</div>
+        <span class="pill">Planned</span>
+      </div>
+      <div class="phase future">
+        <div class="ver">v1.0</div>
+        <div class="name">Share &amp; ship</div>
+        <div class="months">Months 11–12</div>
+        <span class="pill">Planned</span>
+      </div>
+      <div class="phase future">
+        <div class="ver">v2+</div>
+        <div class="name">Collab, ML</div>
+        <div class="months">Beyond</div>
+        <span class="pill">Future</span>
+      </div>
+    </div>
+
+    <div class="summary-grid">
+      <div class="stat">
+        <div class="num">9<span style="color: var(--ink-3); font-size: var(--t-22);"> / 13</span></div>
+        <div class="lbl">Must-ship plugins</div>
+      </div>
+      <div class="stat">
+        <div class="num">5<span style="color: var(--ink-3); font-size: var(--t-22);"> / 7</span></div>
+        <div class="lbl">v0.3 scope items done</div>
+      </div>
+      <div class="stat">
+        <div class="num">20</div>
+        <div class="lbl">v0.3 commits to date</div>
+      </div>
+      <div class="stat">
+        <div class="num">12</div>
+        <div class="lbl">MixState versions</div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============================================================
+       v0.3 — SCOPE TRACKER
+       ============================================================ -->
+  <section class="section">
+    <p class="eyebrow">01 · v0.3 scope tracker</p>
+    <h2 style="margin-top: 0;">What's in v0.3 — status by line item</h2>
+    <p>
+      The phase scope from the plan, with status of each line. The plugin
+      suite has its own section below since it's seven sub-items.
+    </p>
+
+    <table>
+      <thead>
+        <tr>
+          <th>Line item</th>
+          <th style="width: 1%;">Status</th>
+          <th>Notes</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>
+            <div class="lbl">All 12 native plugins</div>
+            <div class="why">v1 suite — Rust crates compiled to WASM, lazy-loaded into AudioWorklets.</div>
+          </td>
+          <td class="status"><span class="pill-st pill-flight">9 of 13</span></td>
+          <td>EQ-8 · Comp-Clean · Comp-Color · Plate · Hall · Limiter · Transient · DeEss · Imager shipped. MB-Comp · Tape · Console remaining (v1.1: Spring, Exciter, Tuner).</td>
+        </tr>
+        <tr>
+          <td>
+            <div class="lbl">Sends + buses</div>
+            <div class="why">User-created summing buses with post-fader aux sends from each channel.</div>
+          </td>
+          <td class="status"><span class="pill-st pill-shipped">Shipped</span></td>
+          <td>Three sub-slices landed: explicit Master bus + UI strip, user-created buses + channel routing, post-fader aux sends.</td>
+        </tr>
+        <tr>
+          <td>
+            <div class="lbl">Master chain</div>
+            <div class="why">True-peak Limiter on the Master bus output.</div>
+          </td>
+          <td class="status"><span class="pill-st pill-shipped">Shipped</span></td>
+          <td>Limiter sits between Master gain and final analyser; GR meter on the Master strip.</td>
+        </tr>
+        <tr>
+          <td>
+            <div class="lbl">Reference Rooms</div>
+            <div class="why">Filter presets that simulate playback on car / laptop / earbud systems, applied to the Master so you can spot-check translation while mixing.</div>
+          </td>
+          <td class="status"><span class="pill-st pill-shipped">Shipped</span></td>
+          <td>
+            Four presets (Off / Laptop / Earbuds / Car) as native BiquadFilterNode cascades inserted between
+            masterGain and the final output — meter + limiter still see the true mix, only what's monitored is
+            coloured. 2×2 toggle grid on the Master strip. Hydration also fixed in passing to preserve a saved
+            limiter on version bumps rather than wiping it.
+          </td>
+        </tr>
+        <tr>
+          <td>
+            <div class="lbl">Smart EQ panel</div>
+            <div class="why">Polished UI for the existing EQ-8 DSP — curve display, frequency-response plot, draggable nodes, all eight bands exposed.</div>
+          </td>
+          <td class="status"><span class="pill-st pill-planned">Planned</span></td>
+          <td>Today the channel strip only exposes three bands (Lo / Mid / Hi). The DSP itself has all eight; the panel surfaces them.</td>
+        </tr>
+        <tr>
+          <td>
+            <div class="lbl">Clip editing v1</div>
+            <div class="why">Cut / move / trim per stem on the timeline. Stays inside one stem — no inserts, no MIDI.</div>
+          </td>
+          <td class="status"><span class="pill-st pill-next">Next (unblocked)</span></td>
+          <td>Stem timeline is in, so the surface to edit on exists. Still the heaviest unlanded v0.3 item.</td>
+        </tr>
+        <tr>
+          <td>
+            <div class="lbl">Stem timeline (read-only)</div>
+            <div class="why">Horizontal lane per stem, sharing the mixer playhead. Waveform render + click-to-jump + mute/solo mirror.</div>
+          </td>
+          <td class="status"><span class="pill-st pill-shipped">Shipped</span></td>
+          <td>
+            Ruler + canvas lane per stem, peaks pre-decoded on mount, click-to-seek (restarts playback at offset
+            when playing), in/out shading + hairline markers, mute/solo mirror, timeline toggle in the transport bar.
+            Mixer also gained a global vertical scroll and a sibling names row so the scribble strip stays
+            visible regardless of how the controls are scrolled.
+          </td>
+        </tr>
+      </tbody>
+    </table>
+  </section>
+
+  <!-- ============================================================
+       PLUGIN SUITE
+       ============================================================ -->
+  <section class="section">
+    <p class="eyebrow">02 · Plugin suite</p>
+    <h2 style="margin-top: 0;">v1 plugin suite — DSP modules</h2>
+    <p>
+      All Rust crates in <code>packages/dsp-*</code> with a <code>wasm-pack</code>
+      build that produces an inlined-worklet bundle. Each plugin follows the
+      same shape: <code>Rust crate → wasm-bindgen ABI → /public/{name}-worklet.js
+      + {name}_bg.wasm → AudioWorkletNode insert in the channel chain</code>.
+    </p>
+
+    <div class="meter-row">
+      <div class="label">Must-ship</div>
+      <div class="meter"><div class="fill" style="width: 69%;"></div></div>
+      <div class="pct">9 / 13</div>
+    </div>
+    <div class="meter-row">
+      <div class="label">v1.1 stretch</div>
+      <div class="meter"><div class="fill" style="width: 0%;"></div></div>
+      <div class="pct">0 / 3</div>
+    </div>
+
+    <table>
+      <thead>
+        <tr>
+          <th>Plugin</th>
+          <th>Type</th>
+          <th>Tier</th>
+          <th>Status</th>
+          <th class="commit">Commit</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td><span class="lbl">EQ-8</span></td>
+          <td>8-band parametric EQ</td>
+          <td>Must ship</td>
+          <td><span class="pill-st pill-shipped">Shipped</span></td>
+          <td class="commit">c4d972d</td>
+        </tr>
+        <tr>
+          <td><span class="lbl">Comp-Clean</span></td>
+          <td>VCA-style compressor</td>
+          <td>Must ship</td>
+          <td><span class="pill-st pill-shipped">Shipped</span></td>
+          <td class="commit">a2bbd53</td>
+        </tr>
+        <tr>
+          <td><span class="lbl">Comp-Color</span></td>
+          <td>FET-style compressor</td>
+          <td>Must ship</td>
+          <td><span class="pill-st pill-shipped">Shipped</span></td>
+          <td class="commit">f66941b</td>
+        </tr>
+        <tr>
+          <td><span class="lbl">Plate</span></td>
+          <td>Plate reverb (Dattorro)</td>
+          <td>Must ship</td>
+          <td><span class="pill-st pill-shipped">Shipped</span></td>
+          <td class="commit">6e4c520</td>
+        </tr>
+        <tr>
+          <td><span class="lbl">Hall</span></td>
+          <td>Hall reverb</td>
+          <td>Must ship</td>
+          <td><span class="pill-st pill-shipped">Shipped</span></td>
+          <td class="commit">ebe3040</td>
+        </tr>
+        <tr>
+          <td><span class="lbl">Limiter</span></td>
+          <td>True-peak limiter</td>
+          <td>Must ship</td>
+          <td><span class="pill-st pill-shipped">Shipped</span></td>
+          <td class="commit">25572a8</td>
+        </tr>
+        <tr>
+          <td><span class="lbl">Transient</span></td>
+          <td>Transient designer</td>
+          <td>Must ship</td>
+          <td><span class="pill-st pill-shipped">Shipped</span></td>
+          <td class="commit">fcf6930</td>
+        </tr>
+        <tr>
+          <td><span class="lbl">DeEss</span></td>
+          <td>Split-band de-esser</td>
+          <td>Must ship</td>
+          <td><span class="pill-st pill-shipped">Shipped</span></td>
+          <td class="commit">89a3a49</td>
+        </tr>
+        <tr>
+          <td><span class="lbl">Imager</span></td>
+          <td>M/S stereo width</td>
+          <td>Must ship</td>
+          <td><span class="pill-st pill-shipped">Shipped</span></td>
+          <td class="commit">89a3a49</td>
+        </tr>
+        <tr>
+          <td><span class="lbl">MB-Comp</span></td>
+          <td>Multiband compressor</td>
+          <td>Must ship</td>
+          <td><span class="pill-st pill-planned">Planned</span></td>
+          <td class="commit">—</td>
+        </tr>
+        <tr>
+          <td><span class="lbl">Tape</span></td>
+          <td>Tape saturation</td>
+          <td>Must ship</td>
+          <td><span class="pill-st pill-planned">Planned</span></td>
+          <td class="commit">—</td>
+        </tr>
+        <tr>
+          <td><span class="lbl">Console</span></td>
+          <td>Console saturation</td>
+          <td>Must ship</td>
+          <td><span class="pill-st pill-planned">Planned</span></td>
+          <td class="commit">—</td>
+        </tr>
+        <tr style="opacity: 0.7;">
+          <td><span class="lbl">Spring</span></td>
+          <td>Spring reverb</td>
+          <td>v1.1</td>
+          <td><span class="pill-st pill-planned">Planned</span></td>
+          <td class="commit">—</td>
+        </tr>
+        <tr style="opacity: 0.7;">
+          <td><span class="lbl">Exciter</span></td>
+          <td>Harmonic exciter</td>
+          <td>v1.1</td>
+          <td><span class="pill-st pill-planned">Planned</span></td>
+          <td class="commit">—</td>
+        </tr>
+        <tr style="opacity: 0.7;">
+          <td><span class="lbl">Tuner</span></td>
+          <td>Pitch reference</td>
+          <td>v1.1</td>
+          <td><span class="pill-st pill-planned">Planned</span></td>
+          <td class="commit">—</td>
+        </tr>
+      </tbody>
+    </table>
+  </section>
+
+  <!-- ============================================================
+       WHAT'S NEXT
+       ============================================================ -->
+  <section class="section">
+    <p class="eyebrow">03 · What's next</p>
+    <h2 style="margin-top: 0;">Recommended next move</h2>
+
+    <div class="callout callout-tip">
+      <span class="mark">Pick one</span>
+      <p>
+        Reference Rooms shipped, so v0.3 has three lanes left: finish the
+        plugin marathon (Tape · Console · MB-Comp), Smart EQ panel, and
+        Clip editing v1. The plugin marathon closes the headline
+        &ldquo;all 12 native plugins&rdquo; checkbox on the v0.3 list, with
+        Tape as the easiest first step. Smart EQ panel is the only
+        remaining UI-heavy item; Clip editing v1 is the largest unlanded
+        feature, now reachable on top of the stem timeline.
+      </p>
+    </div>
+
+    <div class="grid-2">
+      <div>
+        <h3 style="margin-top: 0;">Option A — Tape (cheapest plugin)</h3>
+        <p>
+          Single-stage tape-style saturation. Smooth nonlinearity (typically
+          tanh / soft-clip), drive + bias + low-shelf bias to model the
+          tape head's frequency-dependent compression. Mono per channel.
+        </p>
+        <p class="caption">
+          <strong>Cost:</strong> Small Rust crate, the plugin plumbing is
+          by-rote at this point. Probably a single slice.
+        </p>
+        <p class="caption">
+          <strong>Progress:</strong> 9 / 13 must-ship plugins → 10 / 13.
+        </p>
+      </div>
+      <div>
+        <h3 style="margin-top: 0;">Option B — Finish the plugin suite</h3>
+        <p>
+          Three plugins to go: Tape (easy — single-stage saturation
+          curve), Console (medium — channel-style nonlinear coloration),
+          MB-Comp (heavy — 3 or 4 bands × compressor + Linkwitz-Riley
+          crossovers). Tape first, then Console, then MB-Comp.
+        </p>
+        <p class="caption">
+          <strong>Cost:</strong> 3 slices, roughly one each. Work is in
+          tuning the DSP, not wiring it up.
+        </p>
+        <p class="caption">
+          <strong>Unlocks:</strong> Closes &ldquo;all 12 native
+          plugins&rdquo; on the v0.3 checklist; 9 / 13 → 12 / 13.
+        </p>
+      </div>
+      <div>
+        <h3 style="margin-top: 0;">Option C — Clip editing v1 (heaviest)</h3>
+        <p>
+          Cut / move / trim per stem inside the timeline. Stays inside one
+          stem — no inserts, no MIDI. Drag handles on each lane, snap,
+          undo for edits.
+        </p>
+        <p class="caption">
+          <strong>Cost:</strong> Largest unlanded v0.3 lane. Edit-state in
+          MixState, drag interactions on each lane, undo/redo stack, and
+          host-side per-clip playback offsets in the audio engine.
+        </p>
+        <p class="caption">
+          <strong>Unblocked since:</strong> Stem timeline shipped, so the
+          editing surface exists.
+        </p>
+      </div>
+      <div>
+        <h3 style="margin-top: 0;">Option D — Smart EQ panel</h3>
+        <p>
+          Polished UI for the existing EQ-8 DSP — curve display,
+          frequency-response plot, draggable band nodes, all eight bands
+          exposed (today only Lo / Mid / Hi are surfaced on the channel
+          strip).
+        </p>
+        <p class="caption">
+          <strong>Cost:</strong> Larger than the plugin slices because the
+          interaction model is bespoke (drag points on a log-frequency
+          canvas). DSP is already done.
+        </p>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============================================================
+       v0.3 COMMIT LOG
+       ============================================================ -->
+  <section class="section">
+    <p class="eyebrow">04 · v0.3 commit log</p>
+    <h2 style="margin-top: 0;">Slices landed in this phase</h2>
+    <p>
+      Pulled from <code>git log</code> on the staging branch. Each commit is
+      one v0.3 slice — see the implementation plan §11 for phase scope.
+    </p>
+
+    <div class="commitlog">
+<span class="sha">862e7bd</span> <span class="v03">v0.3</span> <span class="msg">Reference Rooms: monitoring presets on the Master strip</span>
+<span class="sha">565f622</span> <span class="v03">v0.3</span> <span class="msg">Channel strip: names in a sibling row outside the console scroll</span>
+<span class="sha">70651b8</span> <span class="v03">v0.3</span> <span class="msg">Channel strip: drop sticky on name to stop covering the output</span>
+<span class="sha">286c1f9</span> <span class="v03">v0.3</span> <span class="msg">Channel strip: global console scroll + sticky scribble-strip name</span>
+<span class="sha">3d1d0c5</span> <span class="v03">v0.3</span> <span class="msg">Channel strip: per-strip scroll body so name is always visible</span>
+<span class="sha">79f9774</span> <span class="v03">v0.3</span> <span class="msg">Channel strip: scribble-strip name (sticky bottom)</span>
+<span class="sha">882cc50</span> <span class="v03">v0.3</span> <span class="msg">Stem timeline: single-line ellipsis on channel names</span>
+<span class="sha">79b66f4</span> <span class="v03">v0.3</span> <span class="msg">Stem timeline polish: mixer scroll, name wrap, peaks on mount</span>
+<span class="sha">b5c78d7</span> <span class="v03">v0.3</span> <span class="msg">Stem timeline (read-only) + living progress doc</span>
+<span class="sha">89a3a49</span> <span class="v03">v0.3</span> <span class="msg">DeEss + Imager: per-channel split-band de-esser and M/S width</span>
+<span class="sha">fcf6930</span> <span class="v03">v0.3</span> <span class="msg">Transient designer: per-channel attack/sustain shaper</span>
+<span class="sha">ebe3040</span> <span class="v03">v0.3</span> <span class="msg">Hall reverb + generalised per-bus reverb slot</span>
+<span class="sha">6e4c520</span> <span class="v03">v0.3</span> <span class="msg">Plate reverb: first wet plugin, lives on user buses</span>
+<span class="sha">25572a8</span> <span class="v03">v0.3</span> <span class="msg">Master chain: true-peak Limiter on the Master bus</span>
+<span class="sha">2fb031b</span> <span class="v03">v0.3</span> <span class="msg">buses (slice 3): post-fader aux sends</span>
+<span class="sha">609a4d5</span> <span class="v03">v0.3</span> <span class="msg">buses (slice 2): user-created buses + channel routing</span>
+<span class="sha">80aa22d</span> <span class="v03">v0.3</span> <span class="msg">buses (slice 1): explicit Master bus + dedicated UI strip</span>
+<span class="sha">f66941b</span>      <span class="msg">Comp-Color: worklet + Clean/Color selector + MixState v4</span>
+<span class="sha">06bdf43</span>      <span class="msg">@aux/dsp-comp-color: FET-style compressor in Rust + WASM (foundation)</span>
+<span class="sha">7661616</span> <span class="v03">v0.3</span> <span class="msg">prep: v0.2 carried debt cleanup</span>
+    </div>
+  </section>
+
+  <footer class="section" style="border-top: 1px solid var(--line); margin-top: var(--s-7);">
+    <p class="caption" style="text-align: center;">
+      aux · progress snapshot · regenerated as work lands · Bruce Higiro
+    </p>
+  </footer>
+
+</main>
+</body>
+</html>

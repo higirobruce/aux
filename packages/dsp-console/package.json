@@ -1,0 +1,23 @@
+{
+  "name": "@aux/dsp-console",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Console-style asymmetric saturation (tanh + bias + iron shelf) — Rust DSP compiled to WASM.",
+  "type": "module",
+  "main": "./wasm/console.js",
+  "types": "./wasm/console.d.ts",
+  "files": ["wasm"],
+  "exports": {
+    ".": {
+      "types": "./wasm/console.d.ts",
+      "default": "./wasm/console.js"
+    },
+    "./console_bg.wasm": "./wasm/console_bg.wasm",
+    "./package.json": "./package.json"
+  },
+  "scripts": {
+    "build": "wasm-pack build --release --target web --out-dir wasm --out-name console && rm -f wasm/.gitignore wasm/package.json",
+    "test:rust": "cargo test --release",
+    "clean": "rm -rf wasm target"
+  }
+}

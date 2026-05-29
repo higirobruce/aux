@@ -17,6 +17,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "aux-dsp-console"
+version = "0.1.0"
+dependencies = [
+ "wasm-bindgen",
+]
+
+[[package]]
+name = "aux-dsp-deess"
+version = "0.1.0"
+dependencies = [
+ "wasm-bindgen",
+]
+
+[[package]]
 name = "aux-dsp-eq8"
 version = "0.1.0"
 dependencies = [
@@ -31,6 +45,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "aux-dsp-imager"
+version = "0.1.0"
+dependencies = [
+ "wasm-bindgen",
+]
+
+[[package]]
 name = "aux-dsp-limiter"
 version = "0.1.0"
 dependencies = [
@@ -38,7 +59,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "aux-dsp-mbcomp"
+version = "0.1.0"
+dependencies = [
+ "wasm-bindgen",
+]
+
+[[package]]
 name = "aux-dsp-plate"
+version = "0.1.0"
+dependencies = [
+ "wasm-bindgen",
+]
+
+[[package]]
+name = "aux-dsp-tape"
 version = "0.1.0"
 dependencies = [
  "wasm-bindgen",

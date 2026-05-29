@@ -86,12 +86,92 @@ export interface AudioHostOptions {
   transientWorkletUrl?: string | URL;
   /** URL to transient_bg.wasm. */
   transientWasmUrl?: string | URL;
+  /**
+   * URL to the DeEss worklet (split-band sibilance tamer). With its wasm,
+   * every channel gets a DeEss insert between Transient and Imager.
+   */
+  deessWorkletUrl?: string | URL;
+  /** URL to deess_bg.wasm. */
+  deessWasmUrl?: string | URL;
+  /**
+   * URL to the Imager worklet (M/S stereo width). Sits last in the channel
+   * chain so the panner sees the final stereo image.
+   */
+  imagerWorkletUrl?: string | URL;
+  /** URL to imager_bg.wasm. */
+  imagerWasmUrl?: string | URL;
+  /**
+   * URL to the Tape worklet (single-stage tape saturation). Sits between
+   * the imager and the gain stage so the saturation works on the final
+   * stereo image.
+   */
+  tapeWorkletUrl?: string | URL;
+  /** URL to tape_bg.wasm. */
+  tapeWasmUrl?: string | URL;
+  /**
+   * URL to the Console worklet (asymmetric-clip saturation). Inserts
+   * after Tape so the channel chain ends with two cascaded saturators —
+   * symmetric "tape" then asymmetric "console" — before the fader.
+   */
+  consoleWorkletUrl?: string | URL;
+  /** URL to console_bg.wasm. */
+  consoleWasmUrl?: string | URL;
+  /**
+   * URL to the MB-Comp worklet (3-band multiband compressor). Sits
+   * between EQ-8 and Comp-Clean so the engineer can tame specific bands
+   * before the wideband comp catches whatever's left.
+   */
+  mbcompWorkletUrl?: string | URL;
+  /** URL to mbcomp_bg.wasm. */
+  mbcompWasmUrl?: string | URL;
   /** Sample rate (default: AudioContext default). */
   sampleRate?: number;
 }
 
 /** Which reverb DSP fills the bus's single reverb slot. */
 export type ReverbKind = 'plate' | 'hall';
+
+/**
+ * Reference Room — a small set of monitoring presets that filter the
+ * post-master signal to simulate common playback systems. Engineers flip
+ * between them mid-mix to spot-check translation ("does this still work
+ * on AirPods?"). Implemented as a cascade of native BiquadFilterNodes
+ * inserted between the master fader and the final worklet output, so
+ * the meter / limiter still see the true mix.
+ */
+export type ReferenceRoomPreset = 'off' | 'laptop' | 'earbuds' | 'car';
+
+interface BiquadSpec {
+  type: BiquadFilterType;
+  freq: number;
+  gainDb?: number;
+  q?: number;
+}
+
+const REFERENCE_ROOM_FILTERS: Record<ReferenceRoomPreset, BiquadSpec[]> = {
+  off: [],
+  // Laptop speakers: brutal high-pass (no bass extension), midrange bump
+  // (tinny / boxed sound), rolled-off treble.
+  laptop: [
+    { type: 'highpass', freq: 200, q: 0.7 },
+    { type: 'peaking', freq: 1500, gainDb: 4, q: 1.5 },
+    { type: 'lowpass', freq: 10_000, q: 0.7 },
+  ],
+  // Earbuds / AirPods: gentle high-pass, presence boost around 3 kHz,
+  // mild treble lift. Closer to flat than the laptop but still coloured.
+  earbuds: [
+    { type: 'highpass', freq: 80, q: 0.7 },
+    { type: 'peaking', freq: 3500, gainDb: 3, q: 1.5 },
+    { type: 'highshelf', freq: 8000, gainDb: 2 },
+  ],
+  // Car stereo: bass boost (subs), midrange scoop (cabin nulls), treble
+  // roll-off (absorbent interior).
+  car: [
+    { type: 'lowshelf', freq: 100, gainDb: 6 },
+    { type: 'peaking', freq: 400, gainDb: -4, q: 1.0 },
+    { type: 'highshelf', freq: 8000, gainDb: -3 },
+  ],
+};
 
 /** Numeric band-type enum, mirrors @aux/dsp-eq8's BandType. */
 export const Eq8BandType = {
@@ -173,6 +253,16 @@ interface ChannelInternals {
   compColor: AudioWorkletNode | null;
   /** Optional Transient designer between Comp-Color and gain. */
   transient: AudioWorkletNode | null;
+  /** Optional DeEss between Transient and Imager. */
+  deess: AudioWorkletNode | null;
+  /** Optional Imager (M/S width). */
+  imager: AudioWorkletNode | null;
+  /** Optional Tape saturation. */
+  tape: AudioWorkletNode | null;
+  /** Optional Console saturation — last channel insert before gain. */
+  console: AudioWorkletNode | null;
+  /** Optional 3-band multiband compressor — sits between EQ-8 and Comp. */
+  mbcomp: AudioWorkletNode | null;
   /** Latest gain reduction (≥ 0) from whichever comp is currently active. */
   compGrDb: number;
   /** Latest GR from the Color-flavor comp, surfaced separately for the meter. */
@@ -215,6 +305,22 @@ export class AudioHost {
   private reverbWasmModules: Partial<Record<ReverbKind, WebAssembly.Module>> = {};
   /** Transient designer — per-channel insert. */
   private transientWasmModule: WebAssembly.Module | null = null;
+  /** DeEss — per-channel insert. */
+  private deessWasmModule: WebAssembly.Module | null = null;
+  /** Imager — per-channel insert. */
+  private imagerWasmModule: WebAssembly.Module | null = null;
+  /** Tape — per-channel insert. */
+  private tapeWasmModule: WebAssembly.Module | null = null;
+  /** Console — per-channel insert. */
+  private consoleWasmModule: WebAssembly.Module | null = null;
+  /** MB-Comp — per-channel insert. */
+  private mbcompWasmModule: WebAssembly.Module | null = null;
+
+  /** Reference Room monitoring filter — between masterGain and the final
+   *  worklet output. A list of BiquadFilterNodes wired in series; empty
+   *  when preset = 'off'. Native Web Audio, no worklet involved. */
+  private referenceRoomFilters: BiquadFilterNode[] = [];
+  private referenceRoomPreset: ReferenceRoomPreset = 'off';
 
   private channels = new Map<string, ChannelInternals>();
   private buses = new Map<string, BusInternals>();
@@ -316,6 +422,61 @@ export class AudioHost {
       );
     }
 
+    if (this.options.deessWorkletUrl && this.options.deessWasmUrl) {
+      await this.ctx.audioWorklet.addModule(this.options.deessWorkletUrl);
+      const res = await fetch(this.options.deessWasmUrl);
+      if (!res.ok) throw new Error(`deess wasm fetch failed (${res.status})`);
+      this.deessWasmModule = await WebAssembly.compileStreaming(
+        new Response(await res.arrayBuffer(), {
+          headers: { 'Content-Type': 'application/wasm' },
+        })
+      );
+    }
+
+    if (this.options.imagerWorkletUrl && this.options.imagerWasmUrl) {
+      await this.ctx.audioWorklet.addModule(this.options.imagerWorkletUrl);
+      const res = await fetch(this.options.imagerWasmUrl);
+      if (!res.ok) throw new Error(`imager wasm fetch failed (${res.status})`);
+      this.imagerWasmModule = await WebAssembly.compileStreaming(
+        new Response(await res.arrayBuffer(), {
+          headers: { 'Content-Type': 'application/wasm' },
+        })
+      );
+    }
+
+    if (this.options.tapeWorkletUrl && this.options.tapeWasmUrl) {
+      await this.ctx.audioWorklet.addModule(this.options.tapeWorkletUrl);
+      const res = await fetch(this.options.tapeWasmUrl);
+      if (!res.ok) throw new Error(`tape wasm fetch failed (${res.status})`);
+      this.tapeWasmModule = await WebAssembly.compileStreaming(
+        new Response(await res.arrayBuffer(), {
+          headers: { 'Content-Type': 'application/wasm' },
+        })
+      );
+    }
+
+    if (this.options.consoleWorkletUrl && this.options.consoleWasmUrl) {
+      await this.ctx.audioWorklet.addModule(this.options.consoleWorkletUrl);
+      const res = await fetch(this.options.consoleWasmUrl);
+      if (!res.ok) throw new Error(`console wasm fetch failed (${res.status})`);
+      this.consoleWasmModule = await WebAssembly.compileStreaming(
+        new Response(await res.arrayBuffer(), {
+          headers: { 'Content-Type': 'application/wasm' },
+        })
+      );
+    }
+
+    if (this.options.mbcompWorkletUrl && this.options.mbcompWasmUrl) {
+      await this.ctx.audioWorklet.addModule(this.options.mbcompWorkletUrl);
+      const res = await fetch(this.options.mbcompWasmUrl);
+      if (!res.ok) throw new Error(`mbcomp wasm fetch failed (${res.status})`);
+      this.mbcompWasmModule = await WebAssembly.compileStreaming(
+        new Response(await res.arrayBuffer(), {
+          headers: { 'Content-Type': 'application/wasm' },
+        })
+      );
+    }
+
     this.workletNode = new AudioWorkletNode(this.ctx, 'aux-processor', {
       numberOfInputs: 1,
       numberOfOutputs: 1,
@@ -343,9 +504,14 @@ export class AudioHost {
     this.stopAll();
     for (const channel of this.channels.values()) {
       if (channel.eq8) channel.eq8.disconnect();
+      if (channel.mbcomp) channel.mbcomp.disconnect();
       if (channel.comp) channel.comp.disconnect();
       if (channel.compColor) channel.compColor.disconnect();
       if (channel.transient) channel.transient.disconnect();
+      if (channel.deess) channel.deess.disconnect();
+      if (channel.imager) channel.imager.disconnect();
+      if (channel.tape) channel.tape.disconnect();
+      if (channel.console) channel.console.disconnect();
       for (const send of channel.sends.values()) send.disconnect();
       channel.sends.clear();
       channel.gain.disconnect();
@@ -361,6 +527,15 @@ export class AudioHost {
       bus.analyser.disconnect();
     }
     this.buses.clear();
+    for (const node of this.referenceRoomFilters) {
+      try {
+        node.disconnect();
+      } catch {
+        // ignore
+      }
+    }
+    this.referenceRoomFilters = [];
+    this.referenceRoomPreset = 'off';
     if (this.workletNode) {
       this.workletNode.disconnect();
       this.workletNode = null;
@@ -403,11 +578,55 @@ export class AudioHost {
     // straightforward: each new node connects to the previous "front" and
     // becomes the new front; the source ultimately connects to `front`.
     //
-    //   source → [eq8] → [comp] → [compColor] → [transient] → gain → panner → analyser → bus
+    //   source → [eq8] → [mbcomp] → [comp] → [compColor] → [transient] → [deess] → [imager] → [tape] → [console] → gain → panner → analyser → bus
     //
     // Bracketed nodes are conditional: they only exist if the corresponding
     // WASM module was loaded at start(). With everything off the routing
     // reduces to source → gain → ... as before.
+    let consoleNode: AudioWorkletNode | null = null;
+    if (this.consoleWasmModule) {
+      consoleNode = new AudioWorkletNode(this.ctx, 'aux-console-processor', {
+        numberOfInputs: 1,
+        numberOfOutputs: 1,
+        outputChannelCount: [2],
+        processorOptions: { wasmModule: this.consoleWasmModule },
+      });
+      consoleNode.connect(gain);
+    }
+
+    let tape: AudioWorkletNode | null = null;
+    if (this.tapeWasmModule) {
+      tape = new AudioWorkletNode(this.ctx, 'aux-tape-processor', {
+        numberOfInputs: 1,
+        numberOfOutputs: 1,
+        outputChannelCount: [2],
+        processorOptions: { wasmModule: this.tapeWasmModule },
+      });
+      tape.connect(consoleNode ?? gain);
+    }
+
+    let imager: AudioWorkletNode | null = null;
+    if (this.imagerWasmModule) {
+      imager = new AudioWorkletNode(this.ctx, 'aux-imager-processor', {
+        numberOfInputs: 1,
+        numberOfOutputs: 1,
+        outputChannelCount: [2],
+        processorOptions: { wasmModule: this.imagerWasmModule },
+      });
+      imager.connect(tape ?? consoleNode ?? gain);
+    }
+
+    let deess: AudioWorkletNode | null = null;
+    if (this.deessWasmModule) {
+      deess = new AudioWorkletNode(this.ctx, 'aux-deess-processor', {
+        numberOfInputs: 1,
+        numberOfOutputs: 1,
+        outputChannelCount: [2],
+        processorOptions: { wasmModule: this.deessWasmModule },
+      });
+      deess.connect(imager ?? tape ?? consoleNode ?? gain);
+    }
+
     let transient: AudioWorkletNode | null = null;
     if (this.transientWasmModule) {
       transient = new AudioWorkletNode(this.ctx, 'aux-transient-processor', {
@@ -416,7 +635,7 @@ export class AudioHost {
         outputChannelCount: [2],
         processorOptions: { wasmModule: this.transientWasmModule },
       });
-      transient.connect(gain);
+      transient.connect(deess ?? imager ?? tape ?? consoleNode ?? gain);
     }
 
     let compColor: AudioWorkletNode | null = null;
@@ -427,7 +646,7 @@ export class AudioHost {
         outputChannelCount: [2],
         processorOptions: { wasmModule: this.compColorWasmModule },
       });
-      compColor.connect(transient ?? gain);
+      compColor.connect(transient ?? deess ?? imager ?? tape ?? consoleNode ?? gain);
     }
 
     let comp: AudioWorkletNode | null = null;
@@ -438,7 +657,20 @@ export class AudioHost {
         outputChannelCount: [2],
         processorOptions: { wasmModule: this.compWasmModule },
       });
-      comp.connect(compColor ?? transient ?? gain);
+      comp.connect(compColor ?? transient ?? deess ?? imager ?? tape ?? consoleNode ?? gain);
+    }
+
+    let mbcomp: AudioWorkletNode | null = null;
+    if (this.mbcompWasmModule) {
+      mbcomp = new AudioWorkletNode(this.ctx, 'aux-mbcomp-processor', {
+        numberOfInputs: 1,
+        numberOfOutputs: 1,
+        outputChannelCount: [2],
+        processorOptions: { wasmModule: this.mbcompWasmModule },
+      });
+      mbcomp.connect(
+        comp ?? compColor ?? transient ?? deess ?? imager ?? tape ?? consoleNode ?? gain
+      );
     }
 
     let eq8: AudioWorkletNode | null = null;
@@ -449,7 +681,9 @@ export class AudioHost {
         outputChannelCount: [2],
         processorOptions: { wasmModule: this.eq8WasmModule },
       });
-      eq8.connect(comp ?? compColor ?? transient ?? gain);
+      eq8.connect(
+        mbcomp ?? comp ?? compColor ?? transient ?? deess ?? imager ?? tape ?? consoleNode ?? gain
+      );
     }
 
     // gain → panner → analyser → outputBus.input
@@ -461,9 +695,14 @@ export class AudioHost {
       stemId: init.stemId,
       buffer: null,
       eq8,
+      mbcomp,
       comp,
       compColor,
       transient,
+      deess,
+      imager,
+      tape,
+      console: consoleNode,
       compGrDb: 0,
       compColorGrDb: 0,
       gain,
@@ -507,6 +746,100 @@ export class AudioHost {
     return this.channels.get(stemId)?.buffer != null;
   }
 
+  /** Duration in seconds of a stem's decoded buffer (0 if not loaded). */
+  getStemDuration(stemId: string): number {
+    return this.channels.get(stemId)?.buffer?.duration ?? 0;
+  }
+
+  /**
+   * Downsampled waveform data for the read-only stem timeline.
+   *
+   * Reads the decoded AudioBuffer and computes `count` (min, max) pairs by
+   * scanning the buffer in equal-width bins. For stereo buffers we fold the
+   * channels by taking the per-bin extremes across both, which is what a
+   * standard DAW waveform shows.
+   *
+   * Returns null when the stem isn't loaded yet. The result is independent
+   * of the audio graph state — no playback or worklet involvement — so
+   * callers can request it as soon as `loadStem()` resolves.
+   *
+   * `inSample` / `outSample` mark the first and last sample whose absolute
+   * value exceeds `silenceThreshold`. Useful for showing where a stem has
+   * audible content vs. silent intro/outro padding.
+   */
+  getStemPeaks(
+    stemId: string,
+    count: number,
+    silenceThreshold = 0.001
+  ): {
+    peaks: Float32Array;
+    inSample: number;
+    outSample: number;
+    sampleRate: number;
+    totalSamples: number;
+  } | null {
+    const buffer = this.channels.get(stemId)?.buffer;
+    if (!buffer || count <= 0) return null;
+    const totalLen = buffer.length;
+    const channels = buffer.numberOfChannels;
+
+    // Stride channel data into a single linked view per channel so we can
+    // walk both in lock-step. Web Audio's getChannelData returns the raw
+    // Float32Array — zero copy.
+    const channelData: Float32Array[] = [];
+    for (let c = 0; c < channels; c++) channelData.push(buffer.getChannelData(c));
+
+    const bins = Math.max(1, Math.min(count, totalLen));
+    const peaks = new Float32Array(bins * 2);
+    const samplesPerBin = totalLen / bins;
+    for (let b = 0; b < bins; b++) {
+      const start = Math.floor(b * samplesPerBin);
+      const end = b === bins - 1 ? totalLen : Math.floor((b + 1) * samplesPerBin);
+      let min = Number.POSITIVE_INFINITY;
+      let max = Number.NEGATIVE_INFINITY;
+      for (let c = 0; c < channels; c++) {
+        const ch = channelData[c];
+        if (!ch) continue;
+        for (let i = start; i < end; i++) {
+          const v = ch[i] ?? 0;
+          if (v < min) min = v;
+          if (v > max) max = v;
+        }
+      }
+      if (!Number.isFinite(min) || !Number.isFinite(max)) {
+        min = 0;
+        max = 0;
+      }
+      peaks[b * 2] = min;
+      peaks[b * 2 + 1] = max;
+    }
+
+    // Silence-trim: walk the first channel from each end. Stops at the first
+    // sample exceeding the threshold. Cheap (linear scan) and accurate enough
+    // for "where does the content start".
+    let inSample = 0;
+    let outSample = totalLen - 1;
+    const probe = channelData[0];
+    if (probe) {
+      while (inSample < totalLen && Math.abs(probe[inSample] ?? 0) <= silenceThreshold) inSample++;
+      while (outSample > inSample && Math.abs(probe[outSample] ?? 0) <= silenceThreshold) {
+        outSample--;
+      }
+      if (inSample >= totalLen) {
+        inSample = 0;
+        outSample = totalLen - 1;
+      }
+    }
+
+    return {
+      peaks,
+      inSample,
+      outSample,
+      sampleRate: buffer.sampleRate,
+      totalSamples: totalLen,
+    };
+  }
+
   removeChannel(stemId: string): void {
     const channel = this.channels.get(stemId);
     if (!channel) return;
@@ -521,9 +854,14 @@ export class AudioHost {
       channel.source = null;
     }
     if (channel.eq8) channel.eq8.disconnect();
+    if (channel.mbcomp) channel.mbcomp.disconnect();
     if (channel.comp) channel.comp.disconnect();
     if (channel.compColor) channel.compColor.disconnect();
     if (channel.transient) channel.transient.disconnect();
+    if (channel.deess) channel.deess.disconnect();
+    if (channel.imager) channel.imager.disconnect();
+    if (channel.tape) channel.tape.disconnect();
+    if (channel.console) channel.console.disconnect();
     for (const send of channel.sends.values()) send.disconnect();
     channel.sends.clear();
     channel.gain.disconnect();
@@ -547,6 +885,98 @@ export class AudioHost {
     const transient = this.channels.get(stemId)?.transient;
     if (!transient) return;
     transient.port.postMessage({ type: 'set-bypassed', bypassed });
+  }
+
+  // ────────────────────────────────────────────────────────────────────
+  // Per-channel DeEss
+  // ────────────────────────────────────────────────────────────────────
+
+  /** `freq` Hz (2k..12k), `amount` 0..1 (0 = off). */
+  setChannelDeEss(stemId: string, freq: number, amount: number): void {
+    const deess = this.channels.get(stemId)?.deess;
+    if (!deess) return;
+    deess.port.postMessage({ type: 'set-params', freq, amount });
+  }
+
+  setChannelDeEssBypassed(stemId: string, bypassed: boolean): void {
+    const deess = this.channels.get(stemId)?.deess;
+    if (!deess) return;
+    deess.port.postMessage({ type: 'set-bypassed', bypassed });
+  }
+
+  // ────────────────────────────────────────────────────────────────────
+  // Per-channel Imager (M/S width)
+  // ────────────────────────────────────────────────────────────────────
+
+  /** `width` 0..2; 1 = unity (passthrough). */
+  setChannelImager(stemId: string, width: number): void {
+    const imager = this.channels.get(stemId)?.imager;
+    if (!imager) return;
+    imager.port.postMessage({ type: 'set-width', width });
+  }
+
+  setChannelImagerBypassed(stemId: string, bypassed: boolean): void {
+    const imager = this.channels.get(stemId)?.imager;
+    if (!imager) return;
+    imager.port.postMessage({ type: 'set-bypassed', bypassed });
+  }
+
+  // ────────────────────────────────────────────────────────────────────
+  // Per-channel Tape (saturation)
+  // ────────────────────────────────────────────────────────────────────
+
+  /** `driveDb` 0..24, `tone` -1..1, `mix` 0..1 (0 = passthrough). */
+  setChannelTape(stemId: string, driveDb: number, tone: number, mix: number): void {
+    const tape = this.channels.get(stemId)?.tape;
+    if (!tape) return;
+    tape.port.postMessage({ type: 'set-params', driveDb, tone, mix });
+  }
+
+  setChannelTapeBypassed(stemId: string, bypassed: boolean): void {
+    const tape = this.channels.get(stemId)?.tape;
+    if (!tape) return;
+    tape.port.postMessage({ type: 'set-bypassed', bypassed });
+  }
+
+  // ────────────────────────────────────────────────────────────────────
+  // Per-channel Console (asymmetric saturation)
+  // ────────────────────────────────────────────────────────────────────
+
+  /** `driveDb` 0..24, `character` 0..1, `mix` 0..1 (0 = passthrough). */
+  setChannelConsole(stemId: string, driveDb: number, character: number, mix: number): void {
+    const node = this.channels.get(stemId)?.console;
+    if (!node) return;
+    node.port.postMessage({ type: 'set-params', driveDb, character, mix });
+  }
+
+  setChannelConsoleBypassed(stemId: string, bypassed: boolean): void {
+    const node = this.channels.get(stemId)?.console;
+    if (!node) return;
+    node.port.postMessage({ type: 'set-bypassed', bypassed });
+  }
+
+  // ────────────────────────────────────────────────────────────────────
+  // Per-channel MB-Comp (3-band multiband compressor)
+  // ────────────────────────────────────────────────────────────────────
+
+  /** Per-band thresholds in dB (each -40..0; 0 = that band uncompressed) and
+   *  shared ratio (1..10). */
+  setChannelMbComp(
+    stemId: string,
+    loThreshDb: number,
+    midThreshDb: number,
+    hiThreshDb: number,
+    ratio: number
+  ): void {
+    const node = this.channels.get(stemId)?.mbcomp;
+    if (!node) return;
+    node.port.postMessage({ type: 'set-params', loThreshDb, midThreshDb, hiThreshDb, ratio });
+  }
+
+  setChannelMbCompBypassed(stemId: string, bypassed: boolean): void {
+    const node = this.channels.get(stemId)?.mbcomp;
+    if (!node) return;
+    node.port.postMessage({ type: 'set-bypassed', bypassed });
   }
 
   // ────────────────────────────────────────────────────────────────────
@@ -809,6 +1239,71 @@ export class AudioHost {
   }
 
   // ────────────────────────────────────────────────────────────────────
+  // Master Reference Room (monitoring preset)
+  // ────────────────────────────────────────────────────────────────────
+
+  /**
+   * Insert a Reference Room preset between masterGain and the final
+   * worklet output. Setting `'off'` removes any filters. Calling with
+   * the same preset is a no-op. The meter / limiter sit before this
+   * stage in the chain, so they continue to show the true mix —
+   * Reference Rooms only affect what the engineer monitors.
+   */
+  setMasterReferenceRoom(preset: ReferenceRoomPreset): void {
+    if (!this.ctx || !this.masterGain || !this.workletNode) return;
+    if (preset === this.referenceRoomPreset) return;
+
+    // Tear down: disconnect masterGain from whichever node currently
+    // follows it (either the head of the old filter chain, or directly
+    // to the worklet), and disconnect every filter.
+    try {
+      this.masterGain.disconnect();
+    } catch {
+      // ignore — node may already be detached
+    }
+    for (const node of this.referenceRoomFilters) {
+      try {
+        node.disconnect();
+      } catch {
+        // ignore
+      }
+    }
+    this.referenceRoomFilters = [];
+
+    // Rebuild for the new preset.
+    const specs = REFERENCE_ROOM_FILTERS[preset];
+    if (specs.length === 0) {
+      this.masterGain.connect(this.workletNode);
+    } else {
+      const nodes = specs.map((spec) => this.buildBiquad(spec));
+      this.referenceRoomFilters = nodes;
+      let cursor: AudioNode = this.masterGain;
+      for (const node of nodes) {
+        cursor.connect(node);
+        cursor = node;
+      }
+      cursor.connect(this.workletNode);
+    }
+
+    this.referenceRoomPreset = preset;
+  }
+
+  /** Currently active Reference Room preset. */
+  getMasterReferenceRoom(): ReferenceRoomPreset {
+    return this.referenceRoomPreset;
+  }
+
+  private buildBiquad(spec: BiquadSpec): BiquadFilterNode {
+    if (!this.ctx) throw new Error('AudioHost not started');
+    const node = this.ctx.createBiquadFilter();
+    node.type = spec.type;
+    node.frequency.value = spec.freq;
+    if (spec.gainDb != null) node.gain.value = spec.gainDb;
+    if (spec.q != null) node.Q.value = spec.q;
+    return node;
+  }
+
+  // ────────────────────────────────────────────────────────────────────
   // Per-bus Reverb slot (user buses only)
   // ────────────────────────────────────────────────────────────────────
 
@@ -1060,7 +1555,16 @@ export class AudioHost {
       // Routing front: prefer eq8 if present, else comp, else gain.
       // addChannel() chains eq8 → comp → gain when both inserts exist.
       src.connect(
-        channel.eq8 ?? channel.comp ?? channel.compColor ?? channel.transient ?? channel.gain
+        channel.eq8 ??
+          channel.mbcomp ??
+          channel.comp ??
+          channel.compColor ??
+          channel.transient ??
+          channel.deess ??
+          channel.imager ??
+          channel.tape ??
+          channel.console ??
+          channel.gain
       );
       src.onended = () => {
         if (channel.source === src) channel.source = null;

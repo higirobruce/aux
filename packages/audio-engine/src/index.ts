@@ -4,6 +4,7 @@ export {
   type BusInit,
   Eq8BandType,
   MASTER_BUS_ID,
+  type ReferenceRoomPreset,
   type ReverbKind,
 } from './host';
 export type {
