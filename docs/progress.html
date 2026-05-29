@@ -190,7 +190,7 @@
 
     <div class="summary-grid">
       <div class="stat">
-        <div class="num">9<span style="color: var(--ink-3); font-size: var(--t-22);"> / 13</span></div>
+        <div class="num">10<span style="color: var(--ink-3); font-size: var(--t-22);"> / 13</span></div>
         <div class="lbl">Must-ship plugins</div>
       </div>
       <div class="stat">
@@ -198,11 +198,11 @@
         <div class="lbl">v0.3 scope items done</div>
       </div>
       <div class="stat">
-        <div class="num">20</div>
+        <div class="num">25</div>
         <div class="lbl">v0.3 commits to date</div>
       </div>
       <div class="stat">
-        <div class="num">12</div>
+        <div class="num">13</div>
         <div class="lbl">MixState versions</div>
       </div>
     </div>
@@ -233,8 +233,8 @@
             <div class="lbl">All 12 native plugins</div>
             <div class="why">v1 suite — Rust crates compiled to WASM, lazy-loaded into AudioWorklets.</div>
           </td>
-          <td class="status"><span class="pill-st pill-flight">9 of 13</span></td>
-          <td>EQ-8 · Comp-Clean · Comp-Color · Plate · Hall · Limiter · Transient · DeEss · Imager shipped. MB-Comp · Tape · Console remaining (v1.1: Spring, Exciter, Tuner).</td>
+          <td class="status"><span class="pill-st pill-flight">10 of 13</span></td>
+          <td>EQ-8 · Comp-Clean · Comp-Color · Plate · Hall · Limiter · Transient · DeEss · Imager · Tape shipped. MB-Comp · Console remaining (v1.1: Spring, Exciter, Tuner).</td>
         </tr>
         <tr>
           <td>
@@ -313,8 +313,8 @@
 
     <div class="meter-row">
       <div class="label">Must-ship</div>
-      <div class="meter"><div class="fill" style="width: 69%;"></div></div>
-      <div class="pct">9 / 13</div>
+      <div class="meter"><div class="fill" style="width: 77%;"></div></div>
+      <div class="pct">10 / 13</div>
     </div>
     <div class="meter-row">
       <div class="label">v1.1 stretch</div>
@@ -407,8 +407,8 @@
           <td><span class="lbl">Tape</span></td>
           <td>Tape saturation</td>
           <td>Must ship</td>
-          <td><span class="pill-st pill-planned">Planned</span></td>
-          <td class="commit">—</td>
+          <td><span class="pill-st pill-shipped">Shipped</span></td>
+          <td class="commit">243d03d</td>
         </tr>
         <tr>
           <td><span class="lbl">Console</span></td>
@@ -452,47 +452,47 @@
     <div class="callout callout-tip">
       <span class="mark">Pick one</span>
       <p>
-        Reference Rooms shipped, so v0.3 has three lanes left: finish the
-        plugin marathon (Tape · Console · MB-Comp), Smart EQ panel, and
-        Clip editing v1. The plugin marathon closes the headline
-        &ldquo;all 12 native plugins&rdquo; checkbox on the v0.3 list, with
-        Tape as the easiest first step. Smart EQ panel is the only
-        remaining UI-heavy item; Clip editing v1 is the largest unlanded
-        feature, now reachable on top of the stem timeline.
+        Tape shipped, so the plugin marathon is two crates from the
+        finish line — Console and MB-Comp. Console is the cheapest
+        remaining slice (single-stage non-linear coloration, by-rote
+        plumbing); MB-Comp is the heaviest (multiband crossover + per-band
+        compressor) but is the last plugin between &ldquo;all 12 native
+        plugins&rdquo; turning green. Smart EQ panel and Clip editing v1
+        are the only non-plugin lanes left — Clip editing is the largest
+        unlanded v0.3 feature overall.
       </p>
     </div>
 
     <div class="grid-2">
       <div>
-        <h3 style="margin-top: 0;">Option A — Tape (cheapest plugin)</h3>
+        <h3 style="margin-top: 0;">Option A — Console (cheapest plugin)</h3>
         <p>
-          Single-stage tape-style saturation. Smooth nonlinearity (typically
-          tanh / soft-clip), drive + bias + low-shelf bias to model the
-          tape head's frequency-dependent compression. Mono per channel.
+          Channel-style non-linear coloration — soft asymmetric saturation
+          + a touch of low-end fatness, mimicking the &ldquo;sum bus&rdquo;
+          flavour of an analog console. Single-stage, mono per channel.
         </p>
         <p class="caption">
-          <strong>Cost:</strong> Small Rust crate, the plugin plumbing is
-          by-rote at this point. Probably a single slice.
+          <strong>Cost:</strong> Small Rust crate, by-rote plumbing —
+          mirrors the Tape slice. Probably a single slice.
         </p>
         <p class="caption">
-          <strong>Progress:</strong> 9 / 13 must-ship plugins → 10 / 13.
+          <strong>Progress:</strong> 10 / 13 must-ship plugins → 11 / 13.
         </p>
       </div>
       <div>
         <h3 style="margin-top: 0;">Option B — Finish the plugin suite</h3>
         <p>
-          Three plugins to go: Tape (easy — single-stage saturation
-          curve), Console (medium — channel-style nonlinear coloration),
-          MB-Comp (heavy — 3 or 4 bands × compressor + Linkwitz-Riley
-          crossovers). Tape first, then Console, then MB-Comp.
+          Two plugins to go: Console (medium — channel-style non-linear
+          coloration) then MB-Comp (heavy — 3 or 4 bands × compressor +
+          Linkwitz-Riley crossovers).
         </p>
         <p class="caption">
-          <strong>Cost:</strong> 3 slices, roughly one each. Work is in
-          tuning the DSP, not wiring it up.
+          <strong>Cost:</strong> 2 slices. Work is in tuning the DSP, not
+          wiring it up.
         </p>
         <p class="caption">
           <strong>Unlocks:</strong> Closes &ldquo;all 12 native
-          plugins&rdquo; on the v0.3 checklist; 9 / 13 → 12 / 13.
+          plugins&rdquo; on the v0.3 checklist; 10 / 13 → 12 / 13.
         </p>
       </div>
       <div>
@@ -541,6 +541,14 @@
     </p>
 
     <div class="commitlog">
+<span class="sha">b2d37c9</span>      <span class="msg">fix(web): tolerate per-stem load failures so partial sessions still paint</span>
+<span class="sha">569352f</span>      <span class="msg">fix(web): decode newly-added stems so timeline lanes paint</span>
+<span class="sha">405ec7a</span>      <span class="msg">fix(api): assertOwnedKey expects the actual R2 key shape</span>
+<span class="sha">243d03d</span> <span class="v03">v0.3</span> <span class="msg">Tape: per-channel tape saturation (drive / tone / mix)</span>
+<span class="sha">2282f9e</span> <span class="v03">v0.3</span> <span class="msg">Bus strip header: stop the master name clipping at the top</span>
+<span class="sha">119e0b8</span> <span class="v03">v0.3</span> <span class="msg">Bus strip name: tighter spacing + bolder weight for clean fit</span>
+<span class="sha">1b00bfd</span> <span class="v03">v0.3</span> <span class="msg">Mixer UI polish: playhead handle, MASTER fit, scribble strip pop</span>
+<span class="sha">be73922</span> <span class="v03">v0.3</span> <span class="msg">Reference Rooms: stack picker vertically so labels fit</span>
 <span class="sha">862e7bd</span> <span class="v03">v0.3</span> <span class="msg">Reference Rooms: monitoring presets on the Master strip</span>
 <span class="sha">565f622</span> <span class="v03">v0.3</span> <span class="msg">Channel strip: names in a sibling row outside the console scroll</span>
 <span class="sha">70651b8</span> <span class="v03">v0.3</span> <span class="msg">Channel strip: drop sticky on name to stop covering the output</span>

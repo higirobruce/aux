@@ -1209,6 +1209,7 @@ Same artifacts, prod environment</code></pre>
           <li>Reference Rooms</li>
           <li>Smart EQ panel</li>
           <li>Clip editing v1</li>
+          <li>Stem timeline (read-only)</li>
         </ul>
       </div>
       <div class="phase">
@@ -1254,6 +1255,11 @@ Same artifacts, prod environment</code></pre>
     <div class="callout callout-warn">
       <span class="mark">Reality check</span>
       <p>Twelve months is still aggressive. Twelve native plugins is six engineer-months of focused DSP work. Plan for v1 to land in 14–15 months and ship anything in months 12–14 as v0.9 beta. The phases stay the same; the dates slip. The win from dropping collab isn't shipping faster — it's shipping <em>at all</em> instead of slipping further with a stretched scope.</p>
+    </div>
+
+    <div class="callout">
+      <span class="mark">Stem timeline (v0.3) · scope</span>
+      <p>Read-only horizontal lane per stem, sharing one playhead with the mixer. Includes: per-stem waveform render, transport-synced scrub, click-to-jump on a stem lane, mute/solo mirrors from the channel strip, and in/out markers showing where each stem actually has audio. Explicitly out of scope: no clip cut / move / trim, no automation lanes, no MIDI — those stay on the no-list. Purpose is <em>seeing</em> the song's shape while mixing, not editing it.</p>
     </div>
   </section>
 
