@@ -1043,8 +1043,18 @@ export function MixerShell({
     });
   }, []);
 
+  // loadStems is a per-render closure but uses only refs + stable setters
+  // so the first-render copy works fine across all calls.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: see comment above
   const onStemAdded = useCallback((stem: Stem) => {
     setStems((prev) => (prev.some((s) => s.id === stem.id) ? prev : [...prev, stem]));
+    // Decode the new stem into the host + populate peaks so the timeline
+    // lane paints. loadStems re-fetches the full /stems list, decodes the
+    // missing audio, and incrementally updates peaks — already-loaded
+    // stems are skipped, so this is cheap.
+    void loadStems().catch(() => {
+      // errors surface through the normal play path
+    });
   }, []);
 
   const onStemRemoved = useCallback((stemId: string) => {
