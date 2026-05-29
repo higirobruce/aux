@@ -8,11 +8,15 @@ later. If it's neither, evaluate against §02 principles and §16 architecture.
 
 ## Pull requests
 
-- Branch from `main`.
+aux is **staging-first**: every change lands on `staging` before it reaches
+`main`.
+
+- Branch from `staging`, and target your PR at `staging` (not `main`).
 - Open a draft PR early. Mark ready when CI passes.
 - Title in imperative: `add eq-8 frequency curve`, not `added eq-8 ...`.
 - Description should answer: what changes, why, and how to verify.
 - Link the issue if there is one.
+- `/ship` runs the gates and opens the draft PR into `staging` for you.
 
 ## Code review
 

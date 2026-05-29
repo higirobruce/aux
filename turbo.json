@@ -40,6 +40,9 @@
     "test": {
       "dependsOn": ["^build"]
     },
+    "test:perf": {
+      "dependsOn": ["^build"]
+    },
     "clean": {
       "cache": false
     }
