@@ -530,26 +530,39 @@ export function MixerShell({
       storageMode === 'local' ? isLocalKey(s.s3Key) : !!s.downloadUrl
     );
 
+    // Per-stem try/catch so a single missing OPFS file (different browser
+    // profile, manual storage cleanup, etc.) doesn't poison the whole
+    // batch and leave every lane stuck on "loading…". Successes populate
+    // peaks/duration; failures log but don't throw.
+    const succeeded: StemWithUrl[] = [];
     await Promise.all(
       loadable.map(async (stem) => {
-        if (host.isLoaded(stem.id)) return;
-        let audioData: ArrayBuffer;
-        if (localStore && isLocalKey(stem.s3Key)) {
-          const file = await localStore.getStem(stem.s3Key as string);
-          audioData = await file.arrayBuffer();
-        } else if (stem.downloadUrl) {
-          const audioRes = await fetch(stem.downloadUrl);
-          if (!audioRes.ok) throw new Error(`fetch ${stem.name} failed`);
-          audioData = await audioRes.arrayBuffer();
-        } else {
-          return; // not loadable
+        try {
+          if (host.isLoaded(stem.id)) {
+            succeeded.push(stem);
+            return;
+          }
+          let audioData: ArrayBuffer;
+          if (localStore && isLocalKey(stem.s3Key)) {
+            const file = await localStore.getStem(stem.s3Key as string);
+            audioData = await file.arrayBuffer();
+          } else if (stem.downloadUrl) {
+            const audioRes = await fetch(stem.downloadUrl);
+            if (!audioRes.ok) throw new Error(`fetch ${stem.name} failed (${audioRes.status})`);
+            audioData = await audioRes.arrayBuffer();
+          } else {
+            return; // not loadable
+          }
+          await host.loadStem(stem.id, audioData);
+          succeeded.push(stem);
+        } catch (err) {
+          console.warn(`[mixer] could not load stem ${stem.name}:`, err);
         }
-        await host.loadStem(stem.id, audioData);
       })
     );
 
     setStems(fetched);
-    setLoadedIds(new Set(loadable.map((s) => s.id)));
+    setLoadedIds(new Set(succeeded.map((s) => s.id)));
     setDuration(host.durationSeconds);
 
     // Build / refresh peaks for the read-only timeline. Each stem is at most
