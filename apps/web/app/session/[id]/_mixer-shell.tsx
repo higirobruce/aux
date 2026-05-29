@@ -749,9 +749,9 @@ export function MixerShell({
     [duration]
   );
 
-  /** Replace a stem's clips: push to the engine, update state (autosaves),
-   *  and recompute the timeline duration (clips can extend / shorten it). */
-  const setClips = useCallback((stemId: string, clips: StemClip[]) => {
+  /** Apply a stem's clips to the engine + state without touching history.
+   *  Shared by user edits, undo, and redo. */
+  const applyClips = useCallback((stemId: string, clips: StemClip[]) => {
     hostRef.current?.setChannelClips(stemId, clips);
     setChannelState((prev) => ({
       ...prev,
@@ -760,6 +760,53 @@ export function MixerShell({
     const dur = hostRef.current?.durationSeconds;
     if (typeof dur === 'number' && dur > 0) setDuration(dur);
   }, []);
+
+  // Per-stem clip-edit history. One entry per committed gesture (the timeline
+  // already coalesces a drag into a single setClips call), scoped to clips so
+  // it never tangles with the rest of the mix state.
+  const undoStackRef = useRef<{ stemId: string; before: StemClip[]; after: StemClip[] }[]>([]);
+  const redoStackRef = useRef<{ stemId: string; before: StemClip[]; after: StemClip[] }[]>([]);
+
+  /** User-facing clip edit: records history, then applies. */
+  const setClips = useCallback(
+    (stemId: string, clips: StemClip[]) => {
+      const before = channelStateRef.current[stemId]?.clips ?? [];
+      undoStackRef.current.push({ stemId, before, after: clips });
+      redoStackRef.current = [];
+      applyClips(stemId, clips);
+    },
+    [applyClips]
+  );
+
+  const undo = useCallback(() => {
+    const entry = undoStackRef.current.pop();
+    if (!entry) return;
+    redoStackRef.current.push(entry);
+    setSelectedClip(null);
+    applyClips(entry.stemId, entry.before);
+  }, [applyClips]);
+
+  const redo = useCallback(() => {
+    const entry = redoStackRef.current.pop();
+    if (!entry) return;
+    undoStackRef.current.push(entry);
+    setSelectedClip(null);
+    applyClips(entry.stemId, entry.after);
+  }, [applyClips]);
+
+  // Cmd/Ctrl+Z undo · Cmd/Ctrl+Shift+Z redo (ignored while typing).
+  useEffect(() => {
+    function onKey(e: KeyboardEvent) {
+      if (e.key.toLowerCase() !== 'z' || !(e.metaKey || e.ctrlKey)) return;
+      const t = e.target as HTMLElement | null;
+      if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable)) return;
+      e.preventDefault();
+      if (e.shiftKey) redo();
+      else undo();
+    }
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [undo, redo]);
 
   // Delete / Backspace removes the selected clip (ignored while typing).
   useEffect(() => {
