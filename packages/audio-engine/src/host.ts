@@ -116,6 +116,14 @@ export interface AudioHostOptions {
   consoleWorkletUrl?: string | URL;
   /** URL to console_bg.wasm. */
   consoleWasmUrl?: string | URL;
+  /**
+   * URL to the MB-Comp worklet (3-band multiband compressor). Sits
+   * between EQ-8 and Comp-Clean so the engineer can tame specific bands
+   * before the wideband comp catches whatever's left.
+   */
+  mbcompWorkletUrl?: string | URL;
+  /** URL to mbcomp_bg.wasm. */
+  mbcompWasmUrl?: string | URL;
   /** Sample rate (default: AudioContext default). */
   sampleRate?: number;
 }
@@ -253,6 +261,8 @@ interface ChannelInternals {
   tape: AudioWorkletNode | null;
   /** Optional Console saturation — last channel insert before gain. */
   console: AudioWorkletNode | null;
+  /** Optional 3-band multiband compressor — sits between EQ-8 and Comp. */
+  mbcomp: AudioWorkletNode | null;
   /** Latest gain reduction (≥ 0) from whichever comp is currently active. */
   compGrDb: number;
   /** Latest GR from the Color-flavor comp, surfaced separately for the meter. */
@@ -303,6 +313,8 @@ export class AudioHost {
   private tapeWasmModule: WebAssembly.Module | null = null;
   /** Console — per-channel insert. */
   private consoleWasmModule: WebAssembly.Module | null = null;
+  /** MB-Comp — per-channel insert. */
+  private mbcompWasmModule: WebAssembly.Module | null = null;
 
   /** Reference Room monitoring filter — between masterGain and the final
    *  worklet output. A list of BiquadFilterNodes wired in series; empty
@@ -454,6 +466,17 @@ export class AudioHost {
       );
     }
 
+    if (this.options.mbcompWorkletUrl && this.options.mbcompWasmUrl) {
+      await this.ctx.audioWorklet.addModule(this.options.mbcompWorkletUrl);
+      const res = await fetch(this.options.mbcompWasmUrl);
+      if (!res.ok) throw new Error(`mbcomp wasm fetch failed (${res.status})`);
+      this.mbcompWasmModule = await WebAssembly.compileStreaming(
+        new Response(await res.arrayBuffer(), {
+          headers: { 'Content-Type': 'application/wasm' },
+        })
+      );
+    }
+
     this.workletNode = new AudioWorkletNode(this.ctx, 'aux-processor', {
       numberOfInputs: 1,
       numberOfOutputs: 1,
@@ -481,6 +504,7 @@ export class AudioHost {
     this.stopAll();
     for (const channel of this.channels.values()) {
       if (channel.eq8) channel.eq8.disconnect();
+      if (channel.mbcomp) channel.mbcomp.disconnect();
       if (channel.comp) channel.comp.disconnect();
       if (channel.compColor) channel.compColor.disconnect();
       if (channel.transient) channel.transient.disconnect();
@@ -554,7 +578,7 @@ export class AudioHost {
     // straightforward: each new node connects to the previous "front" and
     // becomes the new front; the source ultimately connects to `front`.
     //
-    //   source → [eq8] → [comp] → [compColor] → [transient] → [deess] → [imager] → [tape] → [console] → gain → panner → analyser → bus
+    //   source → [eq8] → [mbcomp] → [comp] → [compColor] → [transient] → [deess] → [imager] → [tape] → [console] → gain → panner → analyser → bus
     //
     // Bracketed nodes are conditional: they only exist if the corresponding
     // WASM module was loaded at start(). With everything off the routing
@@ -636,6 +660,19 @@ export class AudioHost {
       comp.connect(compColor ?? transient ?? deess ?? imager ?? tape ?? consoleNode ?? gain);
     }
 
+    let mbcomp: AudioWorkletNode | null = null;
+    if (this.mbcompWasmModule) {
+      mbcomp = new AudioWorkletNode(this.ctx, 'aux-mbcomp-processor', {
+        numberOfInputs: 1,
+        numberOfOutputs: 1,
+        outputChannelCount: [2],
+        processorOptions: { wasmModule: this.mbcompWasmModule },
+      });
+      mbcomp.connect(
+        comp ?? compColor ?? transient ?? deess ?? imager ?? tape ?? consoleNode ?? gain
+      );
+    }
+
     let eq8: AudioWorkletNode | null = null;
     if (this.eq8WasmModule) {
       eq8 = new AudioWorkletNode(this.ctx, 'aux-eq8-processor', {
@@ -644,7 +681,9 @@ export class AudioHost {
         outputChannelCount: [2],
         processorOptions: { wasmModule: this.eq8WasmModule },
       });
-      eq8.connect(comp ?? compColor ?? transient ?? deess ?? imager ?? tape ?? consoleNode ?? gain);
+      eq8.connect(
+        mbcomp ?? comp ?? compColor ?? transient ?? deess ?? imager ?? tape ?? consoleNode ?? gain
+      );
     }
 
     // gain → panner → analyser → outputBus.input
@@ -656,6 +695,7 @@ export class AudioHost {
       stemId: init.stemId,
       buffer: null,
       eq8,
+      mbcomp,
       comp,
       compColor,
       transient,
@@ -814,6 +854,7 @@ export class AudioHost {
       channel.source = null;
     }
     if (channel.eq8) channel.eq8.disconnect();
+    if (channel.mbcomp) channel.mbcomp.disconnect();
     if (channel.comp) channel.comp.disconnect();
     if (channel.compColor) channel.compColor.disconnect();
     if (channel.transient) channel.transient.disconnect();
@@ -910,6 +951,30 @@ export class AudioHost {
 
   setChannelConsoleBypassed(stemId: string, bypassed: boolean): void {
     const node = this.channels.get(stemId)?.console;
+    if (!node) return;
+    node.port.postMessage({ type: 'set-bypassed', bypassed });
+  }
+
+  // ────────────────────────────────────────────────────────────────────
+  // Per-channel MB-Comp (3-band multiband compressor)
+  // ────────────────────────────────────────────────────────────────────
+
+  /** Per-band thresholds in dB (each -40..0; 0 = that band uncompressed) and
+   *  shared ratio (1..10). */
+  setChannelMbComp(
+    stemId: string,
+    loThreshDb: number,
+    midThreshDb: number,
+    hiThreshDb: number,
+    ratio: number
+  ): void {
+    const node = this.channels.get(stemId)?.mbcomp;
+    if (!node) return;
+    node.port.postMessage({ type: 'set-params', loThreshDb, midThreshDb, hiThreshDb, ratio });
+  }
+
+  setChannelMbCompBypassed(stemId: string, bypassed: boolean): void {
+    const node = this.channels.get(stemId)?.mbcomp;
     if (!node) return;
     node.port.postMessage({ type: 'set-bypassed', bypassed });
   }
@@ -1491,6 +1556,7 @@ export class AudioHost {
       // addChannel() chains eq8 → comp → gain when both inserts exist.
       src.connect(
         channel.eq8 ??
+          channel.mbcomp ??
           channel.comp ??
           channel.compColor ??
           channel.transient ??

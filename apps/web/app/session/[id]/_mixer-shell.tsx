@@ -19,6 +19,7 @@ import {
   DEFAULT_CHANNEL_DEESS,
   DEFAULT_CHANNEL_EQ,
   DEFAULT_CHANNEL_IMAGER,
+  DEFAULT_CHANNEL_MBCOMP,
   DEFAULT_CHANNEL_TAPE,
   DEFAULT_CHANNEL_TRANSIENT,
   DEFAULT_COMP_TYPE,
@@ -72,6 +73,14 @@ export interface ChannelState {
   tape: { driveDb: number; tone: number; mix: number; bypassed: boolean };
   /** Console — asymmetric channel-strip saturation. */
   console: { driveDb: number; character: number; mix: number; bypassed: boolean };
+  /** MB-Comp — 3-band multiband compressor (per-band thresholds + shared ratio). */
+  mbcomp: {
+    loThreshDb: number;
+    midThreshDb: number;
+    hiThreshDb: number;
+    ratio: number;
+    bypassed: boolean;
+  };
 }
 
 const DEFAULT_CHANNEL: ChannelState = {
@@ -89,6 +98,7 @@ const DEFAULT_CHANNEL: ChannelState = {
   imager: { ...DEFAULT_CHANNEL_IMAGER },
   tape: { ...DEFAULT_CHANNEL_TAPE },
   console: { ...DEFAULT_CHANNEL_CONSOLE },
+  mbcomp: { ...DEFAULT_CHANNEL_MBCOMP },
 };
 const AUTOSAVE_DEBOUNCE_MS = 600;
 
@@ -183,6 +193,7 @@ function hydrateMixState(raw: unknown): HydratedMix {
       imager: c.imager ?? { ...DEFAULT_CHANNEL_IMAGER },
       tape: c.tape ?? { ...DEFAULT_CHANNEL_TAPE },
       console: c.console ?? { ...DEFAULT_CHANNEL_CONSOLE },
+      mbcomp: c.mbcomp ?? { ...DEFAULT_CHANNEL_MBCOMP },
     };
   }
   // Bus migration. v5+ docs already have a `buses` field; older docs don't.
@@ -516,6 +527,8 @@ export function MixerShell({
       tapeWasmUrl: '/tape_bg.wasm',
       consoleWorkletUrl: '/console-worklet.js',
       consoleWasmUrl: '/console_bg.wasm',
+      mbcompWorkletUrl: '/mbcomp-worklet.js',
+      mbcompWasmUrl: '/mbcomp_bg.wasm',
     });
     await host.start();
     hostRef.current = host;
@@ -625,6 +638,14 @@ export function MixerShell({
       host.setChannelTapeBypassed(stem.id, ch.tape.bypassed);
       host.setChannelConsole(stem.id, ch.console.driveDb, ch.console.character, ch.console.mix);
       host.setChannelConsoleBypassed(stem.id, ch.console.bypassed);
+      host.setChannelMbComp(
+        stem.id,
+        ch.mbcomp.loThreshDb,
+        ch.mbcomp.midThreshDb,
+        ch.mbcomp.hiThreshDb,
+        ch.mbcomp.ratio
+      );
+      host.setChannelMbCompBypassed(stem.id, ch.mbcomp.bypassed);
     }
 
     // Ensure user-defined buses exist on the host (Master is auto-created)
@@ -887,6 +908,40 @@ export function MixerShell({
       return {
         ...prev,
         [stemId]: { ...current, console: { ...current.console, bypassed } },
+      };
+    });
+  }, []);
+
+  const setMbComp = useCallback(
+    (
+      stemId: string,
+      field: 'loThreshDb' | 'midThreshDb' | 'hiThreshDb' | 'ratio',
+      value: number
+    ) => {
+      setChannelState((prev) => {
+        const current = prev[stemId] ?? DEFAULT_CHANNEL;
+        const nextMbComp = { ...current.mbcomp, [field]: value };
+        hostRef.current?.setChannelMbComp(
+          stemId,
+          nextMbComp.loThreshDb,
+          nextMbComp.midThreshDb,
+          nextMbComp.hiThreshDb,
+          nextMbComp.ratio
+        );
+        return { ...prev, [stemId]: { ...current, mbcomp: nextMbComp } };
+      });
+    },
+    []
+  );
+
+  const toggleMbCompBypass = useCallback((stemId: string) => {
+    setChannelState((prev) => {
+      const current = prev[stemId] ?? DEFAULT_CHANNEL;
+      const bypassed = !current.mbcomp.bypassed;
+      hostRef.current?.setChannelMbCompBypassed(stemId, bypassed);
+      return {
+        ...prev,
+        [stemId]: { ...current, mbcomp: { ...current.mbcomp, bypassed } },
       };
     });
   }, []);
@@ -1295,6 +1350,8 @@ export function MixerShell({
                           onTapeBypass={() => toggleTapeBypass(stem.id)}
                           onConsole={(field, value) => setConsole(stem.id, field, value)}
                           onConsoleBypass={() => toggleConsoleBypass(stem.id)}
+                          onMbComp={(field, value) => setMbComp(stem.id, field, value)}
+                          onMbCompBypass={() => toggleMbCompBypass(stem.id)}
                         />
                       );
                     })

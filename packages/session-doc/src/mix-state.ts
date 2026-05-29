@@ -23,9 +23,11 @@ import { z } from 'zod';
  * v13 — adds per-channel `tape` (saturation: drive / tone / mix + bypass).
  * v14 — adds per-channel `console` (asymmetric saturation: drive /
  *       character / mix + bypass).
+ * v15 — adds per-channel `mbcomp` (3-band multiband compressor: per-band
+ *       lo/mid/hi thresholds + shared ratio + bypass).
  */
 
-export const MIX_STATE_VERSION = 14;
+export const MIX_STATE_VERSION = 15;
 
 /** Stable id for the always-present Master bus. Sessions can omit it from
  *  their `buses` record; the client treats it as if explicitly present. */
@@ -135,6 +137,19 @@ export const ChannelConsoleSchema = z.object({
   bypassed: z.boolean(),
 });
 
+/** MB-Comp per channel — 3-band multiband compressor. */
+export const ChannelMbCompSchema = z.object({
+  /** Low-band threshold in dB, -40..0. 0 = that band uncompressed. */
+  loThreshDb: z.number().min(-40).max(0),
+  /** Mid-band threshold in dB, -40..0. */
+  midThreshDb: z.number().min(-40).max(0),
+  /** High-band threshold in dB, -40..0. */
+  hiThreshDb: z.number().min(-40).max(0),
+  /** Shared ratio across all three bands, 1..10. */
+  ratio: z.number().min(1).max(10),
+  bypassed: z.boolean(),
+});
+
 export const ChannelStateSchema = z.object({
   volume: z.number().min(0).max(8),
   pan: z.number().min(-1).max(1),
@@ -150,6 +165,7 @@ export const ChannelStateSchema = z.object({
   imager: ChannelImagerSchema,
   tape: ChannelTapeSchema,
   console: ChannelConsoleSchema,
+  mbcomp: ChannelMbCompSchema,
 });
 
 export const LimiterStateSchema = z.object({
@@ -188,6 +204,7 @@ export const MixStateSchema = z.object({
 
 export type ChannelEq = z.infer<typeof ChannelEqSchema>;
 export type ChannelComp = z.infer<typeof ChannelCompSchema>;
+export type ChannelMbComp = z.infer<typeof ChannelMbCompSchema>;
 export type ChannelStateDoc = z.infer<typeof ChannelStateSchema>;
 export type BusState = z.infer<typeof BusStateSchema>;
 export type ReverbState = z.infer<typeof ReverbStateSchema>;
@@ -286,6 +303,15 @@ export const DEFAULT_CHANNEL_CONSOLE = {
   driveDb: 0,
   character: 0,
   mix: 0,
+  bypassed: false,
+} as const;
+
+/** Default MB-Comp — all bands at 0 dB (uncompressed), ratio 4:1. */
+export const DEFAULT_CHANNEL_MBCOMP = {
+  loThreshDb: 0,
+  midThreshDb: 0,
+  hiThreshDb: 0,
+  ratio: 4,
   bypassed: false,
 } as const;
 

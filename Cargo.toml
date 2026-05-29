@@ -12,6 +12,7 @@ members = [
   "packages/dsp-imager",
   "packages/dsp-tape",
   "packages/dsp-console",
+  "packages/dsp-mbcomp",
 ]
 
 # Optimize WASM size + perf for release builds.

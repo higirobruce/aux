@@ -44,6 +44,9 @@ interface Props {
   /** Console — driveDb (0..24), character (0..1), mix (0..1). */
   onConsole: (field: 'driveDb' | 'character' | 'mix', value: number) => void;
   onConsoleBypass: () => void;
+  /** MB-Comp — per-band thresholds (-40..0) + shared ratio (1..10). */
+  onMbComp: (field: 'loThreshDb' | 'midThreshDb' | 'hiThreshDb' | 'ratio', value: number) => void;
+  onMbCompBypass: () => void;
 }
 
 const EQ_KNOB_MIN_DB = -12;
@@ -185,6 +188,8 @@ export function ChannelStrip({
   onTapeBypass,
   onConsole,
   onConsoleBypass,
+  onMbComp,
+  onMbCompBypass,
 }: Props) {
   const effectivelyMuted = state.muted || (anySoloed && !state.soloed);
 
@@ -488,6 +493,68 @@ export function ChannelStrip({
             />
             <span className="knob-label">Mix</span>
             <span className="knob-readout">{formatTapeMix(state.console.mix)}</span>
+          </div>
+        </div>
+      </div>
+
+      <div className="ch-mbcomp">
+        <button
+          type="button"
+          className={`ch-mbcomp-toggle ${state.mbcomp.bypassed ? '' : 'on'}`}
+          onClick={onMbCompBypass}
+          aria-pressed={!state.mbcomp.bypassed}
+          title={state.mbcomp.bypassed ? 'MB-Comp bypassed — click to engage' : 'MB-Comp active'}
+        >
+          MBC
+        </button>
+        <div className="ch-mbcomp-knobs">
+          <div className="knob-wrap">
+            <Knob
+              value={state.mbcomp.loThreshDb}
+              min={COMP_THRESH_MIN}
+              max={COMP_THRESH_MAX}
+              defaultValue={0}
+              ariaLabel={`${stem.name} MB-Comp low threshold`}
+              onChange={(v) => onMbComp('loThreshDb', v)}
+            />
+            <span className="knob-label">Lo</span>
+            <span className="knob-readout">{formatThresh(state.mbcomp.loThreshDb)}</span>
+          </div>
+          <div className="knob-wrap">
+            <Knob
+              value={state.mbcomp.midThreshDb}
+              min={COMP_THRESH_MIN}
+              max={COMP_THRESH_MAX}
+              defaultValue={0}
+              ariaLabel={`${stem.name} MB-Comp mid threshold`}
+              onChange={(v) => onMbComp('midThreshDb', v)}
+            />
+            <span className="knob-label">Mid</span>
+            <span className="knob-readout">{formatThresh(state.mbcomp.midThreshDb)}</span>
+          </div>
+          <div className="knob-wrap">
+            <Knob
+              value={state.mbcomp.hiThreshDb}
+              min={COMP_THRESH_MIN}
+              max={COMP_THRESH_MAX}
+              defaultValue={0}
+              ariaLabel={`${stem.name} MB-Comp high threshold`}
+              onChange={(v) => onMbComp('hiThreshDb', v)}
+            />
+            <span className="knob-label">Hi</span>
+            <span className="knob-readout">{formatThresh(state.mbcomp.hiThreshDb)}</span>
+          </div>
+          <div className="knob-wrap">
+            <Knob
+              value={state.mbcomp.ratio}
+              min={COMP_RATIO_MIN}
+              max={COMP_RATIO_MAX}
+              defaultValue={4}
+              ariaLabel={`${stem.name} MB-Comp ratio`}
+              onChange={(v) => onMbComp('ratio', v)}
+            />
+            <span className="knob-label">Rat</span>
+            <span className="knob-readout">{formatRatio(state.mbcomp.ratio)}</span>
           </div>
         </div>
       </div>

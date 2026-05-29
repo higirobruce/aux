@@ -24,7 +24,8 @@
       "**/public/deess-worklet.js",
       "**/public/imager-worklet.js",
       "**/public/tape-worklet.js",
-      "**/public/console-worklet.js"
+      "**/public/console-worklet.js",
+      "**/public/mbcomp-worklet.js"
     ]
   },
   "vcs": {

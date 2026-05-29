@@ -274,6 +274,15 @@
   text-transform: uppercase;
 }
 
+/* The master strip carries extra sections (Ref Room + Limiter) that the
+   channel strips don't. The shared fader floor of 180px would then push the
+   strip past the pinned bus-panel height and clip the dB readout at the
+   bottom. Bus strips live in their own fixed-height panel, so let the fader
+   flex down to fit — keeps the value on screen at any viewport height. */
+.bus-strip .ch-fader-meter {
+  min-height: 0;
+}
+
 /* ─── Master limiter (only rendered on the Master bus strip) ───────── */
 
 .bus-limiter {
@@ -1881,7 +1890,7 @@
 /* ─── Reference Room (Master strip only) ────────────────────────────── */
 
 .bus-ref-room {
-  padding: 8px 6px;
+  padding: 8px 4px;
   border-bottom: 1px solid #0a0c10;
   background: rgba(46, 95, 168, 0.06);
 }
@@ -1897,8 +1906,10 @@
 }
 
 .bus-ref-room-grid {
-  display: flex;
-  flex-direction: column;
+  /* 2×2 grid instead of a 4-high vertical stack — halves the vertical
+     footprint so the limiter + fader + master readout stay on screen. */
+  display: grid;
+  grid-template-columns: 1fr 1fr;
   gap: 3px;
 }
 
@@ -1907,11 +1918,12 @@
   min-width: 0;
   box-sizing: border-box;
   height: 18px;
-  padding: 0 4px;
+  padding: 0 1px;
   font-family: var(--font-mono);
-  font-size: 9px;
-  letter-spacing: 0.08em;
+  font-size: 7px;
+  letter-spacing: 0;
   text-transform: uppercase;
+  text-align: center;
   background: linear-gradient(180deg, #2a3038, #14171c);
   border: 1px solid #0a0c10;
   border-radius: 2px;
@@ -2054,4 +2066,67 @@
 .ch-console .knob-readout {
   font-size: 8px;
   color: #939aa5;
+}
+
+.ch-mbcomp {
+  padding: 6px 6px 8px;
+  border-bottom: 1px solid #0a0c10;
+  background: rgba(0, 0, 0, 0.2);
+}
+
+.ch-mbcomp-toggle {
+  width: 100%;
+  height: 16px;
+  margin-bottom: 6px;
+  font-family: var(--font-mono);
+  font-size: 8px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  background: linear-gradient(180deg, #2a3038, #14171c);
+  border: 1px solid #0a0c10;
+  border-radius: 2px;
+  color: #6b7280;
+  cursor: pointer;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.06);
+  transition: color 100ms ease, background 100ms ease;
+}
+
+.ch-mbcomp-toggle:hover:not(.on) {
+  color: #c5ecdc;
+}
+
+.ch-mbcomp-toggle.on {
+  /* MB-Comp = teal/green, distinct from Tape amber + Console blue */
+  background: linear-gradient(180deg, #2f4a44, #14231f);
+  color: #d7f5e9;
+  border-color: rgba(110, 200, 168, 0.4);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.14), 0 0 6px rgba(110, 200, 168, 0.25);
+}
+
+.ch-mbcomp-knobs {
+  /* 4 bands in a 2×2 grid (Lo|Mid / Hi|Rat) — two columns give each knob
+     ~37px of room, so they stay legible instead of cramming into one row. */
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px 4px;
+}
+
+.ch-mbcomp .knob-wrap {
+  gap: 3px;
+  min-width: 0;
+}
+
+.ch-mbcomp .knob {
+  width: 24px;
+  height: 24px;
+}
+
+.ch-mbcomp .knob-label {
+  font-size: 8px;
+}
+
+.ch-mbcomp .knob-readout {
+  font-size: 8px;
+  color: #939aa5;
+  white-space: nowrap;
 }

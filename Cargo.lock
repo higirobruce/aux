@@ -59,6 +59,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "aux-dsp-mbcomp"
+version = "0.1.0"
+dependencies = [
+ "wasm-bindgen",
+]
+
+[[package]]
 name = "aux-dsp-plate"
 version = "0.1.0"
 dependencies = [
