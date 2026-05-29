@@ -1,0 +1,23 @@
+{
+  "name": "@aux/dsp-tape",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Tape saturation (tanh + tilt + mix) — Rust DSP compiled to WASM.",
+  "type": "module",
+  "main": "./wasm/tape.js",
+  "types": "./wasm/tape.d.ts",
+  "files": ["wasm"],
+  "exports": {
+    ".": {
+      "types": "./wasm/tape.d.ts",
+      "default": "./wasm/tape.js"
+    },
+    "./tape_bg.wasm": "./wasm/tape_bg.wasm",
+    "./package.json": "./package.json"
+  },
+  "scripts": {
+    "build": "wasm-pack build --release --target web --out-dir wasm --out-name tape && rm -f wasm/.gitignore wasm/package.json",
+    "test:rust": "cargo test --release",
+    "clean": "rm -rf wasm target"
+  }
+}

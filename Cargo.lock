@@ -59,6 +59,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "aux-dsp-tape"
+version = "0.1.0"
+dependencies = [
+ "wasm-bindgen",
+]
+
+[[package]]
 name = "aux-dsp-transient"
 version = "0.1.0"
 dependencies = [

@@ -20,9 +20,10 @@ import { z } from 'zod';
  * v10 — adds per-channel `transient` (attack/sustain shaper + bypass).
  * v11 — adds per-channel `deess` (split-band) + `imager` (M/S width).
  * v12 — adds masterChain.referenceRoom (monitoring preset).
+ * v13 — adds per-channel `tape` (saturation: drive / tone / mix + bypass).
  */
 
-export const MIX_STATE_VERSION = 12;
+export const MIX_STATE_VERSION = 13;
 
 /** Stable id for the always-present Master bus. Sessions can omit it from
  *  their `buses` record; the client treats it as if explicitly present. */
@@ -109,6 +110,17 @@ export const ChannelImagerSchema = z.object({
   bypassed: z.boolean(),
 });
 
+/** Tape per channel — single-stage tape saturation. */
+export const ChannelTapeSchema = z.object({
+  /** Pre-drive in dB, 0..24. 0 = clean. */
+  driveDb: z.number().min(0).max(24),
+  /** Tone tilt, -1..1. Negative = warm, positive = bright, 0 = flat. */
+  tone: z.number().min(-1).max(1),
+  /** Dry/wet mix, 0..1. 0 = dry passthrough. */
+  mix: z.number().min(0).max(1),
+  bypassed: z.boolean(),
+});
+
 export const ChannelStateSchema = z.object({
   volume: z.number().min(0).max(8),
   pan: z.number().min(-1).max(1),
@@ -122,6 +134,7 @@ export const ChannelStateSchema = z.object({
   transient: ChannelTransientSchema,
   deess: ChannelDeEssSchema,
   imager: ChannelImagerSchema,
+  tape: ChannelTapeSchema,
 });
 
 export const LimiterStateSchema = z.object({
@@ -242,6 +255,14 @@ export const DEFAULT_CHANNEL_DEESS = {
 /** Default Imager — width 1 = passthrough. */
 export const DEFAULT_CHANNEL_IMAGER = {
   width: 1,
+  bypassed: false,
+} as const;
+
+/** Default Tape — clean, dry. */
+export const DEFAULT_CHANNEL_TAPE = {
+  driveDb: 0,
+  tone: 0,
+  mix: 0,
   bypassed: false,
 } as const;
 

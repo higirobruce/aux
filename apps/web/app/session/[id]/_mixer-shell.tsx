@@ -18,6 +18,7 @@ import {
   DEFAULT_CHANNEL_DEESS,
   DEFAULT_CHANNEL_EQ,
   DEFAULT_CHANNEL_IMAGER,
+  DEFAULT_CHANNEL_TAPE,
   DEFAULT_CHANNEL_TRANSIENT,
   DEFAULT_COMP_TYPE,
   DEFAULT_LIMITER_STATE,
@@ -66,6 +67,8 @@ export interface ChannelState {
   deess: { freq: number; amount: number; bypassed: boolean };
   /** Imager — M/S stereo width. */
   imager: { width: number; bypassed: boolean };
+  /** Tape — single-stage saturation. */
+  tape: { driveDb: number; tone: number; mix: number; bypassed: boolean };
 }
 
 const DEFAULT_CHANNEL: ChannelState = {
@@ -81,6 +84,7 @@ const DEFAULT_CHANNEL: ChannelState = {
   transient: { ...DEFAULT_CHANNEL_TRANSIENT },
   deess: { ...DEFAULT_CHANNEL_DEESS },
   imager: { ...DEFAULT_CHANNEL_IMAGER },
+  tape: { ...DEFAULT_CHANNEL_TAPE },
 };
 const AUTOSAVE_DEBOUNCE_MS = 600;
 
@@ -173,6 +177,7 @@ function hydrateMixState(raw: unknown): HydratedMix {
       transient: c.transient ?? { ...DEFAULT_CHANNEL_TRANSIENT },
       deess: c.deess ?? { ...DEFAULT_CHANNEL_DEESS },
       imager: c.imager ?? { ...DEFAULT_CHANNEL_IMAGER },
+      tape: c.tape ?? { ...DEFAULT_CHANNEL_TAPE },
     };
   }
   // Bus migration. v5+ docs already have a `buses` field; older docs don't.
@@ -502,6 +507,8 @@ export function MixerShell({
       deessWasmUrl: '/deess_bg.wasm',
       imagerWorkletUrl: '/imager-worklet.js',
       imagerWasmUrl: '/imager_bg.wasm',
+      tapeWorkletUrl: '/tape-worklet.js',
+      tapeWasmUrl: '/tape_bg.wasm',
     });
     await host.start();
     hostRef.current = host;
@@ -594,6 +601,8 @@ export function MixerShell({
       host.setChannelDeEssBypassed(stem.id, ch.deess.bypassed);
       host.setChannelImager(stem.id, ch.imager.width);
       host.setChannelImagerBypassed(stem.id, ch.imager.bypassed);
+      host.setChannelTape(stem.id, ch.tape.driveDb, ch.tape.tone, ch.tape.mix);
+      host.setChannelTapeBypassed(stem.id, ch.tape.bypassed);
     }
 
     // Ensure user-defined buses exist on the host (Master is auto-created)
@@ -803,6 +812,30 @@ export function MixerShell({
       return {
         ...prev,
         [stemId]: { ...current, imager: { ...current.imager, bypassed } },
+      };
+    });
+  }, []);
+
+  const setTape = useCallback(
+    (stemId: string, field: 'driveDb' | 'tone' | 'mix', value: number) => {
+      setChannelState((prev) => {
+        const current = prev[stemId] ?? DEFAULT_CHANNEL;
+        const nextTape = { ...current.tape, [field]: value };
+        hostRef.current?.setChannelTape(stemId, nextTape.driveDb, nextTape.tone, nextTape.mix);
+        return { ...prev, [stemId]: { ...current, tape: nextTape } };
+      });
+    },
+    []
+  );
+
+  const toggleTapeBypass = useCallback((stemId: string) => {
+    setChannelState((prev) => {
+      const current = prev[stemId] ?? DEFAULT_CHANNEL;
+      const bypassed = !current.tape.bypassed;
+      hostRef.current?.setChannelTapeBypassed(stemId, bypassed);
+      return {
+        ...prev,
+        [stemId]: { ...current, tape: { ...current.tape, bypassed } },
       };
     });
   }, []);
@@ -1197,6 +1230,8 @@ export function MixerShell({
                           onDeEssBypass={() => toggleDeEssBypass(stem.id)}
                           onImager={(width) => setImager(stem.id, width)}
                           onImagerBypass={() => toggleImagerBypass(stem.id)}
+                          onTape={(field, value) => setTape(stem.id, field, value)}
+                          onTapeBypass={() => toggleTapeBypass(stem.id)}
                         />
                       );
                     })

@@ -100,6 +100,14 @@ export interface AudioHostOptions {
   imagerWorkletUrl?: string | URL;
   /** URL to imager_bg.wasm. */
   imagerWasmUrl?: string | URL;
+  /**
+   * URL to the Tape worklet (single-stage tape saturation). Sits between
+   * the imager and the gain stage so the saturation works on the final
+   * stereo image.
+   */
+  tapeWorkletUrl?: string | URL;
+  /** URL to tape_bg.wasm. */
+  tapeWasmUrl?: string | URL;
   /** Sample rate (default: AudioContext default). */
   sampleRate?: number;
 }
@@ -231,8 +239,10 @@ interface ChannelInternals {
   transient: AudioWorkletNode | null;
   /** Optional DeEss between Transient and Imager. */
   deess: AudioWorkletNode | null;
-  /** Optional Imager (M/S width) — last channel insert before gain. */
+  /** Optional Imager (M/S width). */
   imager: AudioWorkletNode | null;
+  /** Optional Tape saturation — last channel insert before gain. */
+  tape: AudioWorkletNode | null;
   /** Latest gain reduction (≥ 0) from whichever comp is currently active. */
   compGrDb: number;
   /** Latest GR from the Color-flavor comp, surfaced separately for the meter. */
@@ -279,6 +289,8 @@ export class AudioHost {
   private deessWasmModule: WebAssembly.Module | null = null;
   /** Imager — per-channel insert. */
   private imagerWasmModule: WebAssembly.Module | null = null;
+  /** Tape — per-channel insert. */
+  private tapeWasmModule: WebAssembly.Module | null = null;
 
   /** Reference Room monitoring filter — between masterGain and the final
    *  worklet output. A list of BiquadFilterNodes wired in series; empty
@@ -408,6 +420,17 @@ export class AudioHost {
       );
     }
 
+    if (this.options.tapeWorkletUrl && this.options.tapeWasmUrl) {
+      await this.ctx.audioWorklet.addModule(this.options.tapeWorkletUrl);
+      const res = await fetch(this.options.tapeWasmUrl);
+      if (!res.ok) throw new Error(`tape wasm fetch failed (${res.status})`);
+      this.tapeWasmModule = await WebAssembly.compileStreaming(
+        new Response(await res.arrayBuffer(), {
+          headers: { 'Content-Type': 'application/wasm' },
+        })
+      );
+    }
+
     this.workletNode = new AudioWorkletNode(this.ctx, 'aux-processor', {
       numberOfInputs: 1,
       numberOfOutputs: 1,
@@ -440,6 +463,7 @@ export class AudioHost {
       if (channel.transient) channel.transient.disconnect();
       if (channel.deess) channel.deess.disconnect();
       if (channel.imager) channel.imager.disconnect();
+      if (channel.tape) channel.tape.disconnect();
       for (const send of channel.sends.values()) send.disconnect();
       channel.sends.clear();
       channel.gain.disconnect();
@@ -506,11 +530,22 @@ export class AudioHost {
     // straightforward: each new node connects to the previous "front" and
     // becomes the new front; the source ultimately connects to `front`.
     //
-    //   source → [eq8] → [comp] → [compColor] → [transient] → [deess] → [imager] → gain → panner → analyser → bus
+    //   source → [eq8] → [comp] → [compColor] → [transient] → [deess] → [imager] → [tape] → gain → panner → analyser → bus
     //
     // Bracketed nodes are conditional: they only exist if the corresponding
     // WASM module was loaded at start(). With everything off the routing
     // reduces to source → gain → ... as before.
+    let tape: AudioWorkletNode | null = null;
+    if (this.tapeWasmModule) {
+      tape = new AudioWorkletNode(this.ctx, 'aux-tape-processor', {
+        numberOfInputs: 1,
+        numberOfOutputs: 1,
+        outputChannelCount: [2],
+        processorOptions: { wasmModule: this.tapeWasmModule },
+      });
+      tape.connect(gain);
+    }
+
     let imager: AudioWorkletNode | null = null;
     if (this.imagerWasmModule) {
       imager = new AudioWorkletNode(this.ctx, 'aux-imager-processor', {
@@ -519,7 +554,7 @@ export class AudioHost {
         outputChannelCount: [2],
         processorOptions: { wasmModule: this.imagerWasmModule },
       });
-      imager.connect(gain);
+      imager.connect(tape ?? gain);
     }
 
     let deess: AudioWorkletNode | null = null;
@@ -530,7 +565,7 @@ export class AudioHost {
         outputChannelCount: [2],
         processorOptions: { wasmModule: this.deessWasmModule },
       });
-      deess.connect(imager ?? gain);
+      deess.connect(imager ?? tape ?? gain);
     }
 
     let transient: AudioWorkletNode | null = null;
@@ -541,7 +576,7 @@ export class AudioHost {
         outputChannelCount: [2],
         processorOptions: { wasmModule: this.transientWasmModule },
       });
-      transient.connect(deess ?? imager ?? gain);
+      transient.connect(deess ?? imager ?? tape ?? gain);
     }
 
     let compColor: AudioWorkletNode | null = null;
@@ -552,7 +587,7 @@ export class AudioHost {
         outputChannelCount: [2],
         processorOptions: { wasmModule: this.compColorWasmModule },
       });
-      compColor.connect(transient ?? deess ?? imager ?? gain);
+      compColor.connect(transient ?? deess ?? imager ?? tape ?? gain);
     }
 
     let comp: AudioWorkletNode | null = null;
@@ -563,7 +598,7 @@ export class AudioHost {
         outputChannelCount: [2],
         processorOptions: { wasmModule: this.compWasmModule },
       });
-      comp.connect(compColor ?? transient ?? deess ?? imager ?? gain);
+      comp.connect(compColor ?? transient ?? deess ?? imager ?? tape ?? gain);
     }
 
     let eq8: AudioWorkletNode | null = null;
@@ -574,7 +609,7 @@ export class AudioHost {
         outputChannelCount: [2],
         processorOptions: { wasmModule: this.eq8WasmModule },
       });
-      eq8.connect(comp ?? compColor ?? transient ?? deess ?? imager ?? gain);
+      eq8.connect(comp ?? compColor ?? transient ?? deess ?? imager ?? tape ?? gain);
     }
 
     // gain → panner → analyser → outputBus.input
@@ -591,6 +626,7 @@ export class AudioHost {
       transient,
       deess,
       imager,
+      tape,
       compGrDb: 0,
       compColorGrDb: 0,
       gain,
@@ -747,6 +783,7 @@ export class AudioHost {
     if (channel.transient) channel.transient.disconnect();
     if (channel.deess) channel.deess.disconnect();
     if (channel.imager) channel.imager.disconnect();
+    if (channel.tape) channel.tape.disconnect();
     for (const send of channel.sends.values()) send.disconnect();
     channel.sends.clear();
     channel.gain.disconnect();
@@ -804,6 +841,23 @@ export class AudioHost {
     const imager = this.channels.get(stemId)?.imager;
     if (!imager) return;
     imager.port.postMessage({ type: 'set-bypassed', bypassed });
+  }
+
+  // ────────────────────────────────────────────────────────────────────
+  // Per-channel Tape (saturation)
+  // ────────────────────────────────────────────────────────────────────
+
+  /** `driveDb` 0..24, `tone` -1..1, `mix` 0..1 (0 = passthrough). */
+  setChannelTape(stemId: string, driveDb: number, tone: number, mix: number): void {
+    const tape = this.channels.get(stemId)?.tape;
+    if (!tape) return;
+    tape.port.postMessage({ type: 'set-params', driveDb, tone, mix });
+  }
+
+  setChannelTapeBypassed(stemId: string, bypassed: boolean): void {
+    const tape = this.channels.get(stemId)?.tape;
+    if (!tape) return;
+    tape.port.postMessage({ type: 'set-bypassed', bypassed });
   }
 
   // ────────────────────────────────────────────────────────────────────
@@ -1388,6 +1442,7 @@ export class AudioHost {
           channel.transient ??
           channel.deess ??
           channel.imager ??
+          channel.tape ??
           channel.gain
       );
       src.onended = () => {

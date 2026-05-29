@@ -38,6 +38,9 @@ interface Props {
   /** Imager width (0..2; 1 = unity). */
   onImager: (width: number) => void;
   onImagerBypass: () => void;
+  /** Tape — driveDb (0..24), tone (-1..1), mix (0..1). */
+  onTape: (field: 'driveDb' | 'tone' | 'mix', value: number) => void;
+  onTapeBypass: () => void;
 }
 
 const EQ_KNOB_MIN_DB = -12;
@@ -81,6 +84,21 @@ function formatDeEssAmount(v: number): string {
 function formatImagerWidth(v: number): string {
   if (Math.abs(v - 1) < 0.02) return '1.00';
   return v.toFixed(2);
+}
+
+function formatTapeDrive(db: number): string {
+  if (db < 0.05) return '0';
+  return `+${db.toFixed(0)}`;
+}
+
+function formatTapeTone(v: number): string {
+  if (Math.abs(v) < 0.02) return '0';
+  const sign = v > 0 ? '+' : '−';
+  return `${sign}${Math.round(Math.abs(v) * 100)}`;
+}
+
+function formatTapeMix(v: number): string {
+  return v < 0.01 ? 'dry' : `${Math.round(v * 100)}`;
 }
 
 // ─── dB <-> linear ──────────────────────────────────────────────────────
@@ -156,6 +174,8 @@ export function ChannelStrip({
   onDeEssBypass,
   onImager,
   onImagerBypass,
+  onTape,
+  onTapeBypass,
 }: Props) {
   const effectivelyMuted = state.muted || (anySoloed && !state.soloed);
 
@@ -359,6 +379,56 @@ export function ChannelStrip({
             />
             <span className="knob-label">Wid</span>
             <span className="knob-readout">{formatImagerWidth(state.imager.width)}</span>
+          </div>
+        </div>
+      </div>
+
+      <div className="ch-tape">
+        <button
+          type="button"
+          className={`ch-tape-toggle ${state.tape.bypassed ? '' : 'on'}`}
+          onClick={onTapeBypass}
+          aria-pressed={!state.tape.bypassed}
+          title={state.tape.bypassed ? 'Tape bypassed — click to engage' : 'Tape active'}
+        >
+          Tape
+        </button>
+        <div className="ch-tape-knobs">
+          <div className="knob-wrap">
+            <Knob
+              value={state.tape.driveDb}
+              min={0}
+              max={24}
+              defaultValue={0}
+              ariaLabel={`${stem.name} tape drive`}
+              onChange={(v) => onTape('driveDb', v)}
+            />
+            <span className="knob-label">Drv</span>
+            <span className="knob-readout">{formatTapeDrive(state.tape.driveDb)}</span>
+          </div>
+          <div className="knob-wrap">
+            <Knob
+              value={state.tape.tone}
+              min={-1}
+              max={1}
+              defaultValue={0}
+              ariaLabel={`${stem.name} tape tone`}
+              onChange={(v) => onTape('tone', v)}
+            />
+            <span className="knob-label">Tone</span>
+            <span className="knob-readout">{formatTapeTone(state.tape.tone)}</span>
+          </div>
+          <div className="knob-wrap">
+            <Knob
+              value={state.tape.mix}
+              min={0}
+              max={1}
+              defaultValue={0}
+              ariaLabel={`${stem.name} tape mix`}
+              onChange={(v) => onTape('mix', v)}
+            />
+            <span className="knob-label">Mix</span>
+            <span className="knob-readout">{formatTapeMix(state.tape.mix)}</span>
           </div>
         </div>
       </div>
