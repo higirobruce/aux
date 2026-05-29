@@ -2,14 +2,23 @@
 
 import { isLocalKey, resolveStemStore } from '@/lib/stem-store';
 import type { Stem, StemWithUrl } from '@/lib/types';
-import { AudioHost, Eq8BandType, MASTER_BUS_ID, type ReverbKind } from '@aux/audio-engine';
+import {
+  AudioHost,
+  Eq8BandType,
+  MASTER_BUS_ID,
+  type ReferenceRoomPreset,
+  type ReverbKind,
+} from '@aux/audio-engine';
 import {
   type BusState,
   COMP_COLOR_DEFAULTS,
   COMP_DEFAULTS,
   type CompType,
   DEFAULT_CHANNEL_COMP,
+  DEFAULT_CHANNEL_DEESS,
   DEFAULT_CHANNEL_EQ,
+  DEFAULT_CHANNEL_IMAGER,
+  DEFAULT_CHANNEL_TAPE,
   DEFAULT_CHANNEL_TRANSIENT,
   DEFAULT_COMP_TYPE,
   DEFAULT_LIMITER_STATE,
@@ -25,8 +34,9 @@ import {
 import Link from 'next/link';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { BusStrip } from './_bus-strip';
-import { ChannelStrip } from './_channel-strip';
+import { ChannelStrip, ChannelStripName } from './_channel-strip';
 import { StemDropZone } from './_stem-drop-zone';
+import { type StemPeaks, StemTimeline } from './_stem-timeline';
 import './mixer.css';
 
 interface Props {
@@ -53,6 +63,12 @@ export interface ChannelState {
   sends: Record<string, number>;
   /** Transient designer — both knobs ∈ [-1, 1]. */
   transient: { attack: number; sustain: number; bypassed: boolean };
+  /** DeEss — split-band sibilance tamer. */
+  deess: { freq: number; amount: number; bypassed: boolean };
+  /** Imager — M/S stereo width. */
+  imager: { width: number; bypassed: boolean };
+  /** Tape — single-stage saturation. */
+  tape: { driveDb: number; tone: number; mix: number; bypassed: boolean };
 }
 
 const DEFAULT_CHANNEL: ChannelState = {
@@ -66,6 +82,9 @@ const DEFAULT_CHANNEL: ChannelState = {
   outputBusId: MASTER_BUS_ID,
   sends: {},
   transient: { ...DEFAULT_CHANNEL_TRANSIENT },
+  deess: { ...DEFAULT_CHANNEL_DEESS },
+  imager: { ...DEFAULT_CHANNEL_IMAGER },
+  tape: { ...DEFAULT_CHANNEL_TAPE },
 };
 const AUTOSAVE_DEBOUNCE_MS = 600;
 
@@ -106,7 +125,10 @@ function hydrateMixState(raw: unknown): HydratedMix {
   const empty: HydratedMix = {
     channels: {},
     buses: { [MASTER_BUS_ID]: { ...DEFAULT_MASTER_BUS } },
-    masterChain: { limiter: { ...DEFAULT_LIMITER_STATE } },
+    masterChain: {
+      limiter: { ...DEFAULT_LIMITER_STATE },
+      referenceRoom: { preset: 'off' },
+    },
   };
 
   if (raw == null) return empty;
@@ -127,7 +149,7 @@ function hydrateMixState(raw: unknown): HydratedMix {
     return empty;
   }
   const ver = (raw as { version: unknown }).version;
-  if (typeof ver !== 'number' || ver < 1 || ver > 9) return empty;
+  if (typeof ver !== 'number' || ver < 1 || ver >= MIX_STATE_VERSION) return empty;
 
   const channels = (raw as { channels: Record<string, unknown> }).channels;
   const upgradedChannels: Record<string, ChannelState> = {};
@@ -153,6 +175,9 @@ function hydrateMixState(raw: unknown): HydratedMix {
       outputBusId: c.outputBusId ?? MASTER_BUS_ID,
       sends: c.sends ?? {},
       transient: c.transient ?? { ...DEFAULT_CHANNEL_TRANSIENT },
+      deess: c.deess ?? { ...DEFAULT_CHANNEL_DEESS },
+      imager: c.imager ?? { ...DEFAULT_CHANNEL_IMAGER },
+      tape: c.tape ?? { ...DEFAULT_CHANNEL_TAPE },
     };
   }
   // Bus migration. v5+ docs already have a `buses` field; older docs don't.
@@ -190,10 +215,32 @@ function hydrateMixState(raw: unknown): HydratedMix {
     }
   }
 
+  // Preserve the older doc's limiter if it has well-shaped values — the
+  // upgrade path was previously wiping it back to defaults whenever the
+  // version bumped, which surprised users who had tuned the master limiter.
+  const rawMaster = (raw as { masterChain?: { limiter?: Partial<LimiterState> } }).masterChain;
+  const oldLim = rawMaster?.limiter;
+  const preservedLimiter: LimiterState =
+    oldLim &&
+    typeof oldLim.thresholdDb === 'number' &&
+    typeof oldLim.releaseMs === 'number' &&
+    typeof oldLim.makeupDb === 'number' &&
+    typeof oldLim.bypassed === 'boolean'
+      ? {
+          thresholdDb: oldLim.thresholdDb,
+          releaseMs: oldLim.releaseMs,
+          makeupDb: oldLim.makeupDb,
+          bypassed: oldLim.bypassed,
+        }
+      : { ...DEFAULT_LIMITER_STATE };
+
   return {
     channels: upgradedChannels,
     buses: upgradedBuses,
-    masterChain: { ...DEFAULT_MASTER_CHAIN, limiter: { ...DEFAULT_LIMITER_STATE } },
+    masterChain: {
+      ...DEFAULT_MASTER_CHAIN,
+      limiter: preservedLimiter,
+    },
   };
 }
 
@@ -263,6 +310,8 @@ export function MixerShell({
   const [masterChain, setMasterChain] = useState<MasterChain>(() => hydrated.masterChain);
   const [loadedIds, setLoadedIds] = useState<Set<string>>(new Set());
   const [stemsOpen, setStemsOpen] = useState(initialStems.length === 0);
+  const [timelineOpen, setTimelineOpen] = useState(true);
+  const [peaks, setPeaks] = useState<Record<string, StemPeaks | undefined>>({});
   const [saveStatus, setSaveStatus] = useState<SaveStatus>('idle');
   // First render is hydration; suppress that as an autosave trigger.
   const hasMounted = useRef(false);
@@ -299,6 +348,26 @@ export function MixerShell({
       if (host) void host.stop();
       if (saveTimer.current) clearTimeout(saveTimer.current);
       if (inFlightSave.current) inFlightSave.current.abort();
+    };
+  }, []);
+
+  // Pre-decode stems on mount so the timeline can show waveforms without
+  // waiting for a Play press. The AudioContext starts in 'suspended' state —
+  // we don't need a user gesture to decode, only to actually play. Failures
+  // are silent: the worst case is the timeline keeps saying "loading…" until
+  // the user hits Play, which is what it did before this effect existed.
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      try {
+        await loadStems();
+      } catch {
+        // Surfaced through the normal play path; nothing to do here.
+      }
+      if (cancelled) return;
+    })();
+    return () => {
+      cancelled = true;
     };
   }, []);
 
@@ -434,6 +503,12 @@ export function MixerShell({
       hallWasmUrl: '/hall_bg.wasm',
       transientWorkletUrl: '/transient-worklet.js',
       transientWasmUrl: '/transient_bg.wasm',
+      deessWorkletUrl: '/deess-worklet.js',
+      deessWasmUrl: '/deess_bg.wasm',
+      imagerWorkletUrl: '/imager-worklet.js',
+      imagerWasmUrl: '/imager_bg.wasm',
+      tapeWorkletUrl: '/tape-worklet.js',
+      tapeWasmUrl: '/tape_bg.wasm',
     });
     await host.start();
     hostRef.current = host;
@@ -455,27 +530,59 @@ export function MixerShell({
       storageMode === 'local' ? isLocalKey(s.s3Key) : !!s.downloadUrl
     );
 
+    // Per-stem try/catch so a single missing OPFS file (different browser
+    // profile, manual storage cleanup, etc.) doesn't poison the whole
+    // batch and leave every lane stuck on "loading…". Successes populate
+    // peaks/duration; failures log but don't throw.
+    const succeeded: StemWithUrl[] = [];
     await Promise.all(
       loadable.map(async (stem) => {
-        if (host.isLoaded(stem.id)) return;
-        let audioData: ArrayBuffer;
-        if (localStore && isLocalKey(stem.s3Key)) {
-          const file = await localStore.getStem(stem.s3Key as string);
-          audioData = await file.arrayBuffer();
-        } else if (stem.downloadUrl) {
-          const audioRes = await fetch(stem.downloadUrl);
-          if (!audioRes.ok) throw new Error(`fetch ${stem.name} failed`);
-          audioData = await audioRes.arrayBuffer();
-        } else {
-          return; // not loadable
+        try {
+          if (host.isLoaded(stem.id)) {
+            succeeded.push(stem);
+            return;
+          }
+          let audioData: ArrayBuffer;
+          if (localStore && isLocalKey(stem.s3Key)) {
+            const file = await localStore.getStem(stem.s3Key as string);
+            audioData = await file.arrayBuffer();
+          } else if (stem.downloadUrl) {
+            const audioRes = await fetch(stem.downloadUrl);
+            if (!audioRes.ok) throw new Error(`fetch ${stem.name} failed (${audioRes.status})`);
+            audioData = await audioRes.arrayBuffer();
+          } else {
+            return; // not loadable
+          }
+          await host.loadStem(stem.id, audioData);
+          succeeded.push(stem);
+        } catch (err) {
+          console.warn(`[mixer] could not load stem ${stem.name}:`, err);
         }
-        await host.loadStem(stem.id, audioData);
       })
     );
 
     setStems(fetched);
-    setLoadedIds(new Set(loadable.map((s) => s.id)));
+    setLoadedIds(new Set(succeeded.map((s) => s.id)));
     setDuration(host.durationSeconds);
+
+    // Build / refresh peaks for the read-only timeline. Each stem is at most
+    // a few thousand min/max pairs — cheap to compute (linear scan over the
+    // already-decoded AudioBuffer) and we only redo it for stems that don't
+    // already have peaks (or whose buffer was just swapped).
+    setPeaks((prev) => {
+      const next: Record<string, StemPeaks | undefined> = { ...prev };
+      for (const stem of loadable) {
+        if (next[stem.id]) continue;
+        const p = host.getStemPeaks(stem.id, 2000);
+        if (p) next[stem.id] = p;
+      }
+      // Drop peaks for stems that no longer exist.
+      const live = new Set(loadable.map((s) => s.id));
+      for (const id of Object.keys(next)) {
+        if (!live.has(id)) delete next[id];
+      }
+      return next;
+    });
 
     setChannelState((prev) => {
       const next = { ...prev };
@@ -503,6 +610,12 @@ export function MixerShell({
       applyCompToHost(host, stem.id, ch.comp.threshold, ch.comp.ratio, ch.compType);
       host.setChannelTransient(stem.id, ch.transient.attack, ch.transient.sustain);
       host.setChannelTransientBypassed(stem.id, ch.transient.bypassed);
+      host.setChannelDeEss(stem.id, ch.deess.freq, ch.deess.amount);
+      host.setChannelDeEssBypassed(stem.id, ch.deess.bypassed);
+      host.setChannelImager(stem.id, ch.imager.width);
+      host.setChannelImagerBypassed(stem.id, ch.imager.bypassed);
+      host.setChannelTape(stem.id, ch.tape.driveDb, ch.tape.tone, ch.tape.mix);
+      host.setChannelTapeBypassed(stem.id, ch.tape.bypassed);
     }
 
     // Ensure user-defined buses exist on the host (Master is auto-created)
@@ -533,6 +646,9 @@ export function MixerShell({
     const lim = masterChainRef.current.limiter;
     host.setMasterLimiter(lim.thresholdDb, lim.releaseMs, lim.makeupDb);
     host.setMasterLimiterBypassed(lim.bypassed);
+
+    // Reference Room preset — restore the saved monitoring filter.
+    host.setMasterReferenceRoom(masterChainRef.current.referenceRoom.preset);
 
     // Route channels to their saved bus. The host's addChannel defaults to
     // Master, so this only does work for non-Master targets — but it's safe
@@ -565,6 +681,23 @@ export function MixerShell({
       setError(err instanceof Error ? err.message : 'playback failed');
     }
   }
+
+  // Seek from the stem timeline. Always clamps to the loaded duration; if we
+  // were playing, restarts every source at the new offset (playAll() also
+  // handles the implicit stopAll). Otherwise just updates state — the next
+  // play will start from there.
+  const handleSeek = useCallback(
+    (seconds: number) => {
+      const target = Math.max(0, Math.min(seconds, duration));
+      setPosition(target);
+      const host = hostRef.current;
+      if (host?.isPlaying) {
+        host.playAll(target);
+        playStartedAtRef.current = host.currentTime - target;
+      }
+    },
+    [duration]
+  );
 
   const setVolume = useCallback((stemId: string, volume: number) => {
     hostRef.current?.setChannelVolume(stemId, volume);
@@ -652,6 +785,74 @@ export function MixerShell({
     });
   }, []);
 
+  const setDeEss = useCallback((stemId: string, field: 'freq' | 'amount', value: number) => {
+    setChannelState((prev) => {
+      const current = prev[stemId] ?? DEFAULT_CHANNEL;
+      const nextDeEss = { ...current.deess, [field]: value };
+      hostRef.current?.setChannelDeEss(stemId, nextDeEss.freq, nextDeEss.amount);
+      return { ...prev, [stemId]: { ...current, deess: nextDeEss } };
+    });
+  }, []);
+
+  const toggleDeEssBypass = useCallback((stemId: string) => {
+    setChannelState((prev) => {
+      const current = prev[stemId] ?? DEFAULT_CHANNEL;
+      const bypassed = !current.deess.bypassed;
+      hostRef.current?.setChannelDeEssBypassed(stemId, bypassed);
+      return {
+        ...prev,
+        [stemId]: { ...current, deess: { ...current.deess, bypassed } },
+      };
+    });
+  }, []);
+
+  const setImager = useCallback((stemId: string, width: number) => {
+    setChannelState((prev) => {
+      const current = prev[stemId] ?? DEFAULT_CHANNEL;
+      hostRef.current?.setChannelImager(stemId, width);
+      return {
+        ...prev,
+        [stemId]: { ...current, imager: { ...current.imager, width } },
+      };
+    });
+  }, []);
+
+  const toggleImagerBypass = useCallback((stemId: string) => {
+    setChannelState((prev) => {
+      const current = prev[stemId] ?? DEFAULT_CHANNEL;
+      const bypassed = !current.imager.bypassed;
+      hostRef.current?.setChannelImagerBypassed(stemId, bypassed);
+      return {
+        ...prev,
+        [stemId]: { ...current, imager: { ...current.imager, bypassed } },
+      };
+    });
+  }, []);
+
+  const setTape = useCallback(
+    (stemId: string, field: 'driveDb' | 'tone' | 'mix', value: number) => {
+      setChannelState((prev) => {
+        const current = prev[stemId] ?? DEFAULT_CHANNEL;
+        const nextTape = { ...current.tape, [field]: value };
+        hostRef.current?.setChannelTape(stemId, nextTape.driveDb, nextTape.tone, nextTape.mix);
+        return { ...prev, [stemId]: { ...current, tape: nextTape } };
+      });
+    },
+    []
+  );
+
+  const toggleTapeBypass = useCallback((stemId: string) => {
+    setChannelState((prev) => {
+      const current = prev[stemId] ?? DEFAULT_CHANNEL;
+      const bypassed = !current.tape.bypassed;
+      hostRef.current?.setChannelTapeBypassed(stemId, bypassed);
+      return {
+        ...prev,
+        [stemId]: { ...current, tape: { ...current.tape, bypassed } },
+      };
+    });
+  }, []);
+
   const setBusGain = useCallback((busId: string, gain: number) => {
     hostRef.current?.setBusGain(busId, gain);
     setBusState((prev) => {
@@ -687,6 +888,14 @@ export function MixerShell({
       const bypassed = !prev.limiter.bypassed;
       hostRef.current?.setMasterLimiterBypassed(bypassed);
       return { ...prev, limiter: { ...prev.limiter, bypassed } };
+    });
+  }, []);
+
+  const setReferenceRoom = useCallback((preset: ReferenceRoomPreset) => {
+    setMasterChain((prev) => {
+      if (prev.referenceRoom.preset === preset) return prev;
+      hostRef.current?.setMasterReferenceRoom(preset);
+      return { ...prev, referenceRoom: { preset } };
     });
   }, []);
 
@@ -847,8 +1056,18 @@ export function MixerShell({
     });
   }, []);
 
+  // loadStems is a per-render closure but uses only refs + stable setters
+  // so the first-render copy works fine across all calls.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: see comment above
   const onStemAdded = useCallback((stem: Stem) => {
     setStems((prev) => (prev.some((s) => s.id === stem.id) ? prev : [...prev, stem]));
+    // Decode the new stem into the host + populate peaks so the timeline
+    // lane paints. loadStems re-fetches the full /stems list, decodes the
+    // missing audio, and incrementally updates peaks — already-loaded
+    // stems are skipped, so this is cheap.
+    void loadStems().catch(() => {
+      // errors surface through the normal play path
+    });
   }, []);
 
   const onStemRemoved = useCallback((stemId: string) => {
@@ -862,6 +1081,12 @@ export function MixerShell({
     setLoadedIds((prev) => {
       const next = new Set(prev);
       next.delete(stemId);
+      return next;
+    });
+    setPeaks((prev) => {
+      if (!(stemId in prev)) return prev;
+      const next = { ...prev };
+      delete next[stemId];
       return next;
     });
   }, []);
@@ -884,6 +1109,14 @@ export function MixerShell({
         next.delete(stem.id);
         return next;
       });
+      // Drop the swapped stem's peaks — they'll be re-derived from the new
+      // buffer on the next loadStems().
+      setPeaks((prev) => {
+        if (!(stem.id in prev)) return prev;
+        const next = { ...prev };
+        delete next[stem.id];
+        return next;
+      });
       if (transport === 'playing') handleStop();
     },
     [transport, handleStop]
@@ -896,7 +1129,7 @@ export function MixerShell({
 
   return (
     <>
-      <div className="mixer mixer-fullscreen">
+      <div className={`mixer mixer-fullscreen ${timelineOpen ? '' : 'timeline-closed'}`}>
         <div className="mixer-transport">
           <Link
             href="/"
@@ -948,6 +1181,17 @@ export function MixerShell({
 
           <button
             type="button"
+            className={`transport-timeline-btn ${timelineOpen ? 'on' : ''}`}
+            onClick={() => setTimelineOpen((v) => !v)}
+            aria-pressed={timelineOpen}
+            aria-label={timelineOpen ? 'Hide timeline' : 'Show timeline'}
+            title={timelineOpen ? 'Hide timeline' : 'Show timeline'}
+          >
+            Timeline
+          </button>
+
+          <button
+            type="button"
             className="transport-stems-btn"
             onClick={() => setStemsOpen(true)}
             aria-label="Open stems panel"
@@ -957,48 +1201,93 @@ export function MixerShell({
           </button>
         </div>
 
+        <StemTimeline
+          stems={stems}
+          peaks={peaks}
+          laneState={channelState}
+          anySoloed={anySoloed}
+          duration={duration}
+          position={position}
+          playing={transport === 'playing'}
+          onMute={toggleMute}
+          onSolo={toggleSolo}
+          onSeek={handleSeek}
+        />
+
         <div className="mixer-body">
-          <div className="mixer-console">
-            {stems.length > 0 ? (
-              stems.map((stem) => {
-                const state = channelState[stem.id] ?? DEFAULT_CHANNEL;
-                return (
-                  <ChannelStrip
-                    key={stem.id}
-                    stem={stem}
-                    state={state}
-                    loaded={loadedIds.has(stem.id)}
-                    anySoloed={anySoloed}
-                    host={hostRef.current}
-                    active={transport === 'playing'}
-                    onVolume={(v) => setVolume(stem.id, v)}
-                    onPan={(p) => setPan(stem.id, p)}
-                    onMute={() => toggleMute(stem.id)}
-                    onSolo={() => toggleSolo(stem.id)}
-                    onEq={(band, db) => setEq(stem.id, band, db)}
-                    onComp={(field, value) => setComp(stem.id, field, value)}
-                    onCompType={(type) => setCompType(stem.id, type)}
-                    buses={busState}
-                    onOutput={(busId) => setChannelOutput(stem.id, busId)}
-                    onSend={(busId, level) => setChannelSend(stem.id, busId, level)}
-                    onRemoveSend={(busId) => removeChannelSend(stem.id, busId)}
-                    onTransient={(field, value) => setTransient(stem.id, field, value)}
-                    onTransientBypass={() => toggleTransientBypass(stem.id)}
-                  />
-                );
-              })
-            ) : (
-              <div className="mixer-empty">
-                <p>No stems in this session yet.</p>
-                <button
-                  type="button"
-                  className="mixer-empty-cta"
-                  onClick={() => setStemsOpen(true)}
-                >
-                  Add stems →
-                </button>
+          {/* Two-row layout: controls on top scroll vertically inside their
+              own container, while the names row below sits OUTSIDE the
+              vertical scroll so it stays planted. Both rows share the same
+              horizontal scrollbar via .mixer-console-h-scroll so they
+              always stay column-aligned. */}
+          <div className="mixer-console-area">
+            <div className="mixer-console-h-scroll">
+              <div className="mixer-console-stack">
+                <div className="mixer-console">
+                  {stems.length > 0 ? (
+                    stems.map((stem) => {
+                      const state = channelState[stem.id] ?? DEFAULT_CHANNEL;
+                      return (
+                        <ChannelStrip
+                          key={stem.id}
+                          stem={stem}
+                          state={state}
+                          loaded={loadedIds.has(stem.id)}
+                          anySoloed={anySoloed}
+                          host={hostRef.current}
+                          active={transport === 'playing'}
+                          onVolume={(v) => setVolume(stem.id, v)}
+                          onPan={(p) => setPan(stem.id, p)}
+                          onMute={() => toggleMute(stem.id)}
+                          onSolo={() => toggleSolo(stem.id)}
+                          onEq={(band, db) => setEq(stem.id, band, db)}
+                          onComp={(field, value) => setComp(stem.id, field, value)}
+                          onCompType={(type) => setCompType(stem.id, type)}
+                          buses={busState}
+                          onOutput={(busId) => setChannelOutput(stem.id, busId)}
+                          onSend={(busId, level) => setChannelSend(stem.id, busId, level)}
+                          onRemoveSend={(busId) => removeChannelSend(stem.id, busId)}
+                          onTransient={(field, value) => setTransient(stem.id, field, value)}
+                          onTransientBypass={() => toggleTransientBypass(stem.id)}
+                          onDeEss={(field, value) => setDeEss(stem.id, field, value)}
+                          onDeEssBypass={() => toggleDeEssBypass(stem.id)}
+                          onImager={(width) => setImager(stem.id, width)}
+                          onImagerBypass={() => toggleImagerBypass(stem.id)}
+                          onTape={(field, value) => setTape(stem.id, field, value)}
+                          onTapeBypass={() => toggleTapeBypass(stem.id)}
+                        />
+                      );
+                    })
+                  ) : (
+                    <div className="mixer-empty">
+                      <p>No stems in this session yet.</p>
+                      <button
+                        type="button"
+                        className="mixer-empty-cta"
+                        onClick={() => setStemsOpen(true)}
+                      >
+                        Add stems →
+                      </button>
+                    </div>
+                  )}
+                </div>
+                {stems.length > 0 && (
+                  <div className="mixer-console-names">
+                    {stems.map((stem) => {
+                      const state = channelState[stem.id] ?? DEFAULT_CHANNEL;
+                      const effectivelyMuted = state.muted || (anySoloed && !state.soloed);
+                      return (
+                        <ChannelStripName
+                          key={stem.id}
+                          stem={stem}
+                          effectivelyMuted={effectivelyMuted}
+                        />
+                      );
+                    })}
+                  </div>
+                )}
               </div>
-            )}
+            </div>
           </div>
           {/* Buses on the right of the console — separated by a thin divider.
               User-created buses live to the left of Master so Master always
@@ -1042,6 +1331,8 @@ export function MixerShell({
                 limiter={masterChain.limiter}
                 onLimiter={setLimiter}
                 onLimiterBypass={toggleLimiterBypass}
+                referenceRoom={masterChain.referenceRoom.preset}
+                onReferenceRoom={setReferenceRoom}
               />
             )}
           </div>

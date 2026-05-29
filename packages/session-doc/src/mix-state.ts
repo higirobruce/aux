@@ -18,9 +18,12 @@ import { z } from 'zod';
  * v8  — buses gain an optional `plate` field.
  * v9  — bus reverb slot generalised with `kind: 'plate' | 'hall'`.
  * v10 — adds per-channel `transient` (attack/sustain shaper + bypass).
+ * v11 — adds per-channel `deess` (split-band) + `imager` (M/S width).
+ * v12 — adds masterChain.referenceRoom (monitoring preset).
+ * v13 — adds per-channel `tape` (saturation: drive / tone / mix + bypass).
  */
 
-export const MIX_STATE_VERSION = 10;
+export const MIX_STATE_VERSION = 13;
 
 /** Stable id for the always-present Master bus. Sessions can omit it from
  *  their `buses` record; the client treats it as if explicitly present. */
@@ -91,6 +94,33 @@ export const ChannelTransientSchema = z.object({
   bypassed: z.boolean(),
 });
 
+/** DeEss per channel — split-band sibilance tamer. */
+export const ChannelDeEssSchema = z.object({
+  /** Crossover frequency, 2_000..12_000 Hz. */
+  freq: z.number().min(2000).max(12000),
+  /** De-ess amount, 0..1. 0 = off. */
+  amount: z.number().min(0).max(1),
+  bypassed: z.boolean(),
+});
+
+/** Imager per channel — M/S stereo width. */
+export const ChannelImagerSchema = z.object({
+  /** Width, 0..2; 1 = unity (passthrough). */
+  width: z.number().min(0).max(2),
+  bypassed: z.boolean(),
+});
+
+/** Tape per channel — single-stage tape saturation. */
+export const ChannelTapeSchema = z.object({
+  /** Pre-drive in dB, 0..24. 0 = clean. */
+  driveDb: z.number().min(0).max(24),
+  /** Tone tilt, -1..1. Negative = warm, positive = bright, 0 = flat. */
+  tone: z.number().min(-1).max(1),
+  /** Dry/wet mix, 0..1. 0 = dry passthrough. */
+  mix: z.number().min(0).max(1),
+  bypassed: z.boolean(),
+});
+
 export const ChannelStateSchema = z.object({
   volume: z.number().min(0).max(8),
   pan: z.number().min(-1).max(1),
@@ -102,6 +132,9 @@ export const ChannelStateSchema = z.object({
   outputBusId: z.string().min(1),
   sends: ChannelSendsSchema,
   transient: ChannelTransientSchema,
+  deess: ChannelDeEssSchema,
+  imager: ChannelImagerSchema,
+  tape: ChannelTapeSchema,
 });
 
 export const LimiterStateSchema = z.object({
@@ -114,8 +147,21 @@ export const LimiterStateSchema = z.object({
   bypassed: z.boolean(),
 });
 
+/**
+ * Reference Room — monitoring preset that filters the post-master signal
+ * (between masterGain and the final output) to simulate common playback
+ * systems. "off" disables the filter chain entirely.
+ */
+export const ReferenceRoomPresetSchema = z.enum(['off', 'laptop', 'earbuds', 'car']);
+export type ReferenceRoomPreset = z.infer<typeof ReferenceRoomPresetSchema>;
+
+export const ReferenceRoomStateSchema = z.object({
+  preset: ReferenceRoomPresetSchema,
+});
+
 export const MasterChainSchema = z.object({
   limiter: LimiterStateSchema,
+  referenceRoom: ReferenceRoomStateSchema,
 });
 
 export const MixStateSchema = z.object({
@@ -168,8 +214,13 @@ export const DEFAULT_LIMITER_STATE: LimiterState = {
   bypassed: false,
 };
 
+export const DEFAULT_REFERENCE_ROOM = {
+  preset: 'off',
+} as const;
+
 export const DEFAULT_MASTER_CHAIN: MasterChain = {
   limiter: { ...DEFAULT_LIMITER_STATE },
+  referenceRoom: { preset: 'off' },
 };
 
 /** Default Master bus, added in hydration when absent. */
@@ -191,6 +242,27 @@ export const DEFAULT_CHANNEL_COMP: ChannelComp = { threshold: 0, ratio: 1 };
 export const DEFAULT_CHANNEL_TRANSIENT = {
   attack: 0,
   sustain: 0,
+  bypassed: false,
+} as const;
+
+/** Default DeEss — 6 kHz crossover, amount 0 = passthrough. */
+export const DEFAULT_CHANNEL_DEESS = {
+  freq: 6000,
+  amount: 0,
+  bypassed: false,
+} as const;
+
+/** Default Imager — width 1 = passthrough. */
+export const DEFAULT_CHANNEL_IMAGER = {
+  width: 1,
+  bypassed: false,
+} as const;
+
+/** Default Tape — clean, dry. */
+export const DEFAULT_CHANNEL_TAPE = {
+  driveDb: 0,
+  tone: 0,
+  mix: 0,
   bypassed: false,
 } as const;
 
@@ -223,6 +295,9 @@ export function emptyMixState(): MixState {
     version: MIX_STATE_VERSION,
     channels: {},
     buses: { [MASTER_BUS_ID]: { ...DEFAULT_MASTER_BUS } },
-    masterChain: { limiter: { ...DEFAULT_LIMITER_STATE } },
+    masterChain: {
+      limiter: { ...DEFAULT_LIMITER_STATE },
+      referenceRoom: { preset: 'off' },
+    },
   };
 }

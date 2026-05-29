@@ -20,7 +20,10 @@
       "**/public/limiter-worklet.js",
       "**/public/plate-worklet.js",
       "**/public/hall-worklet.js",
-      "**/public/transient-worklet.js"
+      "**/public/transient-worklet.js",
+      "**/public/deess-worklet.js",
+      "**/public/imager-worklet.js",
+      "**/public/tape-worklet.js"
     ]
   },
   "vcs": {

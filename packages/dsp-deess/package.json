@@ -1,0 +1,23 @@
+{
+  "name": "@aux/dsp-deess",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Split-band de-esser (Linkwitz-Riley + high-band compression) — Rust DSP compiled to WASM.",
+  "type": "module",
+  "main": "./wasm/deess.js",
+  "types": "./wasm/deess.d.ts",
+  "files": ["wasm"],
+  "exports": {
+    ".": {
+      "types": "./wasm/deess.d.ts",
+      "default": "./wasm/deess.js"
+    },
+    "./deess_bg.wasm": "./wasm/deess_bg.wasm",
+    "./package.json": "./package.json"
+  },
+  "scripts": {
+    "build": "wasm-pack build --release --target web --out-dir wasm --out-name deess && rm -f wasm/.gitignore wasm/package.json",
+    "test:rust": "cargo test --release",
+    "clean": "rm -rf wasm target"
+  }
+}

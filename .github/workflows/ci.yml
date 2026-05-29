@@ -2,9 +2,9 @@ name: CI
 
 on:
   push:
-    branches: [main]
+    branches: [main, staging]
   pull_request:
-    branches: [main]
+    branches: [main, staging]
 
 concurrency:
   group: ci-${{ github.workflow }}-${{ github.ref }}
@@ -48,3 +48,6 @@ jobs:
 
       - name: Test
         run: pnpm test
+
+      - name: Perf gate (§16.07 audio render)
+        run: pnpm --filter @aux/web test:perf

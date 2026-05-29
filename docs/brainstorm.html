@@ -1163,6 +1163,147 @@
   }
 
   /* ============================================================
+     BUS COMPRESSOR (transfer curve + GR meter + knobs)
+     ============================================================ */
+  .comp-display { aspect-ratio: 1000 / 360; }
+  .comp-svg { display: block; width: 100%; height: 100%; }
+
+  .comp-axis line { stroke: rgba(220,231,245,0.10); stroke-width: 1; }
+  .comp-axis line.major { stroke: rgba(220,231,245,0.18); }
+  .comp-axis line.dashed { stroke-dasharray: 4 4; }
+  .comp-axis text {
+    fill: #4a5260;
+    font-family: var(--font-mono);
+    font-size: 10px;
+    letter-spacing: 0.04em;
+  }
+  .comp-ref-line {
+    fill: none;
+    stroke: rgba(199, 185, 122, 0.45);
+    stroke-width: 1.2;
+    stroke-dasharray: 3 5;
+  }
+  .comp-curve-fill {
+    fill: rgba(46, 95, 168, 0.12);
+  }
+  .comp-curve {
+    fill: none;
+    stroke: #DCE7F5;
+    stroke-width: 2.2;
+    filter: drop-shadow(0 0 6px rgba(46, 95, 168, 0.7));
+  }
+  .comp-thresh-line {
+    stroke: rgba(229, 158, 92, 0.55);
+    stroke-dasharray: 5 4;
+    stroke-width: 1;
+  }
+  .comp-knee-region {
+    fill: rgba(229, 158, 92, 0.07);
+    stroke: rgba(229, 158, 92, 0.2);
+    stroke-width: 1;
+    stroke-dasharray: 2 3;
+  }
+  .comp-input-dot {
+    fill: #5FAE6B;
+    stroke: rgba(0,0,0,0.7);
+    stroke-width: 1.5;
+    filter: drop-shadow(0 0 6px #5FAE6B);
+  }
+  .comp-label {
+    fill: #939AA5;
+    font-family: var(--font-mono);
+    font-size: 10px;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+  }
+  .comp-label.dim { fill: #4a5260; }
+  .comp-label.warn { fill: #d6a76f; }
+  .comp-label.ok { fill: #8edc99; }
+
+  .comp-gr-frame {
+    fill: #050608;
+    stroke: #000;
+    stroke-width: 1;
+  }
+  .comp-gr-tick {
+    stroke: rgba(220,231,245,0.12);
+    stroke-width: 1;
+  }
+  .comp-gr-tick.major { stroke: rgba(220,231,245,0.22); }
+  .comp-gr-tick-text {
+    fill: #4a5260;
+    font-family: var(--font-mono);
+    font-size: 9px;
+    letter-spacing: 0.04em;
+  }
+  .comp-gr-seg { fill: #1c2028; }
+  .comp-gr-seg.on { fill: #d6a76f; filter: drop-shadow(0 0 4px rgba(229,158,92,0.6)); }
+  .comp-gr-seg.peak { fill: #E55C7A; filter: drop-shadow(0 0 6px rgba(229,92,122,0.6)); }
+
+  /* Knob row */
+  .comp-knobs {
+    display: grid;
+    grid-template-columns: repeat(5, 1fr) auto;
+    gap: 0;
+    background: linear-gradient(180deg, #1c2028, #14171c);
+    border-bottom: 1px solid #000;
+  }
+  .comp-knob {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    padding: 14px 8px 12px;
+    border-right: 1px solid #0a0c10;
+    position: relative;
+  }
+  .comp-knob:last-of-type { border-right: 1px solid #0a0c10; }
+  .comp-knob-eyebrow {
+    font-size: 9px;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: #6B7280;
+    margin-bottom: 8px;
+  }
+  .comp-knob-body { width: 52px; height: 52px; }
+  .comp-knob-value {
+    margin-top: 7px;
+    font-family: var(--font-mono);
+    font-size: 12px;
+    letter-spacing: 0.04em;
+    color: #DCE7F5;
+  }
+  .comp-knob-unit {
+    font-size: 9px;
+    letter-spacing: 0.1em;
+    color: #6B7280;
+    text-transform: uppercase;
+    margin-top: 1px;
+  }
+  .comp-knob-base { fill: url(#comp-knob-grad); stroke: #000; stroke-width: 1; }
+  .comp-knob-track { fill: none; stroke: rgba(220,231,245,0.10); stroke-width: 2; }
+  .comp-knob-arc { fill: none; stroke: var(--azure); stroke-width: 2.5; filter: drop-shadow(0 0 4px rgba(46,95,168,0.6)); }
+  .comp-knob-indicator { stroke: #DCE7F5; stroke-width: 2; stroke-linecap: round; }
+
+  /* Smart panel: same family as seq-smart */
+  .comp-sidechain {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    padding: 11px 16px;
+    background: linear-gradient(180deg, #1f232b, #14171c);
+    flex-wrap: wrap;
+  }
+  .comp-sidechain .seq-smart-label { margin-right: 4px; }
+  .comp-sc-meta {
+    margin-left: auto;
+    font-family: var(--font-mono);
+    font-size: 10px;
+    color: #6B7280;
+    letter-spacing: 0.08em;
+  }
+  .comp-sc-meta strong { color: #8edc99; font-weight: 500; }
+
+  /* ============================================================
      ARCHITECTURE COMMITMENTS
      ============================================================ */
   .arch-card { padding: var(--s-5) var(--s-6); }
@@ -1695,6 +1836,7 @@
       <a href="#wf-mixer"><span class="n">06</span>Wireframe — Mixer</a>
       <a href="#wf-mixer-live"><span class="n">·</span>Mixer — interactive mockup</a>
       <a href="#wf-smarteq"><span class="n">·</span>Smart EQ — interactive mockup</a>
+      <a href="#wf-compressor"><span class="n">·</span>Bus Compressor — interactive mockup</a>
       <a href="#wf-channel"><span class="n">07</span>Wireframe — Channel detail</a>
       <a href="#wf-rooms"><span class="n">·</span>Reference Rooms — interactive mockup</a>
       <a href="#wf-master"><span class="n">08</span>Wireframe — Mastering</a>
@@ -2613,6 +2755,344 @@
         explains why, and waits. Accept applies the move; Discard removes the suggestion;
         nothing changes until the engineer clicks. This is the line we said we wouldn't cross —
         and the surface that holds it.
+      </p>
+    </div>
+  </section>
+
+  <!-- ============================================================
+       06d · BUS COMPRESSOR (SSL × Studio One)
+       ============================================================ -->
+  <section class="section" id="wf-compressor">
+    <p class="eyebrow">Mockup · how a compressor might look</p>
+    <h2 class="mt-0">Bus Compressor</h2>
+    <p>
+      A VCA-style bus compressor: the transfer curve on the left, gain-reduction
+      meter on the right, five knobs underneath. The dashed amber line is the
+      threshold; the soft amber band is the knee; the green dot tracks the live
+      input level on the curve. Same surface language as Smart EQ — restrained,
+      legible, no skeuomorphic wood-grain.
+    </p>
+
+    <div class="smart-eq" id="bus-comp">
+
+      <div class="seq-header">
+        <div class="seq-title">
+          <span class="seq-label">Bus Compressor</span>
+          <span class="seq-sublabel">VCA · feedforward · preset: drum-bus-glue</span>
+        </div>
+        <div class="seq-controls">
+          <button class="seq-btn">undo</button>
+          <button class="seq-btn on">A</button>
+          <button class="seq-btn">B</button>
+          <button class="seq-btn">bypass</button>
+        </div>
+      </div>
+
+      <div class="seq-display comp-display">
+        <svg class="comp-svg" viewBox="0 0 1000 360" preserveAspectRatio="none">
+          <defs>
+            <linearGradient id="comp-knob-grad" x1="0" y1="0" x2="0" y2="1">
+              <stop offset="0%"  stop-color="#3a4048"/>
+              <stop offset="100%" stop-color="#15181d"/>
+            </linearGradient>
+          </defs>
+
+          <!-- =================== Transfer-curve panel =================== -->
+          <!-- Plot bounds: x 60–720, y 30–330  (660 wide, 300 tall)
+               Input dB:  −60 → 0  (11 px / dB)
+               Output dB: −60 → 0  (5 px / dB)
+               Threshold: −18 dB   Ratio: 4:1   Knee: 6 dB soft  -->
+
+          <!-- Frame -->
+          <rect x="60" y="30" width="660" height="300" fill="#0a0c10" stroke="#000"/>
+
+          <!-- Grid -->
+          <g class="comp-axis">
+            <!-- vertical (input) -->
+            <line x1="170" y1="30" x2="170" y2="330"/>
+            <line x1="280" y1="30" x2="280" y2="330"/>
+            <line x1="390" y1="30" x2="390" y2="330" class="major"/>
+            <line x1="500" y1="30" x2="500" y2="330"/>
+            <line x1="610" y1="30" x2="610" y2="330"/>
+            <!-- horizontal (output) -->
+            <line x1="60" y1="80"  x2="720" y2="80"/>
+            <line x1="60" y1="130" x2="720" y2="130"/>
+            <line x1="60" y1="180" x2="720" y2="180" class="major"/>
+            <line x1="60" y1="230" x2="720" y2="230"/>
+            <line x1="60" y1="280" x2="720" y2="280"/>
+            <!-- axis labels (input across the bottom) -->
+            <text x="60"  y="348" text-anchor="middle">−60</text>
+            <text x="170" y="348" text-anchor="middle">−48</text>
+            <text x="280" y="348" text-anchor="middle">−36</text>
+            <text x="390" y="348" text-anchor="middle">−24</text>
+            <text x="500" y="348" text-anchor="middle">−12</text>
+            <text x="610" y="348" text-anchor="middle">−6</text>
+            <text x="720" y="348" text-anchor="middle">0</text>
+            <!-- output (left side) -->
+            <text x="48" y="332" text-anchor="end">−60</text>
+            <text x="48" y="282" text-anchor="end">−48</text>
+            <text x="48" y="232" text-anchor="end">−36</text>
+            <text x="48" y="182" text-anchor="end">−24</text>
+            <text x="48" y="132" text-anchor="end">−12</text>
+            <text x="48" y="82"  text-anchor="end">−6</text>
+            <text x="48" y="38"  text-anchor="end">0</text>
+          </g>
+
+          <!-- 1:1 unity reference line (dashed amber-gold), from (60,330) to (720,30).
+               Note plotting is non-square (input span 660 px, output span 300 px). -->
+          <path class="comp-ref-line" d="M 60 330 L 720 30"/>
+
+          <!-- Threshold + knee shading.
+               Threshold input = −18 dB → x = 60 + (−18+60)*11 = 60 + 462 = 522.
+               Knee 6 dB centered → input range −21 to −15 → x range 489 → 555.
+               Visualize as a vertical band. -->
+          <rect class="comp-knee-region" x="489" y="30" width="66" height="300"/>
+          <line class="comp-thresh-line" x1="522" y1="30" x2="522" y2="330"/>
+
+          <!-- Transfer curve:
+               Below knee (−60 → −21 dB):    unity → output = input
+                  (−60,−60) → (60,330)
+                  (−21,−21) → (60+39*11, 330−39*5)=(489, 135)
+               Knee blend (−21 → −15 dB):    quadratic transition
+                  At −15 dB: output = −18 + 3/4 = −17.25
+                              → (60+45*11, 330−42.75*5) = (555, 116.25)
+               Above knee (−15 → 0 dB):      4:1 slope
+                  At 0 dB: output = −18 + 18/4 = −13.5
+                              → (60+60*11, 330−46.5*5) = (720, 97.5) -->
+          <path class="comp-curve-fill"
+                d="M 60 330 L 489 135 Q 522 125 555 116.25 L 720 97.5 L 720 330 Z"/>
+          <path class="comp-curve"
+                d="M 60 330 L 489 135 Q 522 125 555 116.25 L 720 97.5"/>
+
+          <!-- Live input level on the curve.
+               Pick input = −9 dB (a fairly hot signal). Output = −18 + 9/4 = −15.75
+               → (60 + 51*11, 330 − 44.25*5) = (621, 108.75) -->
+          <line class="comp-axis dashed" x1="621" y1="330" x2="621" y2="108.75"/>
+          <line class="comp-axis dashed" x1="60"  y1="108.75" x2="621" y2="108.75"/>
+          <circle class="comp-input-dot" cx="621" cy="108.75" r="6"/>
+
+          <!-- Labels in plot -->
+          <text class="comp-label warn" x="528" y="48">THRESHOLD −18</text>
+          <text class="comp-label dim"  x="68"  y="48">OUT</text>
+          <text class="comp-label dim"  x="712" y="322" text-anchor="end">IN dB</text>
+          <text class="comp-label ok"   x="628" y="100">−9 dB IN  ·  −15.75 dB OUT</text>
+
+          <!-- =================== Gain-reduction meter =================== -->
+          <!-- Position the meter to the right of the curve, x 760–880, y 30–330 -->
+          <text class="comp-label dim" x="820" y="22" text-anchor="middle">GR</text>
+          <rect class="comp-gr-frame" x="760" y="30" width="120" height="300" rx="3"/>
+
+          <!-- Vertical scale:
+               0 dB at top (y=42), 20 dB at bottom (y=320). Pitch = 13.9 px / dB.
+               Show 4.2 dB of reduction. Each LED segment ~ 1 dB tall.   -->
+          <g>
+            <!-- ticks -->
+            <line class="comp-gr-tick major" x1="760" y1="42"  x2="772" y2="42"/>
+            <line class="comp-gr-tick"       x1="760" y1="83.7" x2="768" y2="83.7"/>
+            <line class="comp-gr-tick major" x1="760" y1="125.4" x2="772" y2="125.4"/>
+            <line class="comp-gr-tick"       x1="760" y1="167.1" x2="768" y2="167.1"/>
+            <line class="comp-gr-tick major" x1="760" y1="208.8" x2="772" y2="208.8"/>
+            <line class="comp-gr-tick"       x1="760" y1="250.5" x2="768" y2="250.5"/>
+            <line class="comp-gr-tick major" x1="760" y1="292.2" x2="772" y2="292.2"/>
+            <text class="comp-gr-tick-text" x="755" y="46"   text-anchor="end">0</text>
+            <text class="comp-gr-tick-text" x="755" y="129"  text-anchor="end">−6</text>
+            <text class="comp-gr-tick-text" x="755" y="212"  text-anchor="end">−12</text>
+            <text class="comp-gr-tick-text" x="755" y="295"  text-anchor="end">−18</text>
+          </g>
+
+          <!-- LED segments (20 of them, top to bottom). The first 5 light amber
+               because 4.2 dB GR is active; the rest are dim. The 6th gets a faint
+               peak-hold tint. -->
+          <g>
+            <rect class="comp-gr-seg on"   x="784" y="42"    width="80" height="11" rx="1"/>
+            <rect class="comp-gr-seg on"   x="784" y="55.9"  width="80" height="11" rx="1"/>
+            <rect class="comp-gr-seg on"   x="784" y="69.8"  width="80" height="11" rx="1"/>
+            <rect class="comp-gr-seg on"   x="784" y="83.7"  width="80" height="11" rx="1"/>
+            <rect class="comp-gr-seg peak" x="784" y="97.6"  width="80" height="11" rx="1"/>
+            <rect class="comp-gr-seg"     x="784" y="111.5" width="80" height="11" rx="1"/>
+            <rect class="comp-gr-seg"     x="784" y="125.4" width="80" height="11" rx="1"/>
+            <rect class="comp-gr-seg"     x="784" y="139.3" width="80" height="11" rx="1"/>
+            <rect class="comp-gr-seg"     x="784" y="153.2" width="80" height="11" rx="1"/>
+            <rect class="comp-gr-seg"     x="784" y="167.1" width="80" height="11" rx="1"/>
+            <rect class="comp-gr-seg"     x="784" y="181"   width="80" height="11" rx="1"/>
+            <rect class="comp-gr-seg"     x="784" y="194.9" width="80" height="11" rx="1"/>
+            <rect class="comp-gr-seg"     x="784" y="208.8" width="80" height="11" rx="1"/>
+            <rect class="comp-gr-seg"     x="784" y="222.7" width="80" height="11" rx="1"/>
+            <rect class="comp-gr-seg"     x="784" y="236.6" width="80" height="11" rx="1"/>
+            <rect class="comp-gr-seg"     x="784" y="250.5" width="80" height="11" rx="1"/>
+            <rect class="comp-gr-seg"     x="784" y="264.4" width="80" height="11" rx="1"/>
+            <rect class="comp-gr-seg"     x="784" y="278.3" width="80" height="11" rx="1"/>
+            <rect class="comp-gr-seg"     x="784" y="292.2" width="80" height="11" rx="1"/>
+            <rect class="comp-gr-seg"     x="784" y="306.1" width="80" height="11" rx="1"/>
+          </g>
+
+          <!-- Numeric readout under the meter -->
+          <text class="comp-label warn" x="820" y="323" text-anchor="middle">−4.2 dB</text>
+
+          <!-- =================== Side info column =================== -->
+          <g>
+            <text class="comp-label dim" x="908" y="48">CHARACTER</text>
+            <text class="comp-label"     x="908" y="66" style="text-transform:none; letter-spacing:0.04em; font-size:11px;">VCA · clean</text>
+
+            <text class="comp-label dim" x="908" y="100">DETECTION</text>
+            <text class="comp-label"     x="908" y="118" style="text-transform:none; letter-spacing:0.04em; font-size:11px;">RMS · 5 ms</text>
+
+            <text class="comp-label dim" x="908" y="152">SIDE-CHAIN</text>
+            <text class="comp-label ok"  x="908" y="170" style="text-transform:none; letter-spacing:0.04em; font-size:11px;">HPF @ 80 Hz</text>
+
+            <text class="comp-label dim" x="908" y="204">MAKE-UP</text>
+            <text class="comp-label"     x="908" y="222" style="text-transform:none; letter-spacing:0.04em; font-size:11px;">auto · +3.8</text>
+
+            <text class="comp-label dim" x="908" y="256">PEAK IN</text>
+            <text class="comp-label"     x="908" y="274" style="text-transform:none; letter-spacing:0.04em; font-size:11px;">−6.1 dBFS</text>
+
+            <text class="comp-label dim" x="908" y="298">PEAK OUT</text>
+            <text class="comp-label"     x="908" y="316" style="text-transform:none; letter-spacing:0.04em; font-size:11px;">−2.3 dBFS</text>
+          </g>
+        </svg>
+      </div>
+
+      <!-- =================== Knob row =================== -->
+      <div class="comp-knobs">
+
+        <!-- Threshold: −18 dB.  Knob arc maps full range −60 → 0 dB across 270°.
+             arc start = 135°, end = 405° (or equivalently −90° to 180°).
+             For −18: pct = (−18 − −60)/60 = 0.70 → angle = 135 + 0.70*270 = 324° -->
+        <div class="comp-knob">
+          <span class="comp-knob-eyebrow">Threshold</span>
+          <svg class="comp-knob-body" viewBox="0 0 52 52">
+            <circle class="comp-knob-base" cx="26" cy="26" r="20"/>
+            <path class="comp-knob-track"
+                  d="M 11.93 40.07 A 20 20 0 1 1 40.07 40.07"/>
+            <!-- arc from 135° to 324°. start (11.93, 40.07). end at 324°: (26+20cos324,26+20sin324)=(42.18,14.24).
+                 sweep 189° (large-arc-flag = 1) -->
+            <path class="comp-knob-arc"
+                  d="M 11.93 40.07 A 20 20 0 1 1 42.18 14.24"/>
+            <!-- indicator line from center (26,26) toward (26+16*cos324,26+16*sin324)=(38.94,16.59) -->
+            <line class="comp-knob-indicator" x1="26" y1="26" x2="38.94" y2="16.59"/>
+          </svg>
+          <span class="comp-knob-value">−18.0</span>
+          <span class="comp-knob-unit">dB</span>
+        </div>
+
+        <!-- Ratio: 4:1.  Range 1 → 20.  Map log-ish.
+             pct = (log(4)/log(20)) ≈ 0.463 → angle = 135 + 0.463*270 ≈ 260° -->
+        <div class="comp-knob">
+          <span class="comp-knob-eyebrow">Ratio</span>
+          <svg class="comp-knob-body" viewBox="0 0 52 52">
+            <circle class="comp-knob-base" cx="26" cy="26" r="20"/>
+            <path class="comp-knob-track" d="M 11.93 40.07 A 20 20 0 1 1 40.07 40.07"/>
+            <!-- 135° → 260°: end at (26+20cos260,26+20sin260)=(22.53,45.70).
+                 sweep 125° (large-arc-flag=0) -->
+            <path class="comp-knob-arc"
+                  d="M 11.93 40.07 A 20 20 0 0 1 22.53 45.70"/>
+            <!-- indicator toward 260°: (26+16cos260,26+16sin260)=(23.22,41.76) -->
+            <line class="comp-knob-indicator" x1="26" y1="26" x2="23.22" y2="41.76"/>
+          </svg>
+          <span class="comp-knob-value">4 : 1</span>
+          <span class="comp-knob-unit">ratio</span>
+        </div>
+
+        <!-- Attack: 12 ms.  Range 0.1 → 100 ms log.
+             pct = log10(12/0.1)/log10(100/0.1) = log10(120)/log10(1000) ≈ 2.079/3 ≈ 0.693
+             angle = 135 + 0.693*270 ≈ 322° -->
+        <div class="comp-knob">
+          <span class="comp-knob-eyebrow">Attack</span>
+          <svg class="comp-knob-body" viewBox="0 0 52 52">
+            <circle class="comp-knob-base" cx="26" cy="26" r="20"/>
+            <path class="comp-knob-track" d="M 11.93 40.07 A 20 20 0 1 1 40.07 40.07"/>
+            <!-- 135° → 322°: end at (26+20cos322,26+20sin322)=(41.76,13.69). sweep 187° (large-arc-flag=1) -->
+            <path class="comp-knob-arc"
+                  d="M 11.93 40.07 A 20 20 0 1 1 41.76 13.69"/>
+            <line class="comp-knob-indicator" x1="26" y1="26" x2="38.61" y2="16.16"/>
+          </svg>
+          <span class="comp-knob-value">12</span>
+          <span class="comp-knob-unit">ms</span>
+        </div>
+
+        <!-- Release: 180 ms.  Range 10 → 2000 ms log.
+             pct = log10(180/10)/log10(2000/10) = log10(18)/log10(200) ≈ 1.255/2.301 ≈ 0.546
+             angle = 135 + 0.546*270 ≈ 282° -->
+        <div class="comp-knob">
+          <span class="comp-knob-eyebrow">Release</span>
+          <svg class="comp-knob-body" viewBox="0 0 52 52">
+            <circle class="comp-knob-base" cx="26" cy="26" r="20"/>
+            <path class="comp-knob-track" d="M 11.93 40.07 A 20 20 0 1 1 40.07 40.07"/>
+            <!-- 135° → 282°: end at (26+20cos282,26+20sin282)=(30.16,45.56). sweep 147° (large-arc-flag=0) -->
+            <path class="comp-knob-arc"
+                  d="M 11.93 40.07 A 20 20 0 0 1 30.16 45.56"/>
+            <line class="comp-knob-indicator" x1="26" y1="26" x2="29.32" y2="41.65"/>
+          </svg>
+          <span class="comp-knob-value">180</span>
+          <span class="comp-knob-unit">ms</span>
+        </div>
+
+        <!-- Make-up: +3.8 dB.  Range 0 → +24 dB.
+             pct = 3.8/24 ≈ 0.158 → angle = 135 + 0.158*270 ≈ 178° -->
+        <div class="comp-knob">
+          <span class="comp-knob-eyebrow">Make-up</span>
+          <svg class="comp-knob-body" viewBox="0 0 52 52">
+            <circle class="comp-knob-base" cx="26" cy="26" r="20"/>
+            <path class="comp-knob-track" d="M 11.93 40.07 A 20 20 0 1 1 40.07 40.07"/>
+            <!-- 135° → 178°: end at (26+20cos178,26+20sin178)=(6.01,26.70). sweep 43° (large-arc-flag=0) -->
+            <path class="comp-knob-arc"
+                  d="M 11.93 40.07 A 20 20 0 0 1 6.01 26.70"/>
+            <line class="comp-knob-indicator" x1="26" y1="26" x2="10.01" y2="26.56"/>
+          </svg>
+          <span class="comp-knob-value">+3.8</span>
+          <span class="comp-knob-unit">dB</span>
+        </div>
+
+      </div>
+
+      <!-- Side-chain / smart row -->
+      <div class="comp-sidechain">
+        <span class="seq-smart-label">Side-chain</span>
+        <button class="seq-btn active">Internal</button>
+        <button class="seq-btn">External</button>
+        <button class="seq-btn">HPF 80 Hz</button>
+        <button class="seq-btn">Listen</button>
+        <span class="comp-sc-meta">Auto make-up <strong>on</strong> · Knee 6 dB · Lookahead 0 ms</span>
+      </div>
+
+    </div>
+
+    <div class="mixer-hint">
+      <span><kbd>drag</kbd>knob — value</span>
+      <span><kbd>shift+drag</kbd>fine</span>
+      <span><kbd>scroll</kbd>over knob</span>
+      <span><kbd>dbl-click</kbd>reset to default</span>
+      <span><kbd>alt-click</kbd>compare A/B</span>
+    </div>
+
+    <div class="grid grid-2" style="margin-top: var(--s-5);">
+      <div class="card">
+        <div class="card-eyebrow">Reading the curve</div>
+        <p class="muted">
+          The dashed gold diagonal is unity — what comes in, goes out. The white curve
+          peels off it at the threshold, bending toward a 4:1 slope. The amber band is the
+          knee — the curve bends through it rather than at a hard corner. The green dot is
+          live input: where it sits on the curve tells you, in one glance, how much gain
+          reduction you're applying right now.
+        </p>
+      </div>
+      <div class="card">
+        <div class="card-eyebrow">Why a single picture works</div>
+        <p class="muted">
+          Three values that engineers normally hold in their head — threshold, ratio, knee —
+          live on the page as a single shape. Change a knob, the curve moves; you don't have
+          to translate. The GR meter is the consequence: same physics, expressed as how
+          much the loud parts are being held back at this moment.
+        </p>
+      </div>
+    </div>
+
+    <div class="callout callout-tip">
+      <span class="mark">Decision · 04b</span>
+      <p>
+        Every dynamics plugin in the suite — bus comp, channel comp, de-esser, limiter,
+        multiband — uses this same chassis: transfer curve, GR meter, knob row. Same
+        place for the same controls, same surface, same accent. Learn one, learn all five.
       </p>
     </div>
   </section>

@@ -172,14 +172,58 @@
   display: flex;
 }
 
-.mixer-console {
+/* Two-row console layout:
+ *   .mixer-console-area  ← takes the left side of .mixer-body
+ *     .mixer-console-h-scroll  ← horizontal scroll for many strips
+ *       .mixer-console-stack    ← controls row + names row stacked
+ *         .mixer-console        ← controls row (vertical scroll)
+ *         .mixer-console-names  ← scribble-strip names row (always visible)
+ *
+ * The h-scroll wraps both rows so they share one horizontal scrollbar and
+ * stay column-aligned. Vertical scroll lives on .mixer-console only, so
+ * the names row below sits OUTSIDE the vertical scroll and never gets
+ * obscured by it.
+ */
+.mixer-console-area {
   flex: 1 1 auto;
+  min-width: 0;
+  min-height: 0;
   display: flex;
-  gap: 0;
-  padding: 10px 6px;
+  flex-direction: column;
+  background: linear-gradient(180deg, #1c2028 0%, #14171c 100%);
+}
+
+.mixer-console-h-scroll {
+  flex: 1 1 auto;
+  min-height: 0;
   overflow-x: auto;
   overflow-y: hidden;
-  background: linear-gradient(180deg, #1c2028 0%, #14171c 100%);
+}
+
+.mixer-console-stack {
+  display: flex;
+  flex-direction: column;
+  min-width: max-content;
+  height: 100%;
+}
+
+.mixer-console {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  gap: 0;
+  padding: 10px 6px 0;
+  overflow-x: hidden;
+  overflow-y: auto;
+}
+
+.mixer-console-names {
+  flex: 0 0 auto;
+  display: flex;
+  padding: 0 6px 10px;
+  border-top: 1px solid #0a0c10;
+  background: linear-gradient(180deg, #1a1e25, #14171c);
+  box-shadow: 0 -2px 6px rgba(0, 0, 0, 0.4);
 }
 
 /* ─── Bus rail (Master + future user buses) ────────────────────────── */
@@ -205,13 +249,26 @@
 }
 
 .bus-strip .ch-name {
-  position: relative;
+  /* Bus strips show their name as a top header on the strip itself
+     (different from the channel-strip names which live in their own
+     bottom row). flex: 0 0 auto is load-bearing — without it the
+     master strip's extra children (Ref Room + Limiter sections) under
+     a fixed-height parent squeeze the header and clip the top of the
+     letters. */
+  flex: 0 0 auto;
   background: linear-gradient(180deg, #344058, #1c2638);
-  color: #dce7f5;
-  letter-spacing: 0.18em;
+  color: #f0f6ff;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  padding: 8px 4px;
+  line-height: 1.2;
+  border-bottom: 1px solid #0a0c10;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.08);
 }
 
 .bus-strip .ch-meta {
+  flex: 0 0 auto;
   color: #6b7280;
   letter-spacing: 0.15em;
   text-transform: uppercase;
@@ -670,6 +727,7 @@
   position: relative;
   transition: border-color 120ms ease, box-shadow 120ms ease;
   min-height: 360px;
+  min-width: 0;
 }
 
 .ch-strip.muted {
@@ -680,20 +738,47 @@
   border-color: rgba(197, 213, 236, 0.18);
 }
 
+/* Track name cell — shared by:
+ *   - the scribble-strip row at the bottom of the mixer console
+ *     (.mixer-console-names .ch-name)
+ *   - the bus strip header at the top of each bus
+ *     (.bus-strip .ch-name)
+ * Base provides the type/colour treatment; row-specific layout (width,
+ * margin) lives in those contexts below. */
 .ch-name {
   text-align: center;
   font-size: 10px;
-  letter-spacing: 0.12em;
+  letter-spacing: 0.06em;
   font-weight: 500;
   color: #dce7f5;
-  padding: 7px 4px;
+  padding: 7px 6px;
   background: linear-gradient(180deg, #2a3038, #14171c);
-  border-bottom: 1px solid #0a0c10;
   text-transform: uppercase;
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.05);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+  /* The full name lives in the title attribute — hover for the long form. */
+}
+
+/* Names-row cells — one per strip column, kept in 1:1 alignment with the
+   strips above by mirroring .ch-strip's 88 px width + 2 px side margin. */
+.mixer-console-names .ch-name {
+  width: 88px;
+  margin: 0 2px;
+  padding: 8px 6px;
+  border: 1px solid #0a0c10;
+  border-top: 0;
+  border-radius: 0 0 3px 3px;
+  /* Brighter gradient + faint top hairline so the scribble strip reads as
+     a distinct "name plate" rather than blending into the dark band below
+     the controls. */
+  background: linear-gradient(180deg, #3a4250, #1f242c);
+  color: #e8eef7;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.1), inset 0 -1px 0 rgba(0, 0, 0, 0.3);
+}
+
+.mixer-console-names .ch-name.muted {
+  opacity: 0.5;
 }
 
 .ch-meta {
@@ -881,6 +966,127 @@
 }
 
 .ch-transient .knob-readout {
+  font-size: 8px;
+  color: #939aa5;
+}
+
+/* ─── DeEss row (split-band sibilance tamer) ───────────────────────── */
+
+.ch-deess {
+  padding: 6px 6px 8px;
+  border-bottom: 1px solid #0a0c10;
+  background: rgba(0, 0, 0, 0.2);
+}
+
+.ch-deess-toggle {
+  width: 100%;
+  height: 16px;
+  margin-bottom: 6px;
+  font-family: var(--font-mono);
+  font-size: 8px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  background: linear-gradient(180deg, #2a3038, #14171c);
+  border: 1px solid #0a0c10;
+  border-radius: 2px;
+  color: #6b7280;
+  cursor: pointer;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.06);
+  transition: color 100ms ease, background 100ms ease;
+}
+
+.ch-deess-toggle:hover:not(.on) {
+  color: #c5d5ec;
+}
+
+.ch-deess-toggle.on {
+  background: linear-gradient(180deg, #3a4a60, #182030);
+  color: #dce7f5;
+  border-color: rgba(120, 180, 255, 0.4);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.14), 0 0 6px rgba(120, 180, 255, 0.25);
+}
+
+.ch-deess-knobs {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 4px;
+}
+
+.ch-deess .knob-wrap {
+  gap: 3px;
+}
+
+.ch-deess .knob {
+  width: 22px;
+  height: 22px;
+}
+
+.ch-deess .knob-label {
+  font-size: 7px;
+}
+
+.ch-deess .knob-readout {
+  font-size: 8px;
+  color: #939aa5;
+}
+
+/* ─── Imager row (M/S stereo width) ────────────────────────────────── */
+
+.ch-imager {
+  padding: 6px 6px 8px;
+  border-bottom: 1px solid #0a0c10;
+  background: rgba(0, 0, 0, 0.2);
+}
+
+.ch-imager-toggle {
+  width: 100%;
+  height: 16px;
+  margin-bottom: 6px;
+  font-family: var(--font-mono);
+  font-size: 8px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  background: linear-gradient(180deg, #2a3038, #14171c);
+  border: 1px solid #0a0c10;
+  border-radius: 2px;
+  color: #6b7280;
+  cursor: pointer;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.06);
+  transition: color 100ms ease, background 100ms ease;
+}
+
+.ch-imager-toggle:hover:not(.on) {
+  color: #c5d5ec;
+}
+
+.ch-imager-toggle.on {
+  background: linear-gradient(180deg, #503a5c, #28182e);
+  color: #f0dcf5;
+  border-color: rgba(196, 130, 230, 0.4);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.14), 0 0 6px rgba(196, 130, 230, 0.25);
+}
+
+.ch-imager-knobs {
+  display: grid;
+  grid-template-columns: 1fr;
+  justify-items: center;
+  gap: 4px;
+}
+
+.ch-imager .knob-wrap {
+  gap: 3px;
+}
+
+.ch-imager .knob {
+  width: 22px;
+  height: 22px;
+}
+
+.ch-imager .knob-label {
+  font-size: 7px;
+}
+
+.ch-imager .knob-readout {
   font-size: 8px;
   color: #939aa5;
 }
@@ -1400,4 +1606,391 @@
 .bus-name-edit:focus-visible {
   outline: none;
   box-shadow: 0 0 0 1px var(--azure, #2e5fa8);
+}
+
+/* ─── Stem timeline (read-only) ────────────────────────────────────── */
+
+.stem-timeline {
+  position: relative;
+  flex: 0 0 auto;
+  background: linear-gradient(180deg, #14171c 0%, #0d1015 100%);
+  border-top: 1px solid #000;
+  border-bottom: 1px solid #000;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04);
+  overflow: hidden;
+}
+
+.stem-timeline.empty {
+  padding: 14px;
+}
+
+.stem-timeline-empty {
+  color: #6b7280;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  text-align: center;
+  letter-spacing: 0.08em;
+}
+
+.stem-timeline-ruler {
+  display: flex;
+  height: 18px;
+  background: #0a0c10;
+  border-bottom: 1px solid #000;
+}
+
+.stem-timeline-ruler-spacer {
+  flex: 0 0 auto;
+  border-right: 1px solid rgba(255, 255, 255, 0.04);
+}
+
+.stem-timeline-ruler-marks {
+  position: relative;
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.stem-timeline-ruler-tick {
+  position: absolute;
+  top: 0;
+  height: 100%;
+  width: 1px;
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.stem-timeline-ruler-label {
+  position: absolute;
+  top: 2px;
+  left: 4px;
+  font-family: var(--font-mono);
+  font-size: 9px;
+  letter-spacing: 0.06em;
+  color: #6b7280;
+  white-space: nowrap;
+}
+
+.stem-timeline-lanes {
+  /* Show ~6 lanes (≈360 px) before scrolling kicks in. Capped at 40vh so
+     a tall stem list never crowds out the mixer console underneath. */
+  max-height: min(40vh, 360px);
+  overflow-y: auto;
+}
+
+.stem-lane {
+  display: flex;
+  align-items: stretch;
+  border-bottom: 1px solid rgba(0, 0, 0, 0.6);
+  background: rgba(0, 0, 0, 0.1);
+}
+
+.stem-lane:last-child {
+  border-bottom: 0;
+}
+
+.stem-lane.muted .stem-lane-wave {
+  opacity: 0.35;
+}
+
+.stem-lane-name {
+  flex: 0 0 auto;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  padding: 6px 8px 6px 10px;
+  background: linear-gradient(180deg, #1a1e25, #14171c);
+  border-right: 1px solid rgba(255, 255, 255, 0.04);
+  box-shadow: inset -1px 0 0 rgba(0, 0, 0, 0.4);
+  min-width: 0;
+}
+
+.stem-lane-title {
+  font-size: 10px;
+  color: #dce7f5;
+  letter-spacing: 0.04em;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.stem-lane-btns {
+  display: flex;
+  gap: 4px;
+  margin-top: 6px;
+}
+
+.stem-lane-btn {
+  width: 22px;
+  height: 16px;
+  background: linear-gradient(180deg, #2a3038, #14171c);
+  border: 1px solid #0a0c10;
+  border-radius: 2px;
+  color: #6b7280;
+  font-family: var(--font-mono);
+  font-size: 9px;
+  letter-spacing: 0.06em;
+  cursor: pointer;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.06);
+  transition: color 100ms ease, background 100ms ease;
+}
+
+.stem-lane-btn.solo.on {
+  background: linear-gradient(180deg, #6a5a26, #382e10);
+  color: #f6e9b8;
+  border-color: rgba(228, 203, 94, 0.4);
+}
+
+.stem-lane-btn.mute.on {
+  background: linear-gradient(180deg, #6a2828, #381010);
+  color: #f5c5c5;
+  border-color: rgba(229, 92, 76, 0.4);
+}
+
+.stem-lane-wave {
+  flex: 1 1 auto;
+  min-width: 0;
+  position: relative;
+  background: #0a0c10;
+}
+
+.stem-lane-wave-canvas-wrap {
+  position: absolute;
+  inset: 0;
+}
+
+.stem-lane-wave-canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+.stem-lane-loading {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-family: var(--font-mono);
+  font-size: 9px;
+  letter-spacing: 0.08em;
+  color: #4a525e;
+}
+
+/* Track: invisible click-receiving overlay across all lanes. The playhead
+   div sits on top of this (z-index 2) so the click target stays underneath. */
+.stem-timeline-track {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  cursor: crosshair;
+  z-index: 1;
+}
+
+.stem-timeline-track:focus-visible {
+  outline: none;
+  box-shadow: inset 0 0 0 1px rgba(46, 95, 168, 0.4);
+}
+
+.stem-timeline-playhead {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 2px;
+  background: #e55c4c;
+  box-shadow: 0 0 8px rgba(229, 92, 76, 0.6);
+  pointer-events: none;
+  z-index: 2;
+}
+
+/* Always-visible top handle — a downward-pointing triangle that sits over
+   the ruler, so the playhead can be found at a glance even at position 0
+   against the dark background. */
+.stem-timeline-playhead::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: -5px;
+  width: 0;
+  height: 0;
+  border-left: 6px solid transparent;
+  border-right: 6px solid transparent;
+  border-top: 8px solid #e55c4c;
+  filter: drop-shadow(0 0 4px rgba(229, 92, 76, 0.65));
+}
+
+.stem-timeline-playhead.playing::after {
+  content: "";
+  position: absolute;
+  top: 8px;
+  left: -3px;
+  width: 8px;
+  height: 8px;
+  background: #e55c4c;
+  border-radius: 50%;
+  box-shadow: 0 0 10px rgba(229, 92, 76, 0.85);
+  animation: aux-playhead-pulse 1.4s ease-in-out infinite;
+}
+
+@keyframes aux-playhead-pulse {
+  0%,
+  100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 0.7;
+    transform: scale(1.2);
+  }
+}
+
+/* Collapsed state — show only a thin strip with a "show timeline" affordance. */
+.mixer.timeline-closed .stem-timeline {
+  display: none;
+}
+
+.transport-timeline-btn {
+  min-height: 28px;
+  padding: 0 12px;
+  background: linear-gradient(180deg, #3a4048, #1c2028);
+  border: 1px solid #000;
+  border-radius: 3px;
+  color: #dce7f5;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.18), inset 0 -1px 0 rgba(0, 0, 0, 0.4), 0 1px 2px
+    rgba(0, 0, 0, 0.4);
+  transition: background 100ms ease;
+}
+
+.transport-timeline-btn:hover {
+  background: linear-gradient(180deg, #4a525e, #242830);
+}
+
+.transport-timeline-btn.on {
+  background: linear-gradient(180deg, #2e5fa8, #14355f);
+  color: #dce7f5;
+  border-color: #000;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.18), 0 0 6px rgba(46, 95, 168, 0.35);
+}
+
+/* ─── Reference Room (Master strip only) ────────────────────────────── */
+
+.bus-ref-room {
+  padding: 8px 6px;
+  border-bottom: 1px solid #0a0c10;
+  background: rgba(46, 95, 168, 0.06);
+}
+
+.bus-ref-room-label {
+  font-family: var(--font-mono);
+  font-size: 9px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: #6b7280;
+  margin-bottom: 6px;
+  text-align: center;
+}
+
+.bus-ref-room-grid {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.bus-ref-room-btn {
+  width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
+  height: 18px;
+  padding: 0 4px;
+  font-family: var(--font-mono);
+  font-size: 9px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  background: linear-gradient(180deg, #2a3038, #14171c);
+  border: 1px solid #0a0c10;
+  border-radius: 2px;
+  color: #6b7280;
+  cursor: pointer;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.06);
+  transition: color 100ms ease, background 100ms ease;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.bus-ref-room-btn:hover:not(.on) {
+  color: #c5d5ec;
+}
+
+.bus-ref-room-btn.on {
+  background: linear-gradient(180deg, #3a4860, #1c2638);
+  color: #dce7f5;
+  border-color: rgba(46, 95, 168, 0.45);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.14), 0 0 6px rgba(46, 95, 168, 0.3);
+}
+
+/* ─── Tape row (single-stage tape saturation) ──────────────────────── */
+
+.ch-tape {
+  padding: 6px 6px 8px;
+  border-bottom: 1px solid #0a0c10;
+  background: rgba(0, 0, 0, 0.2);
+}
+
+.ch-tape-toggle {
+  width: 100%;
+  height: 16px;
+  margin-bottom: 6px;
+  font-family: var(--font-mono);
+  font-size: 8px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  background: linear-gradient(180deg, #2a3038, #14171c);
+  border: 1px solid #0a0c10;
+  border-radius: 2px;
+  color: #6b7280;
+  cursor: pointer;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.06);
+  transition: color 100ms ease, background 100ms ease;
+}
+
+.ch-tape-toggle:hover:not(.on) {
+  color: #c5d5ec;
+}
+
+.ch-tape-toggle.on {
+  background: linear-gradient(180deg, #5a3e2a, #2e1e10);
+  color: #f5e1c8;
+  border-color: rgba(214, 154, 92, 0.4);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.14), 0 0 6px rgba(214, 154, 92, 0.25);
+}
+
+.ch-tape-knobs {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr;
+  gap: 3px;
+}
+
+.ch-tape .knob-wrap {
+  gap: 3px;
+}
+
+.ch-tape .knob {
+  width: 20px;
+  height: 20px;
+}
+
+.ch-tape .knob-label {
+  font-size: 7px;
+}
+
+.ch-tape .knob-readout {
+  font-size: 8px;
+  color: #939aa5;
 }

@@ -1,6 +1,6 @@
 'use client';
 
-import type { AudioHost, ReverbKind } from '@aux/audio-engine';
+import type { AudioHost, ReferenceRoomPreset, ReverbKind } from '@aux/audio-engine';
 import type { BusState, LimiterState, ReverbState } from '@aux/session-doc';
 import { useEffect, useRef, useState } from 'react';
 import { Fader } from './_fader';
@@ -27,6 +27,9 @@ interface Props {
   onRemoveReverb?: () => void;
   onReverb?: (field: 'decay' | 'damping' | 'preDelayMs' | 'mix', value: number) => void;
   onReverbBypass?: () => void;
+  /** Master-only — monitoring preset that filters the post-master output. */
+  referenceRoom?: ReferenceRoomPreset;
+  onReferenceRoom?: (preset: ReferenceRoomPreset) => void;
 }
 
 // Same dB ↔ position mapping as the channel fader.
@@ -92,6 +95,8 @@ export function BusStrip({
   onRemoveReverb,
   onReverb,
   onReverbBypass,
+  referenceRoom,
+  onReferenceRoom,
 }: Props) {
   const [editing, setEditing] = useState(false);
   const [draftName, setDraftName] = useState(bus.name);
@@ -163,6 +168,10 @@ export function BusStrip({
         </div>
       )}
       <div className="ch-meta">bus</div>
+
+      {referenceRoom != null && onReferenceRoom && (
+        <ReferenceRoomPicker value={referenceRoom} onChange={onReferenceRoom} />
+      )}
 
       {limiter && onLimiter && onLimiterBypass && (
         <div className="bus-limiter">
@@ -309,6 +318,43 @@ export function BusStrip({
 
       <div className="ch-readout">
         <div className="ch-db">{formatDb(bus.gain)} dB</div>
+      </div>
+    </div>
+  );
+}
+
+// ─── Reference Room (Master strip only) ─────────────────────────────────
+
+const REFERENCE_ROOM_OPTIONS: ReadonlyArray<{ value: ReferenceRoomPreset; label: string }> = [
+  { value: 'off', label: 'Off' },
+  { value: 'laptop', label: 'Laptop' },
+  { value: 'earbuds', label: 'Earbuds' },
+  { value: 'car', label: 'Car' },
+];
+
+function ReferenceRoomPicker({
+  value,
+  onChange,
+}: {
+  value: ReferenceRoomPreset;
+  onChange: (preset: ReferenceRoomPreset) => void;
+}) {
+  return (
+    <div className="bus-ref-room">
+      <div className="bus-ref-room-label">Ref Room</div>
+      <div className="bus-ref-room-grid" aria-label="Reference room preset">
+        {REFERENCE_ROOM_OPTIONS.map((opt) => (
+          <button
+            key={opt.value}
+            type="button"
+            className={`bus-ref-room-btn ${value === opt.value ? 'on' : ''}`}
+            onClick={() => onChange(opt.value)}
+            aria-pressed={value === opt.value}
+            title={`Reference monitor: ${opt.label}`}
+          >
+            {opt.label}
+          </button>
+        ))}
       </div>
     </div>
   );

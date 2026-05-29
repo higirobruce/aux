@@ -1,0 +1,23 @@
+{
+  "name": "@aux/dsp-imager",
+  "version": "0.1.0",
+  "private": true,
+  "description": "M/S stereo imager — Rust DSP compiled to WASM.",
+  "type": "module",
+  "main": "./wasm/imager.js",
+  "types": "./wasm/imager.d.ts",
+  "files": ["wasm"],
+  "exports": {
+    ".": {
+      "types": "./wasm/imager.d.ts",
+      "default": "./wasm/imager.js"
+    },
+    "./imager_bg.wasm": "./wasm/imager_bg.wasm",
+    "./package.json": "./package.json"
+  },
+  "scripts": {
+    "build": "wasm-pack build --release --target web --out-dir wasm --out-name imager && rm -f wasm/.gitignore wasm/package.json",
+    "test:rust": "cargo test --release",
+    "clean": "rm -rf wasm target"
+  }
+}
