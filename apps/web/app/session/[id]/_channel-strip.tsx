@@ -3,6 +3,8 @@
 import type { Stem } from '@/lib/types';
 import type { AudioHost } from '@aux/audio-engine';
 import type { BusState, CompType } from '@aux/session-doc';
+import type { Accent } from '@aux/ui';
+import { type ReactNode, useState } from 'react';
 import { Fader } from './_fader';
 import { Knob } from './_knob';
 import { Meter } from './_meter';
@@ -160,6 +162,76 @@ function volumeToPosition(volume: number): number {
   return FADER_UNITY_POS + (db / FADER_MAX_DB) * (1 - FADER_UNITY_POS);
 }
 
+// ─── Insert accordion (design StripModule) ──────────────────────────────
+// Each fixed-chain insert is a collapsible module: a header row with a
+// toggle dot (filled = on → knobs shown; hollow = off → knobs hidden), the
+// insert label, and a ↗ that opens the floating plugin window. Mirrors the
+// design's StripModule.
+
+const ACCENT_VAR: Record<Accent, string> = {
+  gold: 'var(--gold)',
+  rust: 'var(--rust)',
+  sage: 'var(--sage)',
+  teal: 'var(--teal)',
+  mauve: 'var(--mauve)',
+  violet: 'var(--violet)',
+  red: 'var(--red)',
+  green: 'var(--green)',
+  neutral: 'var(--txt-2)',
+};
+
+function StripModule({
+  label,
+  accent,
+  on,
+  onToggle,
+  onOpen,
+  children,
+}: {
+  label: string;
+  accent: Accent;
+  /** Filled dot + knobs shown when true. */
+  on: boolean;
+  onToggle: () => void;
+  /** Opens the floating plugin window (undefined → no ↗, header inert). */
+  onOpen?: () => void;
+  children: ReactNode;
+}) {
+  return (
+    <div
+      className="ch-mod"
+      data-on={on}
+      style={{ '--mod': ACCENT_VAR[accent] } as React.CSSProperties}
+    >
+      <div className="ch-mod-head2">
+        <button
+          type="button"
+          className="ch-mod-dot"
+          aria-pressed={on}
+          aria-label={`${label} ${on ? 'on' : 'off'}`}
+          title={on ? `${label} on — click to bypass` : `${label} off — click to engage`}
+          onClick={onToggle}
+        />
+        <button
+          type="button"
+          className="ch-mod-open-btn"
+          onClick={onOpen}
+          disabled={!onOpen}
+          title={onOpen ? `Open ${label}` : undefined}
+        >
+          <span className="ch-mod-label">{label}</span>
+          {onOpen && (
+            <span className="ch-mod-open" aria-hidden="true">
+              ↗
+            </span>
+          )}
+        </button>
+      </div>
+      {on && <div className="ch-mod-body">{children}</div>}
+    </div>
+  );
+}
+
 // ─── Strip ──────────────────────────────────────────────────────────────
 
 export function ChannelStrip({
@@ -196,6 +268,18 @@ export function ChannelStrip({
 }: Props) {
   const effectivelyMuted = state.muted || (anySoloed && !state.soloed);
 
+  // EQ and Comp have no engine bypass, so their accordion dot is a UI-only
+  // collapse (show/hide the quick knobs); the ↗ still opens the full window.
+  const [collapsed, setCollapsed] = useState<Set<string>>(() => new Set());
+  const isOpen = (key: string) => !collapsed.has(key);
+  const toggleCollapse = (key: string) =>
+    setCollapsed((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+
   return (
     <div className={`ch-strip ${effectivelyMuted ? 'muted' : ''}`}>
       <div className="ch-meta">
@@ -206,21 +290,20 @@ export function ChannelStrip({
       {/* Processing chain scrolls inside the strip; the fader/meter footer
           below stays pinned (design: "scrollable only on the plugins"). */}
       <div className="ch-chain">
-        <button
-          type="button"
-          className="ch-mod-head"
-          onClick={() => onOpenPlugin?.('eq')}
-          title="Open EQ"
+        <StripModule
+          label="EQ"
+          accent="gold"
+          on={isOpen('eq')}
+          onToggle={() => toggleCollapse('eq')}
+          onOpen={() => onOpenPlugin?.('eq')}
         >
-          EQ
-        </button>
-        <div className="ch-eq">
           <div className="knob-wrap">
             <Knob
               value={state.eq.lo}
               min={EQ_KNOB_MIN_DB}
               max={EQ_KNOB_MAX_DB}
               defaultValue={0}
+              accent="gold"
               ariaLabel={`${stem.name} EQ low`}
               onChange={(v) => onEq('lo', v)}
             />
@@ -233,6 +316,7 @@ export function ChannelStrip({
               min={EQ_KNOB_MIN_DB}
               max={EQ_KNOB_MAX_DB}
               defaultValue={0}
+              accent="gold"
               ariaLabel={`${stem.name} EQ mid`}
               onChange={(v) => onEq('mid', v)}
             />
@@ -245,343 +329,316 @@ export function ChannelStrip({
               min={EQ_KNOB_MIN_DB}
               max={EQ_KNOB_MAX_DB}
               defaultValue={0}
+              accent="gold"
               ariaLabel={`${stem.name} EQ high`}
               onChange={(v) => onEq('hi', v)}
             />
             <span className="knob-label">Hi</span>
             <span className="knob-readout">{formatEqDb(state.eq.hi)}</span>
           </div>
-        </div>
+        </StripModule>
 
-        <button
-          type="button"
-          className="ch-mod-head"
-          onClick={() => onOpenPlugin?.('comp')}
-          title="Open Compressor"
+        <StripModule
+          label="COMP"
+          accent="sage"
+          on={isOpen('comp')}
+          onToggle={() => toggleCollapse('comp')}
+          onOpen={() => onOpenPlugin?.('comp')}
         >
-          COMP
-        </button>
-        <div className="ch-comp">
-          <fieldset className="ch-comp-type">
-            <legend className="sr-only">{stem.name} comp flavour</legend>
-            <label className={`ch-comp-type-btn ${state.compType === 'clean' ? 'on' : ''}`}>
-              <input
-                type="radio"
-                name={`comp-type-${stem.id}`}
-                value="clean"
-                checked={state.compType === 'clean'}
-                onChange={() => onCompType('clean')}
-                className="sr-only"
-              />
-              Clean
-            </label>
-            <label className={`ch-comp-type-btn ${state.compType === 'color' ? 'on' : ''}`}>
-              <input
-                type="radio"
-                name={`comp-type-${stem.id}`}
-                value="color"
-                checked={state.compType === 'color'}
-                onChange={() => onCompType('color')}
-                className="sr-only"
-              />
-              Color
-            </label>
-          </fieldset>
-          <div className="ch-comp-knobs">
-            <div className="knob-wrap">
-              <Knob
-                value={state.comp.threshold}
-                min={COMP_THRESH_MIN}
-                max={COMP_THRESH_MAX}
-                defaultValue={0}
-                ariaLabel={`${stem.name} comp threshold`}
-                onChange={(v) => onComp('threshold', v)}
-              />
-              <span className="knob-label">Th</span>
-              <span className="knob-readout">{formatThresh(state.comp.threshold)}</span>
-            </div>
-            <div className="knob-wrap">
-              <Knob
-                value={state.comp.ratio}
-                min={COMP_RATIO_MIN}
-                max={COMP_RATIO_MAX}
-                defaultValue={1}
-                ariaLabel={`${stem.name} comp ratio`}
-                onChange={(v) => onComp('ratio', v)}
-              />
-              <span className="knob-label">Rt</span>
-              <span className="knob-readout">{formatRatio(state.comp.ratio)}</span>
+          <div className="ch-comp-stack">
+            <fieldset className="ch-comp-type">
+              <legend className="sr-only">{stem.name} comp flavour</legend>
+              <label className={`ch-comp-type-btn ${state.compType === 'clean' ? 'on' : ''}`}>
+                <input
+                  type="radio"
+                  name={`comp-type-${stem.id}`}
+                  value="clean"
+                  checked={state.compType === 'clean'}
+                  onChange={() => onCompType('clean')}
+                  className="sr-only"
+                />
+                Clean
+              </label>
+              <label className={`ch-comp-type-btn ${state.compType === 'color' ? 'on' : ''}`}>
+                <input
+                  type="radio"
+                  name={`comp-type-${stem.id}`}
+                  value="color"
+                  checked={state.compType === 'color'}
+                  onChange={() => onCompType('color')}
+                  className="sr-only"
+                />
+                Color
+              </label>
+            </fieldset>
+            <div className="ch-comp-knobs">
+              <div className="knob-wrap">
+                <Knob
+                  value={state.comp.threshold}
+                  min={COMP_THRESH_MIN}
+                  max={COMP_THRESH_MAX}
+                  defaultValue={0}
+                  accent="sage"
+                  ariaLabel={`${stem.name} comp threshold`}
+                  onChange={(v) => onComp('threshold', v)}
+                />
+                <span className="knob-label">Th</span>
+                <span className="knob-readout">{formatThresh(state.comp.threshold)}</span>
+              </div>
+              <div className="knob-wrap">
+                <Knob
+                  value={state.comp.ratio}
+                  min={COMP_RATIO_MIN}
+                  max={COMP_RATIO_MAX}
+                  defaultValue={1}
+                  accent="sage"
+                  ariaLabel={`${stem.name} comp ratio`}
+                  onChange={(v) => onComp('ratio', v)}
+                />
+                <span className="knob-label">Rt</span>
+                <span className="knob-readout">{formatRatio(state.comp.ratio)}</span>
+              </div>
             </div>
           </div>
-        </div>
+        </StripModule>
 
-        <div className="ch-transient">
-          <button
-            type="button"
-            className={`ch-transient-toggle ${state.transient.bypassed ? '' : 'on'}`}
-            onClick={onTransientBypass}
-            aria-pressed={!state.transient.bypassed}
-            title={
-              state.transient.bypassed ? 'Transient bypassed — click to engage' : 'Transient active'
-            }
-          >
-            Trans
-          </button>
-          <div className="ch-transient-knobs">
-            <div className="knob-wrap">
-              <Knob
-                value={state.transient.attack}
-                min={-1}
-                max={1}
-                defaultValue={0}
-                ariaLabel={`${stem.name} transient attack`}
-                onChange={(v) => onTransient('attack', v)}
-              />
-              <span className="knob-label">Att</span>
-              <span className="knob-readout">{formatTransient(state.transient.attack)}</span>
-            </div>
-            <div className="knob-wrap">
-              <Knob
-                value={state.transient.sustain}
-                min={-1}
-                max={1}
-                defaultValue={0}
-                ariaLabel={`${stem.name} transient sustain`}
-                onChange={(v) => onTransient('sustain', v)}
-              />
-              <span className="knob-label">Sus</span>
-              <span className="knob-readout">{formatTransient(state.transient.sustain)}</span>
-            </div>
+        <StripModule
+          label="TRANS"
+          accent="teal"
+          on={!state.transient.bypassed}
+          onToggle={onTransientBypass}
+        >
+          <div className="knob-wrap">
+            <Knob
+              value={state.transient.attack}
+              min={-1}
+              max={1}
+              defaultValue={0}
+              accent="teal"
+              ariaLabel={`${stem.name} transient attack`}
+              onChange={(v) => onTransient('attack', v)}
+            />
+            <span className="knob-label">Att</span>
+            <span className="knob-readout">{formatTransient(state.transient.attack)}</span>
           </div>
-        </div>
+          <div className="knob-wrap">
+            <Knob
+              value={state.transient.sustain}
+              min={-1}
+              max={1}
+              defaultValue={0}
+              accent="teal"
+              ariaLabel={`${stem.name} transient sustain`}
+              onChange={(v) => onTransient('sustain', v)}
+            />
+            <span className="knob-label">Sus</span>
+            <span className="knob-readout">{formatTransient(state.transient.sustain)}</span>
+          </div>
+        </StripModule>
 
-        <div className="ch-deess">
-          <button
-            type="button"
-            className={`ch-deess-toggle ${state.deess.bypassed ? '' : 'on'}`}
-            onClick={onDeEssBypass}
-            aria-pressed={!state.deess.bypassed}
-            title={state.deess.bypassed ? 'De-ess bypassed — click to engage' : 'De-ess active'}
-          >
-            DeEss
-          </button>
-          <div className="ch-deess-knobs">
-            <div className="knob-wrap">
-              <Knob
-                value={state.deess.freq}
-                min={2000}
-                max={12000}
-                defaultValue={6000}
-                ariaLabel={`${stem.name} de-ess frequency`}
-                onChange={(v) => onDeEss('freq', v)}
-              />
-              <span className="knob-label">Frq</span>
-              <span className="knob-readout">{formatDeEssFreq(state.deess.freq)}</span>
-            </div>
-            <div className="knob-wrap">
-              <Knob
-                value={state.deess.amount}
-                min={0}
-                max={1}
-                defaultValue={0}
-                ariaLabel={`${stem.name} de-ess amount`}
-                onChange={(v) => onDeEss('amount', v)}
-              />
-              <span className="knob-label">Amt</span>
-              <span className="knob-readout">{formatDeEssAmount(state.deess.amount)}</span>
-            </div>
+        <StripModule
+          label="DEESS"
+          accent="teal"
+          on={!state.deess.bypassed}
+          onToggle={onDeEssBypass}
+        >
+          <div className="knob-wrap">
+            <Knob
+              value={state.deess.freq}
+              min={2000}
+              max={12000}
+              defaultValue={6000}
+              accent="teal"
+              ariaLabel={`${stem.name} de-ess frequency`}
+              onChange={(v) => onDeEss('freq', v)}
+            />
+            <span className="knob-label">Frq</span>
+            <span className="knob-readout">{formatDeEssFreq(state.deess.freq)}</span>
           </div>
-        </div>
+          <div className="knob-wrap">
+            <Knob
+              value={state.deess.amount}
+              min={0}
+              max={1}
+              defaultValue={0}
+              accent="teal"
+              ariaLabel={`${stem.name} de-ess amount`}
+              onChange={(v) => onDeEss('amount', v)}
+            />
+            <span className="knob-label">Amt</span>
+            <span className="knob-readout">{formatDeEssAmount(state.deess.amount)}</span>
+          </div>
+        </StripModule>
 
-        <div className="ch-imager">
-          <button
-            type="button"
-            className={`ch-imager-toggle ${state.imager.bypassed ? '' : 'on'}`}
-            onClick={onImagerBypass}
-            aria-pressed={!state.imager.bypassed}
-            title={state.imager.bypassed ? 'Imager bypassed — click to engage' : 'Imager active'}
-          >
-            Img
-          </button>
-          <div className="ch-imager-knobs">
-            <div className="knob-wrap">
-              <Knob
-                value={state.imager.width}
-                min={0}
-                max={2}
-                defaultValue={1}
-                ariaLabel={`${stem.name} imager width`}
-                onChange={onImager}
-              />
-              <span className="knob-label">Wid</span>
-              <span className="knob-readout">{formatImagerWidth(state.imager.width)}</span>
-            </div>
+        <StripModule
+          label="IMG"
+          accent="mauve"
+          on={!state.imager.bypassed}
+          onToggle={onImagerBypass}
+        >
+          <div className="knob-wrap">
+            <Knob
+              value={state.imager.width}
+              min={0}
+              max={2}
+              defaultValue={1}
+              accent="mauve"
+              ariaLabel={`${stem.name} imager width`}
+              onChange={onImager}
+            />
+            <span className="knob-label">Wid</span>
+            <span className="knob-readout">{formatImagerWidth(state.imager.width)}</span>
           </div>
-        </div>
+        </StripModule>
 
-        <div className="ch-tape">
-          <button
-            type="button"
-            className={`ch-tape-toggle ${state.tape.bypassed ? '' : 'on'}`}
-            onClick={onTapeBypass}
-            aria-pressed={!state.tape.bypassed}
-            title={state.tape.bypassed ? 'Tape bypassed — click to engage' : 'Tape active'}
-          >
-            Tape
-          </button>
-          <div className="ch-tape-knobs">
-            <div className="knob-wrap">
-              <Knob
-                value={state.tape.driveDb}
-                min={0}
-                max={24}
-                defaultValue={0}
-                ariaLabel={`${stem.name} tape drive`}
-                onChange={(v) => onTape('driveDb', v)}
-              />
-              <span className="knob-label">Drv</span>
-              <span className="knob-readout">{formatTapeDrive(state.tape.driveDb)}</span>
-            </div>
-            <div className="knob-wrap">
-              <Knob
-                value={state.tape.tone}
-                min={-1}
-                max={1}
-                defaultValue={0}
-                ariaLabel={`${stem.name} tape tone`}
-                onChange={(v) => onTape('tone', v)}
-              />
-              <span className="knob-label">Tone</span>
-              <span className="knob-readout">{formatTapeTone(state.tape.tone)}</span>
-            </div>
-            <div className="knob-wrap">
-              <Knob
-                value={state.tape.mix}
-                min={0}
-                max={1}
-                defaultValue={0}
-                ariaLabel={`${stem.name} tape mix`}
-                onChange={(v) => onTape('mix', v)}
-              />
-              <span className="knob-label">Mix</span>
-              <span className="knob-readout">{formatTapeMix(state.tape.mix)}</span>
-            </div>
+        <StripModule label="TAPE" accent="rust" on={!state.tape.bypassed} onToggle={onTapeBypass}>
+          <div className="knob-wrap">
+            <Knob
+              value={state.tape.driveDb}
+              min={0}
+              max={24}
+              defaultValue={0}
+              accent="rust"
+              ariaLabel={`${stem.name} tape drive`}
+              onChange={(v) => onTape('driveDb', v)}
+            />
+            <span className="knob-label">Drv</span>
+            <span className="knob-readout">{formatTapeDrive(state.tape.driveDb)}</span>
           </div>
-        </div>
+          <div className="knob-wrap">
+            <Knob
+              value={state.tape.tone}
+              min={-1}
+              max={1}
+              defaultValue={0}
+              accent="rust"
+              ariaLabel={`${stem.name} tape tone`}
+              onChange={(v) => onTape('tone', v)}
+            />
+            <span className="knob-label">Tone</span>
+            <span className="knob-readout">{formatTapeTone(state.tape.tone)}</span>
+          </div>
+          <div className="knob-wrap">
+            <Knob
+              value={state.tape.mix}
+              min={0}
+              max={1}
+              defaultValue={0}
+              accent="rust"
+              ariaLabel={`${stem.name} tape mix`}
+              onChange={(v) => onTape('mix', v)}
+            />
+            <span className="knob-label">Mix</span>
+            <span className="knob-readout">{formatTapeMix(state.tape.mix)}</span>
+          </div>
+        </StripModule>
 
-        <div className="ch-console">
-          <button
-            type="button"
-            className={`ch-console-toggle ${state.console.bypassed ? '' : 'on'}`}
-            onClick={onConsoleBypass}
-            aria-pressed={!state.console.bypassed}
-            title={state.console.bypassed ? 'Console bypassed — click to engage' : 'Console active'}
-          >
-            Cons
-          </button>
-          <div className="ch-console-knobs">
-            <div className="knob-wrap">
-              <Knob
-                value={state.console.driveDb}
-                min={0}
-                max={24}
-                defaultValue={0}
-                ariaLabel={`${stem.name} console drive`}
-                onChange={(v) => onConsole('driveDb', v)}
-              />
-              <span className="knob-label">Drv</span>
-              <span className="knob-readout">{formatTapeDrive(state.console.driveDb)}</span>
-            </div>
-            <div className="knob-wrap">
-              <Knob
-                value={state.console.character}
-                min={0}
-                max={1}
-                defaultValue={0}
-                ariaLabel={`${stem.name} console character`}
-                onChange={(v) => onConsole('character', v)}
-              />
-              <span className="knob-label">Cha</span>
-              <span className="knob-readout">
-                {formatConsoleCharacter(state.console.character)}
-              </span>
-            </div>
-            <div className="knob-wrap">
-              <Knob
-                value={state.console.mix}
-                min={0}
-                max={1}
-                defaultValue={0}
-                ariaLabel={`${stem.name} console mix`}
-                onChange={(v) => onConsole('mix', v)}
-              />
-              <span className="knob-label">Mix</span>
-              <span className="knob-readout">{formatTapeMix(state.console.mix)}</span>
-            </div>
+        <StripModule
+          label="CONS"
+          accent="violet"
+          on={!state.console.bypassed}
+          onToggle={onConsoleBypass}
+        >
+          <div className="knob-wrap">
+            <Knob
+              value={state.console.driveDb}
+              min={0}
+              max={24}
+              defaultValue={0}
+              accent="violet"
+              ariaLabel={`${stem.name} console drive`}
+              onChange={(v) => onConsole('driveDb', v)}
+            />
+            <span className="knob-label">Drv</span>
+            <span className="knob-readout">{formatTapeDrive(state.console.driveDb)}</span>
           </div>
-        </div>
+          <div className="knob-wrap">
+            <Knob
+              value={state.console.character}
+              min={0}
+              max={1}
+              defaultValue={0}
+              accent="violet"
+              ariaLabel={`${stem.name} console character`}
+              onChange={(v) => onConsole('character', v)}
+            />
+            <span className="knob-label">Cha</span>
+            <span className="knob-readout">{formatConsoleCharacter(state.console.character)}</span>
+          </div>
+          <div className="knob-wrap">
+            <Knob
+              value={state.console.mix}
+              min={0}
+              max={1}
+              defaultValue={0}
+              accent="violet"
+              ariaLabel={`${stem.name} console mix`}
+              onChange={(v) => onConsole('mix', v)}
+            />
+            <span className="knob-label">Mix</span>
+            <span className="knob-readout">{formatTapeMix(state.console.mix)}</span>
+          </div>
+        </StripModule>
 
-        <div className="ch-mbcomp">
-          <button
-            type="button"
-            className={`ch-mbcomp-toggle ${state.mbcomp.bypassed ? '' : 'on'}`}
-            onClick={onMbCompBypass}
-            aria-pressed={!state.mbcomp.bypassed}
-            title={state.mbcomp.bypassed ? 'MB-Comp bypassed — click to engage' : 'MB-Comp active'}
-          >
-            MBC
-          </button>
-          <div className="ch-mbcomp-knobs">
-            <div className="knob-wrap">
-              <Knob
-                value={state.mbcomp.loThreshDb}
-                min={COMP_THRESH_MIN}
-                max={COMP_THRESH_MAX}
-                defaultValue={0}
-                ariaLabel={`${stem.name} MB-Comp low threshold`}
-                onChange={(v) => onMbComp('loThreshDb', v)}
-              />
-              <span className="knob-label">Lo</span>
-              <span className="knob-readout">{formatThresh(state.mbcomp.loThreshDb)}</span>
-            </div>
-            <div className="knob-wrap">
-              <Knob
-                value={state.mbcomp.midThreshDb}
-                min={COMP_THRESH_MIN}
-                max={COMP_THRESH_MAX}
-                defaultValue={0}
-                ariaLabel={`${stem.name} MB-Comp mid threshold`}
-                onChange={(v) => onMbComp('midThreshDb', v)}
-              />
-              <span className="knob-label">Mid</span>
-              <span className="knob-readout">{formatThresh(state.mbcomp.midThreshDb)}</span>
-            </div>
-            <div className="knob-wrap">
-              <Knob
-                value={state.mbcomp.hiThreshDb}
-                min={COMP_THRESH_MIN}
-                max={COMP_THRESH_MAX}
-                defaultValue={0}
-                ariaLabel={`${stem.name} MB-Comp high threshold`}
-                onChange={(v) => onMbComp('hiThreshDb', v)}
-              />
-              <span className="knob-label">Hi</span>
-              <span className="knob-readout">{formatThresh(state.mbcomp.hiThreshDb)}</span>
-            </div>
-            <div className="knob-wrap">
-              <Knob
-                value={state.mbcomp.ratio}
-                min={COMP_RATIO_MIN}
-                max={COMP_RATIO_MAX}
-                defaultValue={4}
-                ariaLabel={`${stem.name} MB-Comp ratio`}
-                onChange={(v) => onMbComp('ratio', v)}
-              />
-              <span className="knob-label">Rat</span>
-              <span className="knob-readout">{formatRatio(state.mbcomp.ratio)}</span>
-            </div>
+        <StripModule
+          label="MBC"
+          accent="sage"
+          on={!state.mbcomp.bypassed}
+          onToggle={onMbCompBypass}
+        >
+          <div className="knob-wrap">
+            <Knob
+              value={state.mbcomp.loThreshDb}
+              min={COMP_THRESH_MIN}
+              max={COMP_THRESH_MAX}
+              defaultValue={0}
+              accent="sage"
+              ariaLabel={`${stem.name} MB-Comp low threshold`}
+              onChange={(v) => onMbComp('loThreshDb', v)}
+            />
+            <span className="knob-label">Lo</span>
+            <span className="knob-readout">{formatThresh(state.mbcomp.loThreshDb)}</span>
           </div>
-        </div>
+          <div className="knob-wrap">
+            <Knob
+              value={state.mbcomp.midThreshDb}
+              min={COMP_THRESH_MIN}
+              max={COMP_THRESH_MAX}
+              defaultValue={0}
+              accent="sage"
+              ariaLabel={`${stem.name} MB-Comp mid threshold`}
+              onChange={(v) => onMbComp('midThreshDb', v)}
+            />
+            <span className="knob-label">Mid</span>
+            <span className="knob-readout">{formatThresh(state.mbcomp.midThreshDb)}</span>
+          </div>
+          <div className="knob-wrap">
+            <Knob
+              value={state.mbcomp.hiThreshDb}
+              min={COMP_THRESH_MIN}
+              max={COMP_THRESH_MAX}
+              defaultValue={0}
+              accent="sage"
+              ariaLabel={`${stem.name} MB-Comp high threshold`}
+              onChange={(v) => onMbComp('hiThreshDb', v)}
+            />
+            <span className="knob-label">Hi</span>
+            <span className="knob-readout">{formatThresh(state.mbcomp.hiThreshDb)}</span>
+          </div>
+          <div className="knob-wrap">
+            <Knob
+              value={state.mbcomp.ratio}
+              min={COMP_RATIO_MIN}
+              max={COMP_RATIO_MAX}
+              defaultValue={4}
+              accent="sage"
+              ariaLabel={`${stem.name} MB-Comp ratio`}
+              onChange={(v) => onMbComp('ratio', v)}
+            />
+            <span className="knob-label">Rat</span>
+            <span className="knob-readout">{formatRatio(state.mbcomp.ratio)}</span>
+          </div>
+        </StripModule>
 
         <SendsSection
           stemName={stem.name}

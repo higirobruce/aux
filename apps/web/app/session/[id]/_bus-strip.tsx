@@ -167,7 +167,7 @@ export function BusStrip({
           )}
         </div>
       )}
-      <div className="ch-meta">bus</div>
+      <div className="ch-meta">bus · 2.0</div>
 
       {/* Bus chain scrolls; the fader/meter footer below stays pinned. */}
       <div className="ch-chain">
