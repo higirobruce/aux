@@ -37,9 +37,12 @@ import { z } from 'zod';
  * v19 — surfaces the comp's `attackMs` / `releaseMs` / `makeupDb` (were
  *       baked-in defaults) + a UI-only `knee` for the transfer curve. All
  *       optional with the prior baked defaults, so v1–v18 docs stay valid.
+ * v20 — adds the transient designer's `sens` + `mode` (UI/detector only —
+ *       engine shapes from attack/sustain). Optional with defaults, so
+ *       v1–v19 docs stay valid.
  */
 
-export const MIX_STATE_VERSION = 19;
+export const MIX_STATE_VERSION = 20;
 
 /**
  * Versions the strict parse still accepts. During the v15→v16 rollout we
@@ -47,7 +50,7 @@ export const MIX_STATE_VERSION = 19;
  * API strict-parses with this same schema). Narrow back to a single
  * `z.literal(MIX_STATE_VERSION)` once every deployed surface is on v16.
  */
-const ACCEPTED_VERSIONS = [z.literal(16), z.literal(17), z.literal(18), z.literal(19)] as const;
+const ACCEPTED_VERSIONS = [z.literal(17), z.literal(18), z.literal(19), z.literal(20)] as const;
 
 /** Stable id for the always-present Master bus. Sessions can omit it from
  *  their `buses` record; the client treats it as if explicitly present. */
@@ -150,6 +153,9 @@ export const ChannelCompSchema = z.object({
 /** Post-fader aux sends keyed by destination bus id; value = linear gain. */
 export const ChannelSendsSchema = z.record(z.string(), z.number().min(0).max(2));
 
+export const TransientModeSchema = z.enum(['WIDE', 'TIGHT']);
+export type TransientMode = z.infer<typeof TransientModeSchema>;
+
 /** Transient designer per channel — attack/sustain shaper. */
 export const ChannelTransientSchema = z.object({
   /** Attack scaling, -1..1. 0 = no change. */
@@ -157,6 +163,10 @@ export const ChannelTransientSchema = z.object({
   /** Sustain scaling, -1..1. 0 = no change. */
   sustain: z.number().min(-1).max(1),
   bypassed: z.boolean(),
+  /** Detector sensitivity 0..100 (v20+). UI/detector only. */
+  sens: z.number().min(0).max(100).default(50),
+  /** Detector window (v20+). UI/detector only. */
+  mode: TransientModeSchema.default('WIDE'),
 });
 
 /** DeEss per channel — split-band sibilance tamer. */
@@ -416,6 +426,8 @@ export const DEFAULT_CHANNEL_TRANSIENT = {
   attack: 0,
   sustain: 0,
   bypassed: false,
+  sens: 50,
+  mode: 'WIDE',
 } as const;
 
 /** Default DeEss — 6 kHz crossover, amount 0 = passthrough. */

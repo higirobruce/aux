@@ -26,8 +26,8 @@ interface Props {
   onComp: (field: 'threshold' | 'ratio', value: number) => void;
   onCompType: (type: CompType) => void;
   onCompBypass: () => void;
-  /** Open a floating plugin window for this channel (EQ / Compressor). */
-  onOpenPlugin?: (type: 'eq' | 'comp') => void;
+  /** Open a floating plugin window for this channel. */
+  onOpenPlugin?: (type: 'eq' | 'comp' | 'trans') => void;
   /** Bus directory — used to populate the strip's output picker. */
   buses: Record<string, BusState>;
   onOutput: (busId: string) => void;
@@ -399,6 +399,7 @@ export function ChannelStrip({
           accent="teal"
           on={!state.transient.bypassed}
           onToggle={onTransientBypass}
+          onOpen={() => onOpenPlugin?.('trans')}
         >
           <div className="knob-wrap">
             <Knob

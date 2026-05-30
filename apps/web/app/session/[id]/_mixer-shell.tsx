@@ -37,6 +37,7 @@ import {
   MixStateSchema,
   type ReverbState,
   type StemClip,
+  type TransientMode,
   defaultReverb,
   eqFullFromQuick,
   quickFromEqFull,
@@ -82,8 +83,14 @@ export interface ChannelState {
   outputBusId: string;
   /** Post-fader aux sends keyed by destination bus id (linear 0..2). */
   sends: Record<string, number>;
-  /** Transient designer — both knobs ∈ [-1, 1]. */
-  transient: { attack: number; sustain: number; bypassed: boolean };
+  /** Transient designer — both knobs ∈ [-1, 1]; sens/mode are UI-only. */
+  transient: {
+    attack: number;
+    sustain: number;
+    bypassed: boolean;
+    sens: number;
+    mode: TransientMode;
+  };
   /** DeEss — split-band sibilance tamer. */
   deess: { freq: number; amount: number; bypassed: boolean };
   /** Imager — M/S stereo width. */
@@ -233,7 +240,7 @@ function hydrateMixState(raw: unknown): HydratedMix {
       compType: c.compType ?? DEFAULT_COMP_TYPE,
       outputBusId: c.outputBusId ?? MASTER_BUS_ID,
       sends: c.sends ?? {},
-      transient: c.transient ?? { ...DEFAULT_CHANNEL_TRANSIENT },
+      transient: { ...DEFAULT_CHANNEL_TRANSIENT, ...c.transient },
       deess: c.deess ?? { ...DEFAULT_CHANNEL_DEESS },
       imager: c.imager ?? { ...DEFAULT_CHANNEL_IMAGER },
       tape: c.tape ?? { ...DEFAULT_CHANNEL_TAPE },
@@ -1028,12 +1035,23 @@ export function MixerShell({
     });
   }, []);
 
-  const setTransient = useCallback((stemId: string, field: 'attack' | 'sustain', value: number) => {
+  const setTransient = useCallback(
+    (stemId: string, field: 'attack' | 'sustain' | 'sens', value: number) => {
+      setChannelState((prev) => {
+        const current = prev[stemId] ?? DEFAULT_CHANNEL;
+        const nextTransient = { ...current.transient, [field]: value };
+        // attack/sustain reach the engine; sens is detector/UI only.
+        hostRef.current?.setChannelTransient(stemId, nextTransient.attack, nextTransient.sustain);
+        return { ...prev, [stemId]: { ...current, transient: nextTransient } };
+      });
+    },
+    []
+  );
+
+  const setTransientMode = useCallback((stemId: string, mode: TransientMode) => {
     setChannelState((prev) => {
       const current = prev[stemId] ?? DEFAULT_CHANNEL;
-      const nextTransient = { ...current.transient, [field]: value };
-      hostRef.current?.setChannelTransient(stemId, nextTransient.attack, nextTransient.sustain);
-      return { ...prev, [stemId]: { ...current, transient: nextTransient } };
+      return { ...prev, [stemId]: { ...current, transient: { ...current.transient, mode } } };
     });
   }, []);
 
@@ -1769,6 +1787,9 @@ export function MixerShell({
           onComp: setComp,
           onCompType: setCompType,
           onCompBypass: toggleCompBypass,
+          onTransient: setTransient,
+          onTransientMode: setTransientMode,
+          onTransientBypass: toggleTransientBypass,
         }}
       />
     </>

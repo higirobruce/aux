@@ -14,7 +14,7 @@ import { Knob, Readout, Segmented, Spectrum, Toggle, WindowFrame, clamp } from '
 import { useEffect, useRef, useState } from 'react';
 import type { ChannelState, CompField, EqBand } from './_mixer-shell';
 
-export type PluginType = 'eq' | 'comp';
+export type PluginType = 'eq' | 'comp' | 'trans';
 export interface OpenPlugin {
   type: PluginType;
   stemId: string;
@@ -31,6 +31,9 @@ interface HostBundle {
   onComp: (stemId: string, field: CompField, value: number) => void;
   onCompType: (stemId: string, type: 'clean' | 'color') => void;
   onCompBypass: (stemId: string) => void;
+  onTransient: (stemId: string, field: 'attack' | 'sustain' | 'sens', value: number) => void;
+  onTransientMode: (stemId: string, mode: 'WIDE' | 'TIGHT') => void;
+  onTransientBypass: (stemId: string) => void;
 }
 
 /* ============================================================
@@ -674,6 +677,179 @@ function CompWindow({
   );
 }
 
+/* ============================================================
+   Transient designer — envelope visualiser + attack/sustain shaper
+   ============================================================ */
+const TRANS_W = 280;
+const TRANS_H = 130;
+
+function TransGraph({ attack, sustain }: { attack: number; sustain: number }) {
+  const ref = useRef<HTMLCanvasElement>(null);
+  const v = useRef({ attack, sustain });
+  v.current = { attack, sustain };
+  useEffect(() => {
+    const cv = ref.current;
+    if (!cv) return;
+    const dpr = window.devicePixelRatio || 1;
+    const ctx = cv.getContext('2d');
+    if (!ctx) return;
+    let raf = 0;
+    const draw = () => {
+      const W = TRANS_W;
+      const H = TRANS_H;
+      cv.width = W * dpr;
+      cv.height = H * dpr;
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+      ctx.clearRect(0, 0, W, H);
+      const { attack: a, sustain: s } = v.current;
+      const aBoost = 1 + a;
+      const sBoost = 1 + s;
+      const pts: [number, number][] = [];
+      for (let x = 0; x <= W; x += 2) {
+        const hit = ((x / W) * 4) % 1;
+        const att = Math.exp(-hit * 30) * aBoost;
+        const sus = Math.exp(-hit * 3) * 0.5 * sBoost;
+        const val = clamp(Math.max(att, sus), 0, 1.6);
+        pts.push([x, H - val * (H - 10) * 0.6 - 4]);
+      }
+      // baseline
+      ctx.strokeStyle = 'var(--line-2)';
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.moveTo(0, H - 4);
+      ctx.lineTo(W, H - 4);
+      ctx.stroke();
+      // fill
+      ctx.beginPath();
+      ctx.moveTo(0, H - 4);
+      for (const [x, y] of pts) ctx.lineTo(x, y);
+      ctx.lineTo(W, H - 4);
+      ctx.closePath();
+      ctx.fillStyle = 'rgba(79,163,155,0.1)';
+      ctx.fill();
+      // envelope line
+      ctx.strokeStyle = '#4fa39b';
+      ctx.lineWidth = 2;
+      ctx.shadowColor = 'rgba(79,163,155,0.5)';
+      ctx.shadowBlur = 4;
+      ctx.beginPath();
+      pts.forEach(([x, y], i) => (i ? ctx.lineTo(x, y) : ctx.moveTo(x, y)));
+      ctx.stroke();
+      ctx.shadowBlur = 0;
+      raf = requestAnimationFrame(draw);
+    };
+    draw();
+    return () => cancelAnimationFrame(raf);
+  }, []);
+  return <canvas ref={ref} style={{ width: TRANS_W, height: TRANS_H, display: 'block' }} />;
+}
+
+function TransWindow({
+  b,
+  p,
+  z,
+  onClose,
+  onFocus,
+}: { b: HostBundle; p: OpenPlugin; z: number; onClose: () => void; onFocus: () => void }) {
+  const ch = b.channelState[p.stemId];
+  if (!ch) return null;
+  const tr = ch.transient;
+  const att = Math.round(tr.attack * 100);
+  const sus = Math.round(tr.sustain * 100);
+  return (
+    <WindowFrame
+      title="TRANSIENT"
+      sub={`SHAPER · ${b.stemName(p.stemId)}`}
+      accent="teal"
+      width={470}
+      z={z}
+      initial={{ x: 380, y: 130 }}
+      onClose={onClose}
+      onFocus={onFocus}
+      bypass={tr.bypassed}
+      onBypass={() => b.onTransientBypass(p.stemId)}
+    >
+      <div style={{ display: 'flex', gap: 14, padding: 14 }}>
+        <div
+          style={{
+            position: 'relative',
+            width: TRANS_W,
+            height: TRANS_H,
+            flexShrink: 0,
+            background: 'var(--inset)',
+            borderRadius: 'var(--r-md)',
+            border: '1px solid var(--line)',
+            overflow: 'hidden',
+          }}
+        >
+          <TransGraph attack={tr.attack} sustain={tr.sustain} />
+          <span
+            className="lbl"
+            style={{ position: 'absolute', top: 5, left: 7, fontSize: 8, color: 'var(--teal)' }}
+          >
+            ENVELOPE
+          </span>
+        </div>
+        <div
+          style={{ display: 'flex', flexDirection: 'column', gap: 14, justifyContent: 'center' }}
+        >
+          <div style={{ display: 'flex', gap: 16 }}>
+            <Knob
+              size={50}
+              label="ATTACK"
+              value={att}
+              min={-100}
+              max={100}
+              bipolar
+              defaultValue={0}
+              accent="teal"
+              display={(att > 0 ? '+' : '') + att}
+              ariaLabel="transient attack"
+              onChange={(val) => b.onTransient(p.stemId, 'attack', val / 100)}
+            />
+            <Knob
+              size={50}
+              label="SUSTAIN"
+              value={sus}
+              min={-100}
+              max={100}
+              bipolar
+              defaultValue={0}
+              accent="teal"
+              display={(sus > 0 ? '+' : '') + sus}
+              ariaLabel="transient sustain"
+              onChange={(val) => b.onTransient(p.stemId, 'sustain', val / 100)}
+            />
+          </div>
+          <div style={{ display: 'flex', gap: 14, alignItems: 'center' }}>
+            <Knob
+              size={36}
+              label="SENS"
+              value={tr.sens}
+              min={0}
+              max={100}
+              defaultValue={50}
+              accent="teal"
+              display={tr.sens.toFixed(0)}
+              ariaLabel="transient sensitivity"
+              onChange={(val) => b.onTransient(p.stemId, 'sens', val)}
+            />
+            <Segmented
+              options={[
+                { value: 'WIDE', label: 'WIDE' },
+                { value: 'TIGHT', label: 'TIGHT' },
+              ]}
+              value={tr.mode}
+              accent="teal"
+              onChange={(v) => b.onTransientMode(p.stemId, v as 'WIDE' | 'TIGHT')}
+            />
+          </div>
+        </div>
+      </div>
+    </WindowFrame>
+  );
+}
+
 export function PluginWindows({
   windows,
   onClose,
@@ -690,27 +866,16 @@ export function PluginWindows({
       {windows.map((p, i) => {
         const key = `${p.type}:${p.stemId}`;
         const z = 60 + i;
-        if (p.type === 'eq')
-          return (
-            <EqWindow
-              key={key}
-              b={bundle}
-              p={p}
-              z={z}
-              onClose={() => onClose(i)}
-              onFocus={() => onFocus(i)}
-            />
-          );
-        return (
-          <CompWindow
-            key={key}
-            b={bundle}
-            p={p}
-            z={z}
-            onClose={() => onClose(i)}
-            onFocus={() => onFocus(i)}
-          />
-        );
+        const props = {
+          b: bundle,
+          p,
+          z,
+          onClose: () => onClose(i),
+          onFocus: () => onFocus(i),
+        };
+        if (p.type === 'eq') return <EqWindow key={key} {...props} />;
+        if (p.type === 'trans') return <TransWindow key={key} {...props} />;
+        return <CompWindow key={key} {...props} />;
       })}
     </>
   );

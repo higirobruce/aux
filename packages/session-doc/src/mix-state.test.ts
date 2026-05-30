@@ -75,21 +75,21 @@ describe('ChannelStateSchema — clips', () => {
 });
 
 describe('MixStateSchema — version transition', () => {
-  it('emptyMixState() is the current version (19) and round-trips', () => {
+  it('emptyMixState() is the current version (20) and round-trips', () => {
     const doc = emptyMixState();
-    expect(doc.version).toBe(19);
-    expect(MIX_STATE_VERSION).toBe(19);
-    expect(MixStateSchema.parse(doc).version).toBe(19);
+    expect(doc.version).toBe(20);
+    expect(MIX_STATE_VERSION).toBe(20);
+    expect(MixStateSchema.parse(doc).version).toBe(20);
   });
 
-  it('accepts v16–v18 docs during the transition window', () => {
-    for (const v of [16, 17, 18] as const) {
+  it('accepts v17–v19 docs during the transition window', () => {
+    for (const v of [17, 18, 19] as const) {
       expect(MixStateSchema.safeParse({ ...emptyMixState(), version: v }).success).toBe(true);
     }
   });
 
   it('rejects versions outside the accepted set', () => {
-    expect(MixStateSchema.safeParse({ ...emptyMixState(), version: 15 }).success).toBe(false);
-    expect(MixStateSchema.safeParse({ ...emptyMixState(), version: 20 }).success).toBe(false);
+    expect(MixStateSchema.safeParse({ ...emptyMixState(), version: 16 }).success).toBe(false);
+    expect(MixStateSchema.safeParse({ ...emptyMixState(), version: 21 }).success).toBe(false);
   });
 });
