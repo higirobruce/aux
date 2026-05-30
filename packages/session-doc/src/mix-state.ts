@@ -40,9 +40,11 @@ import { z } from 'zod';
  * v20 — adds the transient designer's `sens` + `mode` (UI/detector only —
  *       engine shapes from attack/sustain). Optional with defaults, so
  *       v1–v19 docs stay valid.
+ * v21 — adds the tape's `bias` + `mode` (UI/visual only — engine drives from
+ *       drive/tone/mix). Optional with defaults, so v1–v20 docs stay valid.
  */
 
-export const MIX_STATE_VERSION = 20;
+export const MIX_STATE_VERSION = 21;
 
 /**
  * Versions the strict parse still accepts. During the v15→v16 rollout we
@@ -50,7 +52,7 @@ export const MIX_STATE_VERSION = 20;
  * API strict-parses with this same schema). Narrow back to a single
  * `z.literal(MIX_STATE_VERSION)` once every deployed surface is on v16.
  */
-const ACCEPTED_VERSIONS = [z.literal(17), z.literal(18), z.literal(19), z.literal(20)] as const;
+const ACCEPTED_VERSIONS = [z.literal(18), z.literal(19), z.literal(20), z.literal(21)] as const;
 
 /** Stable id for the always-present Master bus. Sessions can omit it from
  *  their `buses` record; the client treats it as if explicitly present. */
@@ -185,6 +187,9 @@ export const ChannelImagerSchema = z.object({
   bypassed: z.boolean(),
 });
 
+export const TapeModeSchema = z.enum(['TAPE', 'TUBE', 'TRANS']);
+export type TapeMode = z.infer<typeof TapeModeSchema>;
+
 /** Tape per channel — single-stage tape saturation. */
 export const ChannelTapeSchema = z.object({
   /** Pre-drive in dB, 0..24. 0 = clean. */
@@ -194,6 +199,10 @@ export const ChannelTapeSchema = z.object({
   /** Dry/wet mix, 0..1. 0 = dry passthrough. */
   mix: z.number().min(0).max(1),
   bypassed: z.boolean(),
+  /** Bias offset −50..50 (v21+). UI/curve only. */
+  bias: z.number().min(-50).max(50).default(0),
+  /** Saturation flavour (v21+). UI/harmonics only. */
+  mode: TapeModeSchema.default('TAPE'),
 });
 
 /** Console per channel — asymmetric soft-clip with iron-shelf bass + top-smooth. */
@@ -449,6 +458,8 @@ export const DEFAULT_CHANNEL_TAPE = {
   tone: 0,
   mix: 0,
   bypassed: false,
+  bias: 0,
+  mode: 'TAPE',
 } as const;
 
 /** Default Console — clean, dry. */

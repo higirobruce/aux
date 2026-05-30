@@ -37,6 +37,7 @@ import {
   MixStateSchema,
   type ReverbState,
   type StemClip,
+  type TapeMode,
   type TransientMode,
   defaultReverb,
   eqFullFromQuick,
@@ -95,8 +96,15 @@ export interface ChannelState {
   deess: { freq: number; amount: number; bypassed: boolean };
   /** Imager — M/S stereo width. */
   imager: { width: number; bypassed: boolean };
-  /** Tape — single-stage saturation. */
-  tape: { driveDb: number; tone: number; mix: number; bypassed: boolean };
+  /** Tape — single-stage saturation; bias/mode are UI/visual-only. */
+  tape: {
+    driveDb: number;
+    tone: number;
+    mix: number;
+    bypassed: boolean;
+    bias: number;
+    mode: TapeMode;
+  };
   /** Console — asymmetric channel-strip saturation. */
   console: { driveDb: number; character: number; mix: number; bypassed: boolean };
   /** MB-Comp — 3-band multiband compressor (per-band thresholds + shared ratio). */
@@ -243,7 +251,7 @@ function hydrateMixState(raw: unknown): HydratedMix {
       transient: { ...DEFAULT_CHANNEL_TRANSIENT, ...c.transient },
       deess: c.deess ?? { ...DEFAULT_CHANNEL_DEESS },
       imager: c.imager ?? { ...DEFAULT_CHANNEL_IMAGER },
-      tape: c.tape ?? { ...DEFAULT_CHANNEL_TAPE },
+      tape: { ...DEFAULT_CHANNEL_TAPE, ...c.tape },
       console: c.console ?? { ...DEFAULT_CHANNEL_CONSOLE },
       mbcomp: c.mbcomp ?? { ...DEFAULT_CHANNEL_MBCOMP },
       clips: c.clips ?? [],
@@ -1112,16 +1120,24 @@ export function MixerShell({
   }, []);
 
   const setTape = useCallback(
-    (stemId: string, field: 'driveDb' | 'tone' | 'mix', value: number) => {
+    (stemId: string, field: 'driveDb' | 'tone' | 'mix' | 'bias', value: number) => {
       setChannelState((prev) => {
         const current = prev[stemId] ?? DEFAULT_CHANNEL;
         const nextTape = { ...current.tape, [field]: value };
+        // drive/tone/mix reach the engine; bias is curve/UI only.
         hostRef.current?.setChannelTape(stemId, nextTape.driveDb, nextTape.tone, nextTape.mix);
         return { ...prev, [stemId]: { ...current, tape: nextTape } };
       });
     },
     []
   );
+
+  const setTapeMode = useCallback((stemId: string, mode: TapeMode) => {
+    setChannelState((prev) => {
+      const current = prev[stemId] ?? DEFAULT_CHANNEL;
+      return { ...prev, [stemId]: { ...current, tape: { ...current.tape, mode } } };
+    });
+  }, []);
 
   const toggleTapeBypass = useCallback((stemId: string) => {
     setChannelState((prev) => {
@@ -1790,6 +1806,9 @@ export function MixerShell({
           onTransient: setTransient,
           onTransientMode: setTransientMode,
           onTransientBypass: toggleTransientBypass,
+          onTape: setTape,
+          onTapeMode: setTapeMode,
+          onTapeBypass: toggleTapeBypass,
         }}
       />
     </>

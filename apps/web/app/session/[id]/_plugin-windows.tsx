@@ -14,7 +14,7 @@ import { Knob, Readout, Segmented, Spectrum, Toggle, WindowFrame, clamp } from '
 import { useEffect, useRef, useState } from 'react';
 import type { ChannelState, CompField, EqBand } from './_mixer-shell';
 
-export type PluginType = 'eq' | 'comp' | 'trans';
+export type PluginType = 'eq' | 'comp' | 'trans' | 'tape';
 export interface OpenPlugin {
   type: PluginType;
   stemId: string;
@@ -34,6 +34,9 @@ interface HostBundle {
   onTransient: (stemId: string, field: 'attack' | 'sustain' | 'sens', value: number) => void;
   onTransientMode: (stemId: string, mode: 'WIDE' | 'TIGHT') => void;
   onTransientBypass: (stemId: string) => void;
+  onTape: (stemId: string, field: 'driveDb' | 'tone' | 'mix' | 'bias', value: number) => void;
+  onTapeMode: (stemId: string, mode: 'TAPE' | 'TUBE' | 'TRANS') => void;
+  onTapeBypass: (stemId: string) => void;
 }
 
 /* ============================================================
@@ -850,6 +853,261 @@ function TransWindow({
   );
 }
 
+/* ============================================================
+   Tape / Saturation — tanh transfer curve + animated harmonics
+   ============================================================ */
+const TAPE_BOX = 170;
+
+function TapeCurve({ driveDb, bias }: { driveDb: number; bias: number }) {
+  const ref = useRef<HTMLCanvasElement>(null);
+  const v = useRef({ driveDb, bias });
+  v.current = { driveDb, bias };
+  useEffect(() => {
+    const cv = ref.current;
+    if (!cv) return;
+    const dpr = window.devicePixelRatio || 1;
+    const ctx = cv.getContext('2d');
+    if (!ctx) return;
+    let raf = 0;
+    const draw = () => {
+      const W = TAPE_BOX;
+      const H = TAPE_BOX;
+      cv.width = W * dpr;
+      cv.height = H * dpr;
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+      ctx.clearRect(0, 0, W, H);
+      const drive = 1 + v.current.driveDb / 4;
+      const b = v.current.bias / 100;
+      // axes
+      ctx.strokeStyle = 'var(--line)';
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.moveTo(W / 2, 0);
+      ctx.lineTo(W / 2, H);
+      ctx.moveTo(0, H / 2);
+      ctx.lineTo(W, H / 2);
+      ctx.stroke();
+      // unity diagonal
+      ctx.strokeStyle = 'var(--txt-3)';
+      ctx.setLineDash([2, 3]);
+      ctx.beginPath();
+      ctx.moveTo(0, H);
+      ctx.lineTo(W, 0);
+      ctx.stroke();
+      ctx.setLineDash([]);
+      // tanh transfer (with bias offset)
+      ctx.strokeStyle = '#cf6b39';
+      ctx.lineWidth = 2.5;
+      ctx.shadowColor = 'rgba(207,107,57,0.6)';
+      ctx.shadowBlur = 5;
+      ctx.beginPath();
+      for (let i = 0; i <= 80; i++) {
+        const x = (i / 80) * 2 - 1;
+        const y = Math.tanh((x + b) * drive) / Math.tanh(drive || 1);
+        const px = ((x + 1) / 2) * W;
+        const py = H - ((y + 1) / 2) * H;
+        if (i === 0) ctx.moveTo(px, py);
+        else ctx.lineTo(px, py);
+      }
+      ctx.stroke();
+      ctx.shadowBlur = 0;
+      raf = requestAnimationFrame(draw);
+    };
+    draw();
+    return () => cancelAnimationFrame(raf);
+  }, []);
+  return <canvas ref={ref} style={{ width: TAPE_BOX, height: TAPE_BOX, display: 'block' }} />;
+}
+
+function TapeHarmonics({ driveDb, mode }: { driveDb: number; mode: 'TAPE' | 'TUBE' | 'TRANS' }) {
+  const refs = useRef<(HTMLDivElement | null)[]>([]);
+  const v = useRef({ driveDb, mode });
+  v.current = { driveDb, mode };
+  useEffect(() => {
+    let raf = 0;
+    const tick = () => {
+      const t = Date.now() / 600;
+      const drvNorm = v.current.driveDb / 24;
+      for (let i = 0; i < 6; i++) {
+        const even = (i + 1) % 2 === 0;
+        const base = 0.6 ** i * (drvNorm + 0.1);
+        const flav =
+          v.current.mode === 'TUBE'
+            ? even
+              ? 1.4
+              : 0.7
+            : v.current.mode === 'TAPE'
+              ? even
+                ? 0.6
+                : 1.2
+              : 1;
+        const h = clamp(base * flav * (0.7 + 0.3 * Math.sin(t + i)), 0.02, 1);
+        const el = refs.current[i];
+        if (el) el.style.height = `${h * 100}%`;
+      }
+      raf = requestAnimationFrame(tick);
+    };
+    raf = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(raf);
+  }, []);
+  return (
+    <div
+      style={{
+        display: 'flex',
+        alignItems: 'flex-end',
+        gap: 4,
+        height: 40,
+        padding: '0 4px',
+        background: 'var(--inset)',
+        borderRadius: 'var(--r-md)',
+        border: '1px solid var(--line)',
+      }}
+    >
+      {[0, 1, 2, 3, 4, 5].map((i) => (
+        <div
+          key={i}
+          ref={(el) => {
+            refs.current[i] = el;
+          }}
+          style={{
+            flex: 1,
+            height: '2%',
+            alignSelf: 'flex-end',
+            borderRadius: '2px 2px 0 0',
+            background: i % 2 ? 'var(--gold)' : 'var(--rust)',
+          }}
+        />
+      ))}
+    </div>
+  );
+}
+
+function TapeWindow({
+  b,
+  p,
+  z,
+  onClose,
+  onFocus,
+}: { b: HostBundle; p: OpenPlugin; z: number; onClose: () => void; onFocus: () => void }) {
+  const ch = b.channelState[p.stemId];
+  if (!ch) return null;
+  const tp = ch.tape;
+  const tone = Math.round(tp.tone * 100);
+  const mix = Math.round(tp.mix * 100);
+  return (
+    <WindowFrame
+      title="TAPE / SATURATION"
+      sub={`ANALOG · ${b.stemName(p.stemId)}`}
+      accent="rust"
+      width={440}
+      z={z}
+      initial={{ x: 400, y: 140 }}
+      onClose={onClose}
+      onFocus={onFocus}
+      bypass={tp.bypassed}
+      onBypass={() => b.onTapeBypass(p.stemId)}
+    >
+      <div style={{ display: 'flex', gap: 14, padding: 14 }}>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+          <div
+            style={{
+              position: 'relative',
+              width: TAPE_BOX,
+              height: TAPE_BOX,
+              background: 'var(--inset)',
+              borderRadius: 'var(--r-md)',
+              border: '1px solid var(--line)',
+            }}
+          >
+            <TapeCurve driveDb={tp.driveDb} bias={tp.bias} />
+            <span
+              className="lbl"
+              style={{ position: 'absolute', top: 5, left: 7, fontSize: 8, color: 'var(--rust)' }}
+            >
+              CURVE
+            </span>
+          </div>
+          <TapeHarmonics driveDb={tp.driveDb} mode={tp.mode} />
+        </div>
+        <div
+          style={{ display: 'flex', flexDirection: 'column', gap: 14, justifyContent: 'center' }}
+        >
+          <Segmented
+            options={[
+              { value: 'TAPE', label: 'TAPE' },
+              { value: 'TUBE', label: 'TUBE' },
+              { value: 'TRANS', label: 'TRANS' },
+            ]}
+            value={tp.mode}
+            accent="rust"
+            onChange={(v) => b.onTapeMode(p.stemId, v as 'TAPE' | 'TUBE' | 'TRANS')}
+          />
+          <div
+            style={{
+              display: 'grid',
+              gridTemplateColumns: '1fr 1fr',
+              gap: 14,
+              justifyItems: 'center',
+            }}
+          >
+            <Knob
+              size={44}
+              label="DRIVE"
+              value={tp.driveDb}
+              min={0}
+              max={24}
+              defaultValue={0}
+              accent="rust"
+              display={tp.driveDb.toFixed(0)}
+              unit="dB"
+              ariaLabel="tape drive"
+              onChange={(val) => b.onTape(p.stemId, 'driveDb', val)}
+            />
+            <Knob
+              size={44}
+              label="TONE"
+              value={tone}
+              min={-100}
+              max={100}
+              bipolar
+              defaultValue={0}
+              accent="rust"
+              display={(tone > 0 ? '+' : '') + tone}
+              ariaLabel="tape tone"
+              onChange={(val) => b.onTape(p.stemId, 'tone', val / 100)}
+            />
+            <Knob
+              size={44}
+              label="BIAS"
+              value={tp.bias}
+              min={-50}
+              max={50}
+              bipolar
+              defaultValue={0}
+              accent="rust"
+              display={tp.bias.toFixed(0)}
+              ariaLabel="tape bias"
+              onChange={(val) => b.onTape(p.stemId, 'bias', val)}
+            />
+            <Knob
+              size={44}
+              label="MIX"
+              value={mix}
+              min={0}
+              max={100}
+              defaultValue={100}
+              accent="gold"
+              display={mix === 0 ? 'dry' : `${mix}`}
+              ariaLabel="tape mix"
+              onChange={(val) => b.onTape(p.stemId, 'mix', val / 100)}
+            />
+          </div>
+        </div>
+      </div>
+    </WindowFrame>
+  );
+}
+
 export function PluginWindows({
   windows,
   onClose,
@@ -875,6 +1133,7 @@ export function PluginWindows({
         };
         if (p.type === 'eq') return <EqWindow key={key} {...props} />;
         if (p.type === 'trans') return <TransWindow key={key} {...props} />;
+        if (p.type === 'tape') return <TapeWindow key={key} {...props} />;
         return <CompWindow key={key} {...props} />;
       })}
     </>

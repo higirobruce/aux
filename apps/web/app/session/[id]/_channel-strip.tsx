@@ -27,7 +27,7 @@ interface Props {
   onCompType: (type: CompType) => void;
   onCompBypass: () => void;
   /** Open a floating plugin window for this channel. */
-  onOpenPlugin?: (type: 'eq' | 'comp' | 'trans') => void;
+  onOpenPlugin?: (type: 'eq' | 'comp' | 'trans' | 'tape') => void;
   /** Bus directory — used to populate the strip's output picker. */
   buses: Record<string, BusState>;
   onOutput: (busId: string) => void;
@@ -484,7 +484,13 @@ export function ChannelStrip({
           </div>
         </StripModule>
 
-        <StripModule label="TAPE" accent="rust" on={!state.tape.bypassed} onToggle={onTapeBypass}>
+        <StripModule
+          label="TAPE"
+          accent="rust"
+          on={!state.tape.bypassed}
+          onToggle={onTapeBypass}
+          onOpen={() => onOpenPlugin?.('tape')}
+        >
           <div className="knob-wrap">
             <Knob
               value={state.tape.driveDb}
