@@ -73,3 +73,18 @@ body {
   font-family: var(--sans);
   -webkit-font-smoothing: antialiased;
 }
+
+/* Warm-analog primitive helpers — tracked-caps label + tabular-nums value.
+   Used by the @aux/ui custom kit (Knob/Toggle/Readout/etc.). */
+.lbl {
+  font-family: var(--mono);
+  font-size: var(--fs-label);
+  letter-spacing: var(--track-caps);
+  text-transform: uppercase;
+  color: var(--txt-2);
+  font-weight: 500;
+}
+.val {
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: "tnum";
+}

@@ -14,3 +14,16 @@ export { cn } from './lib/utils';
 export { Button, buttonVariants, type ButtonProps } from './components/button';
 export { Input, type InputProps } from './components/input';
 export { Label, type LabelProps } from './components/label';
+
+// Warm-analog primitive kit (custom mixer/plugin components).
+export { type Accent, ACCENT, ACCENT_SOFT, clamp, lerp } from './custom/accent';
+export { useDrag } from './custom/use-drag';
+export { Knob } from './custom/knob';
+export { Fader } from './custom/fader';
+export { Toggle } from './custom/toggle';
+export { Segmented } from './custom/segmented';
+export { Readout } from './custom/readout';
+export { Meter } from './custom/meter';
+export { Spectrum } from './custom/spectrum';
+export { WindowFrame } from './custom/window-frame';
+export { Module } from './custom/module';
