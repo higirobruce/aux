@@ -1683,6 +1683,11 @@
      a tall stem list never crowds out the mixer console underneath. */
   max-height: min(40vh, 360px);
   overflow-y: auto;
+  /* Sit above the seek-track overlay (z-index 1) so clip rects are
+     interactive; the wave background passes clicks through (pointer-events
+     below) to the track for seeking on empty regions. */
+  position: relative;
+  z-index: 2;
 }
 
 .stem-lane {
@@ -1742,6 +1747,23 @@
   transition: color 100ms ease, background 100ms ease;
 }
 
+.stem-lane-btn:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.stem-lane-btn.split {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+}
+
+.stem-lane-btn.split:hover:not(:disabled) {
+  color: #7cc0ff;
+  border-color: rgba(124, 192, 255, 0.4);
+}
+
 .stem-lane-btn.solo.on {
   background: linear-gradient(180deg, #6a5a26, #382e10);
   color: #f6e9b8;
@@ -1759,6 +1781,10 @@
   min-width: 0;
   position: relative;
   background: #0a0c10;
+  /* The wave area handles seek (pointerdown) directly; clip rects sit on top
+     and stopPropagation so dragging a clip never also seeks. The lanes sit
+     above the legacy seek-track overlay, which now only serves keyboard/aria. */
+  cursor: crosshair;
 }
 
 .stem-lane-wave-canvas-wrap {
@@ -1782,6 +1808,75 @@
   font-size: 9px;
   letter-spacing: 0.08em;
   color: #4a525e;
+}
+
+/* ─── Clips (timeline regions, v0.3 clip editing) ──────────────────── */
+
+/* Container spanning the lane; clip rects are absolutely placed within.
+   pointer-events none so gaps between clips fall through to seek. */
+.stem-lane-clips {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+/* A single clip region — positioned by left/width % of the global timeline. */
+.stem-clip {
+  position: absolute;
+  top: 2px;
+  bottom: 2px;
+  border: 1px solid rgba(124, 192, 255, 0.5);
+  border-radius: 2px;
+  background: rgba(124, 192, 255, 0.06);
+  box-sizing: border-box;
+  overflow: hidden;
+  pointer-events: auto;
+  cursor: grab;
+}
+
+.stem-clip:hover {
+  border-color: rgba(124, 192, 255, 0.8);
+}
+
+.stem-clip.selected {
+  border-color: #e8b84b;
+  background: rgba(232, 184, 75, 0.1);
+  box-shadow: 0 0 0 1px rgba(232, 184, 75, 0.5), 0 0 8px rgba(232, 184, 75, 0.25);
+}
+
+/* Trim handles — straddle the clip edges; widen the hit area beyond the
+   1px border. The clip body cursor is grab; handles override to ew-resize. */
+.stem-clip-handle {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 8px;
+  cursor: ew-resize;
+  pointer-events: auto;
+  z-index: 1;
+}
+
+.stem-clip-handle.left {
+  left: -2px;
+}
+
+.stem-clip-handle.right {
+  right: -2px;
+}
+
+.stem-clip-handle:hover {
+  background: rgba(124, 192, 255, 0.35);
+}
+
+.stem-clip-canvas-wrap {
+  position: absolute;
+  inset: 0;
+}
+
+.stem-clip-canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
 }
 
 /* Track: invisible click-receiving overlay across all lanes. The playhead

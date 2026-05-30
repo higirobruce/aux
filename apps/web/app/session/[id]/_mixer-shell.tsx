@@ -26,11 +26,13 @@ import {
   DEFAULT_LIMITER_STATE,
   DEFAULT_MASTER_BUS,
   DEFAULT_MASTER_CHAIN,
+  DEFAULT_STEM_CLIPS,
   type LimiterState,
   MIX_STATE_VERSION,
   type MasterChain,
   MixStateSchema,
   type ReverbState,
+  type StemClip,
   defaultReverb,
 } from '@aux/session-doc';
 import Link from 'next/link';
@@ -81,6 +83,9 @@ export interface ChannelState {
     ratio: number;
     bypassed: boolean;
   };
+  /** Timeline regions for this stem. Always concrete in memory (hydration
+   *  normalises absent/optional to []); empty = whole buffer at t=0. */
+  clips: StemClip[];
 }
 
 const DEFAULT_CHANNEL: ChannelState = {
@@ -99,6 +104,7 @@ const DEFAULT_CHANNEL: ChannelState = {
   tape: { ...DEFAULT_CHANNEL_TAPE },
   console: { ...DEFAULT_CHANNEL_CONSOLE },
   mbcomp: { ...DEFAULT_CHANNEL_MBCOMP },
+  clips: [...DEFAULT_STEM_CLIPS],
 };
 const AUTOSAVE_DEBOUNCE_MS = 600;
 
@@ -152,8 +158,14 @@ function hydrateMixState(raw: unknown): HydratedMix {
     // Ensure Master exists even if a malformed v7 doc dropped it.
     const buses = { ...current.data.buses };
     if (!buses[MASTER_BUS_ID]) buses[MASTER_BUS_ID] = { ...DEFAULT_MASTER_BUS };
+    // Normalise optional `clips` (absent on v15 docs) to a concrete [] so the
+    // engine + timeline can treat "no clips" uniformly as a whole-buffer clip.
+    const channels: Record<string, ChannelState> = {};
+    for (const [id, ch] of Object.entries(current.data.channels)) {
+      channels[id] = { ...ch, clips: ch.clips ?? [] };
+    }
     return {
-      channels: current.data.channels,
+      channels,
       buses,
       masterChain: current.data.masterChain,
     };
@@ -194,6 +206,7 @@ function hydrateMixState(raw: unknown): HydratedMix {
       tape: c.tape ?? { ...DEFAULT_CHANNEL_TAPE },
       console: c.console ?? { ...DEFAULT_CHANNEL_CONSOLE },
       mbcomp: c.mbcomp ?? { ...DEFAULT_CHANNEL_MBCOMP },
+      clips: c.clips ?? [],
     };
   }
   // Bus migration. v5+ docs already have a `buses` field; older docs don't.
@@ -328,6 +341,8 @@ export function MixerShell({
   const [stemsOpen, setStemsOpen] = useState(initialStems.length === 0);
   const [timelineOpen, setTimelineOpen] = useState(true);
   const [peaks, setPeaks] = useState<Record<string, StemPeaks | undefined>>({});
+  /** Currently-selected timeline clip (for trim/move highlight + delete). */
+  const [selectedClip, setSelectedClip] = useState<{ stemId: string; clipId: string } | null>(null);
   const [saveStatus, setSaveStatus] = useState<SaveStatus>('idle');
   // First render is hydration; suppress that as an autosave trigger.
   const hasMounted = useRef(false);
@@ -646,7 +661,11 @@ export function MixerShell({
         ch.mbcomp.ratio
       );
       host.setChannelMbCompBypassed(stem.id, ch.mbcomp.bypassed);
+      host.setChannelClips(stem.id, ch.clips);
     }
+    // Clips can extend (or shorten) the effective timeline, so recompute the
+    // duration after they're applied — the earlier set used buffer lengths.
+    setDuration(host.durationSeconds);
 
     // Ensure user-defined buses exist on the host (Master is auto-created)
     // and apply gain + mute. addBus is idempotent — safe to call every load.
@@ -720,6 +739,7 @@ export function MixerShell({
     (seconds: number) => {
       const target = Math.max(0, Math.min(seconds, duration));
       setPosition(target);
+      setSelectedClip(null); // clicking the timeline to seek clears any selection
       const host = hostRef.current;
       if (host?.isPlaying) {
         host.playAll(target);
@@ -728,6 +748,85 @@ export function MixerShell({
     },
     [duration]
   );
+
+  /** Apply a stem's clips to the engine + state without touching history.
+   *  Shared by user edits, undo, and redo. */
+  const applyClips = useCallback((stemId: string, clips: StemClip[]) => {
+    hostRef.current?.setChannelClips(stemId, clips);
+    setChannelState((prev) => ({
+      ...prev,
+      [stemId]: { ...(prev[stemId] ?? DEFAULT_CHANNEL), clips },
+    }));
+    const dur = hostRef.current?.durationSeconds;
+    if (typeof dur === 'number' && dur > 0) setDuration(dur);
+  }, []);
+
+  // Per-stem clip-edit history. One entry per committed gesture (the timeline
+  // already coalesces a drag into a single setClips call), scoped to clips so
+  // it never tangles with the rest of the mix state.
+  const undoStackRef = useRef<{ stemId: string; before: StemClip[]; after: StemClip[] }[]>([]);
+  const redoStackRef = useRef<{ stemId: string; before: StemClip[]; after: StemClip[] }[]>([]);
+
+  /** User-facing clip edit: records history, then applies. */
+  const setClips = useCallback(
+    (stemId: string, clips: StemClip[]) => {
+      const before = channelStateRef.current[stemId]?.clips ?? [];
+      undoStackRef.current.push({ stemId, before, after: clips });
+      redoStackRef.current = [];
+      applyClips(stemId, clips);
+    },
+    [applyClips]
+  );
+
+  const undo = useCallback(() => {
+    const entry = undoStackRef.current.pop();
+    if (!entry) return;
+    redoStackRef.current.push(entry);
+    setSelectedClip(null);
+    applyClips(entry.stemId, entry.before);
+  }, [applyClips]);
+
+  const redo = useCallback(() => {
+    const entry = redoStackRef.current.pop();
+    if (!entry) return;
+    undoStackRef.current.push(entry);
+    setSelectedClip(null);
+    applyClips(entry.stemId, entry.after);
+  }, [applyClips]);
+
+  // Cmd/Ctrl+Z undo · Cmd/Ctrl+Shift+Z redo (ignored while typing).
+  useEffect(() => {
+    function onKey(e: KeyboardEvent) {
+      if (e.key.toLowerCase() !== 'z' || !(e.metaKey || e.ctrlKey)) return;
+      const t = e.target as HTMLElement | null;
+      if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable)) return;
+      e.preventDefault();
+      if (e.shiftKey) redo();
+      else undo();
+    }
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [undo, redo]);
+
+  // Delete / Backspace removes the selected clip (ignored while typing).
+  useEffect(() => {
+    function onKey(e: KeyboardEvent) {
+      if (e.key !== 'Delete' && e.key !== 'Backspace') return;
+      if (!selectedClip) return;
+      const t = e.target as HTMLElement | null;
+      if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable)) return;
+      e.preventDefault();
+      const { stemId, clipId } = selectedClip;
+      const cur = channelStateRef.current[stemId]?.clips ?? [];
+      setClips(
+        stemId,
+        cur.filter((c) => c.id !== clipId)
+      );
+      setSelectedClip(null);
+    }
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [selectedClip, setClips]);
 
   const setVolume = useCallback((stemId: string, volume: number) => {
     hostRef.current?.setChannelVolume(stemId, volume);
@@ -1302,9 +1401,12 @@ export function MixerShell({
           duration={duration}
           position={position}
           playing={transport === 'playing'}
+          selectedClip={selectedClip}
           onMute={toggleMute}
           onSolo={toggleSolo}
           onSeek={handleSeek}
+          onClipsChange={setClips}
+          onSelectClip={setSelectedClip}
         />
 
         <div className="mixer-body">
