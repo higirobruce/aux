@@ -10,9 +10,9 @@
 
 import type { AudioHost } from '@aux/audio-engine';
 import type { EqFullBand } from '@aux/session-doc';
-import { Knob, Meter, Readout, Segmented, Spectrum, Toggle, WindowFrame, clamp } from '@aux/ui';
+import { Knob, Readout, Segmented, Spectrum, Toggle, WindowFrame, clamp } from '@aux/ui';
 import { useEffect, useRef, useState } from 'react';
-import type { ChannelState, EqBand } from './_mixer-shell';
+import type { ChannelState, CompField, EqBand } from './_mixer-shell';
 
 export type PluginType = 'eq' | 'comp';
 export interface OpenPlugin {
@@ -28,8 +28,9 @@ interface HostBundle {
   onEqBand: (stemId: string, bandId: number, patch: Partial<EqFullBand>) => void;
   onEqAnalyzer: (stemId: string, analyzer: boolean) => void;
   onEqBypass: (stemId: string) => void;
-  onComp: (stemId: string, field: 'threshold' | 'ratio', value: number) => void;
+  onComp: (stemId: string, field: CompField, value: number) => void;
   onCompType: (stemId: string, type: 'clean' | 'color') => void;
+  onCompBypass: (stemId: string) => void;
 }
 
 /* ============================================================
@@ -63,59 +64,171 @@ function bandMag(band: EqFullBand, f: number): number {
 const fmtFreq = (f: number) =>
   f >= 1000 ? `${(f / 1000).toFixed(f < 10000 ? 2 : 1)}k` : `${Math.round(f)}`;
 
-/* ---- Compressor transfer curve ---- */
-function CompCurve({ threshold, ratio }: { threshold: number; ratio: number }) {
+/* ============================================================
+   Compressor — soft-knee transfer curve + threshold marker + moving dot
+   ============================================================ */
+type CompShape = { threshold: number; ratio: number; knee: number; makeup: number };
+
+/** Soft-knee transfer fn (in dB → out dB), matching the design. */
+function compTransfer(x: number, s: CompShape): number {
+  const { threshold: th, ratio: r, knee: kn } = s;
+  if (x < th - kn / 2) return x;
+  if (x > th + kn / 2) return th + (x - th) / r;
+  const d = x - th + kn / 2;
+  return x + ((1 / r - 1) * d * d) / (2 * kn || 1);
+}
+
+const COMP_GRAPH = 200;
+
+function CompGraph({ shape }: { shape: CompShape }) {
   const ref = useRef<HTMLCanvasElement>(null);
-  const v = useRef({ threshold, ratio });
-  v.current = { threshold, ratio };
+  const s = useRef(shape);
+  s.current = shape;
   useEffect(() => {
     const cv = ref.current;
     if (!cv) return;
     const dpr = window.devicePixelRatio || 1;
     const ctx = cv.getContext('2d');
     if (!ctx) return;
+    let raf = 0;
     const draw = () => {
-      cv.width = cv.clientWidth * dpr;
-      cv.height = cv.clientHeight * dpr;
-      const W = cv.width;
-      const H = cv.height;
+      const W = COMP_GRAPH;
+      const H = COMP_GRAPH;
+      cv.width = W * dpr;
+      cv.height = H * dpr;
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
       ctx.clearRect(0, 0, W, H);
-      const { threshold: th, ratio: r } = v.current;
+      const sh = s.current;
       const toX = (db: number) => ((db + 60) / 60) * W;
-      const toY = (db: number) => H - ((db + 60) / 60) * H;
-      // unity reference
-      ctx.strokeStyle = 'rgba(255,240,210,0.10)';
+      const toY = (db: number) => H - ((db + 60) / 66) * H;
+      // grid
+      ctx.strokeStyle = 'var(--line)';
       ctx.lineWidth = 1;
+      for (const g of [-48, -36, -24, -12]) {
+        ctx.beginPath();
+        ctx.moveTo(toX(g), 0);
+        ctx.lineTo(toX(g), H);
+        ctx.moveTo(0, toY(g));
+        ctx.lineTo(W, toY(g));
+        ctx.stroke();
+      }
+      // 1:1 reference
+      ctx.strokeStyle = 'var(--txt-3)';
+      ctx.setLineDash([2, 3]);
       ctx.beginPath();
       ctx.moveTo(toX(-60), toY(-60));
       ctx.lineTo(toX(0), toY(0));
       ctx.stroke();
-      // transfer
+      ctx.setLineDash([]);
+      // transfer curve
       ctx.strokeStyle = '#9aa85e';
-      ctx.lineWidth = 2 * dpr;
+      ctx.lineWidth = 2;
+      ctx.shadowColor = 'rgba(154,168,94,0.6)';
+      ctx.shadowBlur = 5;
       ctx.beginPath();
       for (let db = -60; db <= 0; db += 1) {
-        const out = db <= th ? db : th + (db - th) / r;
-        const x = toX(db);
-        const y = toY(out);
-        if (db === -60) ctx.moveTo(x, y);
-        else ctx.lineTo(x, y);
+        const y = compTransfer(db, sh) + sh.makeup;
+        const px = toX(db);
+        const py = Math.max(0, Math.min(H, toY(y)));
+        if (db === -60) ctx.moveTo(px, py);
+        else ctx.lineTo(px, py);
       }
       ctx.stroke();
+      ctx.shadowBlur = 0;
       // threshold marker
-      ctx.strokeStyle = 'rgba(231,169,72,0.5)';
-      ctx.setLineDash([3, 3]);
+      ctx.strokeStyle = 'rgba(231,169,72,0.7)';
+      ctx.setLineDash([4, 3]);
       ctx.beginPath();
-      ctx.moveTo(toX(th), 0);
-      ctx.lineTo(toX(th), H);
+      ctx.moveTo(toX(sh.threshold), 0);
+      ctx.lineTo(toX(sh.threshold), H);
       ctx.stroke();
       ctx.setLineDash([]);
+      // moving input dot (simulated programme level, like the design)
+      const t = Date.now() / 1000;
+      const inDb = -22 + 18 * Math.abs(Math.sin(t * 2.2)) * (0.6 + 0.4 * Math.sin(t * 0.7));
+      const outDb = compTransfer(inDb, sh) + sh.makeup;
+      ctx.fillStyle = '#e7a948';
+      ctx.shadowColor = '#e7a948';
+      ctx.shadowBlur = 6;
+      ctx.beginPath();
+      ctx.arc(toX(inDb), toY(outDb), 4, 0, 7);
+      ctx.fill();
+      ctx.shadowBlur = 0;
+      raf = requestAnimationFrame(draw);
     };
     draw();
-    const id = setInterval(draw, 80);
-    return () => clearInterval(id);
+    return () => cancelAnimationFrame(raf);
   }, []);
-  return <canvas ref={ref} style={{ width: '100%', height: 150, display: 'block' }} />;
+  return <canvas ref={ref} style={{ width: COMP_GRAPH, height: COMP_GRAPH, display: 'block' }} />;
+}
+
+/** Horizontal gain-reduction meter (draws right→left), fed by the real engine. */
+function GrMeterH({
+  getGr,
+  max = 20,
+  width = 220,
+}: { getGr: () => number; max?: number; width?: number }) {
+  const fillRef = useRef<HTMLDivElement>(null);
+  const valRef = useRef<HTMLSpanElement>(null);
+  useEffect(() => {
+    let raf = 0;
+    const tick = () => {
+      const gr = Math.max(0, getGr());
+      const pct = Math.min(1, gr / max) * 100;
+      if (fillRef.current) fillRef.current.style.width = `${pct}%`;
+      if (valRef.current) valRef.current.textContent = `-${gr.toFixed(1)} dB`;
+      raf = requestAnimationFrame(tick);
+    };
+    raf = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(raf);
+  }, [getGr, max]);
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 4, width }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+        <span className="lbl" style={{ fontSize: 8 }}>
+          GAIN REDUCTION
+        </span>
+        <span ref={valRef} className="val" style={{ fontSize: 10, color: 'var(--sage)' }}>
+          -0.0 dB
+        </span>
+      </div>
+      <div
+        style={{
+          position: 'relative',
+          height: 12,
+          background: 'var(--inset)',
+          borderRadius: 3,
+          overflow: 'hidden',
+          boxShadow: 'inset 0 0 0 1px var(--line)',
+        }}
+      >
+        <div
+          ref={fillRef}
+          style={{
+            position: 'absolute',
+            right: 0,
+            top: 0,
+            bottom: 0,
+            width: '0%',
+            background: 'linear-gradient(90deg,var(--sage),var(--gold))',
+          }}
+        />
+        {[5, 10, 15].map((tk) => (
+          <div
+            key={tk}
+            style={{
+              position: 'absolute',
+              right: `${(tk / max) * 100}%`,
+              top: 0,
+              bottom: 0,
+              width: 1,
+              background: 'var(--line)',
+            }}
+          />
+        ))}
+      </div>
+    </div>
+  );
 }
 
 const EQ_W = 500;
@@ -412,81 +525,149 @@ function CompWindow({
 }: { b: HostBundle; p: OpenPlugin; z: number; onClose: () => void; onFocus: () => void }) {
   const ch = b.channelState[p.stemId];
   if (!ch) return null;
-  const grLevel = (): [number, number] => {
-    const gr = b.host
+  const c = ch.comp;
+  const getGr = () =>
+    b.host
       ? ch.compType === 'color'
         ? b.host.getChannelCompColorGr(p.stemId)
         : b.host.getChannelCompGr(p.stemId)
       : 0;
-    const n = Math.min(1, gr / 18);
-    return [n, n];
-  };
   return (
     <WindowFrame
       title="COMPRESSOR"
-      sub={b.stemName(p.stemId)}
+      sub={`${ch.compType === 'color' ? 'FET' : 'VCA'} · ${b.stemName(p.stemId)}`}
       accent="sage"
-      width={420}
+      width={470}
       z={z}
-      initial={{ x: 400, y: 150 }}
+      initial={{ x: 400, y: 140 }}
       onClose={onClose}
       onFocus={onFocus}
+      bypass={c.bypassed}
+      onBypass={() => b.onCompBypass(p.stemId)}
     >
-      <div style={{ padding: 12, display: 'flex', gap: 12 }}>
-        <div style={{ flex: 1 }}>
-          <div
+      <div style={{ display: 'flex', gap: 12, padding: 12 }}>
+        <div
+          style={{
+            width: COMP_GRAPH,
+            height: COMP_GRAPH,
+            flexShrink: 0,
+            position: 'relative',
+            background: 'var(--inset)',
+            borderRadius: 'var(--r-md)',
+            border: '1px solid var(--line)',
+            overflow: 'hidden',
+          }}
+        >
+          <CompGraph
+            shape={{ threshold: c.threshold, ratio: c.ratio, knee: c.knee, makeup: c.makeupDb }}
+          />
+          <span
+            className="lbl"
             style={{
-              border: '1px solid var(--line)',
-              borderRadius: 'var(--r-md)',
-              background: 'var(--inset)',
-              overflow: 'hidden',
-              marginBottom: 10,
+              position: 'absolute',
+              bottom: 4,
+              right: 6,
+              fontSize: 8,
+              color: 'var(--txt-3)',
             }}
           >
-            <CompCurve threshold={ch.comp.threshold} ratio={ch.comp.ratio} />
-          </div>
-          <div style={{ marginBottom: 10 }}>
-            <Segmented
-              options={[
-                { value: 'clean', label: 'CLEAN' },
-                { value: 'color', label: 'COLOR' },
-              ]}
-              value={ch.compType}
-              accent="sage"
-              onChange={(v) => b.onCompType(p.stemId, v as 'clean' | 'color')}
-            />
-          </div>
-          <div style={{ display: 'flex', justifyContent: 'space-around' }}>
+            IN → OUT
+          </span>
+        </div>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 12, flex: 1 }}>
+          <Segmented
+            options={[
+              { value: 'clean', label: 'CLEAN' },
+              { value: 'color', label: 'COLOR' },
+            ]}
+            value={ch.compType}
+            accent="sage"
+            onChange={(v) => b.onCompType(p.stemId, v as 'clean' | 'color')}
+          />
+          <div
+            style={{
+              display: 'grid',
+              gridTemplateColumns: 'repeat(3,1fr)',
+              gap: 10,
+              justifyItems: 'center',
+            }}
+          >
             <Knob
-              value={ch.comp.threshold}
-              min={-60}
+              size={44}
+              label="THRESH"
+              value={c.threshold}
+              min={-40}
               max={0}
               defaultValue={0}
               accent="sage"
-              label="THRESH"
-              display={ch.comp.threshold.toFixed(0)}
-              unit="dB"
+              display={c.threshold.toFixed(1)}
               ariaLabel="threshold"
               onChange={(v) => b.onComp(p.stemId, 'threshold', v)}
             />
             <Knob
-              value={ch.comp.ratio}
-              min={1}
-              max={20}
-              defaultValue={1}
-              accent="sage"
+              size={44}
               label="RATIO"
-              display={`${ch.comp.ratio.toFixed(1)}:1`}
+              value={c.ratio}
+              min={1}
+              max={12}
+              defaultValue={2}
+              accent="sage"
+              display={`${c.ratio.toFixed(1)}:1`}
               ariaLabel="ratio"
               onChange={(v) => b.onComp(p.stemId, 'ratio', v)}
             />
+            <Knob
+              size={44}
+              label="KNEE"
+              value={c.knee}
+              min={0}
+              max={24}
+              defaultValue={6}
+              accent="sage"
+              display={c.knee.toFixed(0)}
+              ariaLabel="knee"
+              onChange={(v) => b.onComp(p.stemId, 'knee', v)}
+            />
+            <Knob
+              size={44}
+              label="ATTACK"
+              value={c.attackMs}
+              min={0.1}
+              max={100}
+              defaultValue={10}
+              accent="sage"
+              display={c.attackMs.toFixed(1)}
+              unit="ms"
+              ariaLabel="attack"
+              onChange={(v) => b.onComp(p.stemId, 'attackMs', v)}
+            />
+            <Knob
+              size={44}
+              label="RELEASE"
+              value={c.releaseMs}
+              min={10}
+              max={1000}
+              defaultValue={120}
+              accent="sage"
+              display={c.releaseMs.toFixed(0)}
+              unit="ms"
+              ariaLabel="release"
+              onChange={(v) => b.onComp(p.stemId, 'releaseMs', v)}
+            />
+            <Knob
+              size={44}
+              label="MAKEUP"
+              value={c.makeupDb}
+              min={0}
+              max={24}
+              defaultValue={0}
+              accent="gold"
+              display={`+${c.makeupDb.toFixed(1)}`}
+              ariaLabel="makeup"
+              onChange={(v) => b.onComp(p.stemId, 'makeupDb', v)}
+            />
           </div>
-        </div>
-        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 6 }}>
-          <span className="lbl" style={{ fontSize: 8 }}>
-            GR
-          </span>
-          <Meter getLevel={grLevel} width={8} height={140} />
+          <GrMeterH getGr={getGr} />
         </div>
       </div>
     </WindowFrame>

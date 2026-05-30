@@ -34,9 +34,12 @@ import { z } from 'zod';
  *       peaks / high-shelf, each type/freq/gain/q/on + an analyzer flag).
  *       Optional; when absent, hydration derives it from the legacy
  *       `eq.{lo,mid,hi}` quick knobs, which stay a mirror of bands 1/2/4.
+ * v19 — surfaces the comp's `attackMs` / `releaseMs` / `makeupDb` (were
+ *       baked-in defaults) + a UI-only `knee` for the transfer curve. All
+ *       optional with the prior baked defaults, so v1–v18 docs stay valid.
  */
 
-export const MIX_STATE_VERSION = 18;
+export const MIX_STATE_VERSION = 19;
 
 /**
  * Versions the strict parse still accepts. During the v15→v16 rollout we
@@ -44,7 +47,7 @@ export const MIX_STATE_VERSION = 18;
  * API strict-parses with this same schema). Narrow back to a single
  * `z.literal(MIX_STATE_VERSION)` once every deployed surface is on v16.
  */
-const ACCEPTED_VERSIONS = [z.literal(15), z.literal(16), z.literal(17), z.literal(18)] as const;
+const ACCEPTED_VERSIONS = [z.literal(16), z.literal(17), z.literal(18), z.literal(19)] as const;
 
 /** Stable id for the always-present Master bus. Sessions can omit it from
  *  their `buses` record; the client treats it as if explicitly present. */
@@ -134,6 +137,14 @@ export const ChannelCompSchema = z.object({
   ratio: z.number().min(1).max(20),
   /** Insert bypass (v17+). Optional/false on v1–v16 docs = engaged. */
   bypassed: z.boolean().default(false),
+  /** Attack in ms (v19+). */
+  attackMs: z.number().min(0.1).max(100).default(10),
+  /** Release in ms (v19+). */
+  releaseMs: z.number().min(10).max(1000).default(120),
+  /** Make-up gain in dB (v19+). */
+  makeupDb: z.number().min(0).max(24).default(0),
+  /** Soft-knee width in dB (v19+). UI/curve only — engine has no knee param. */
+  knee: z.number().min(0).max(24).default(6),
 });
 
 /** Post-fader aux sends keyed by destination bus id; value = linear gain. */
@@ -390,7 +401,15 @@ export function eqFullFromQuick(eq: { lo: number; mid: number; hi: number }): Ch
  * Default Comp-Clean state — ratio 1.0 means the DSP fast-paths to a
  * passthrough, so a fresh channel is acoustically transparent.
  */
-export const DEFAULT_CHANNEL_COMP: ChannelComp = { threshold: 0, ratio: 1, bypassed: false };
+export const DEFAULT_CHANNEL_COMP: ChannelComp = {
+  threshold: 0,
+  ratio: 1,
+  bypassed: false,
+  attackMs: 10,
+  releaseMs: 120,
+  makeupDb: 0,
+  knee: 6,
+};
 
 /** Default Transient state — both knobs at 0 = passthrough. */
 export const DEFAULT_CHANNEL_TRANSIENT = {

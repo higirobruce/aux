@@ -69,7 +69,15 @@ export interface ChannelState {
   eq: { lo: number; mid: number; hi: number; bypassed: boolean }; // dB, ±24 (quick knobs)
   /** Full 5-band parametric EQ — source of truth; eq.{lo,mid,hi} mirror bands 1/2/4. */
   eqFull: ChannelEqFull;
-  comp: { threshold: number; ratio: number; bypassed: boolean }; // dB threshold + n:1 ratio
+  comp: {
+    threshold: number; // dB
+    ratio: number; // n:1
+    bypassed: boolean;
+    attackMs: number;
+    releaseMs: number;
+    makeupDb: number;
+    knee: number; // UI/curve only
+  };
   compType: CompType; // 'clean' (VCA) or 'color' (FET)
   outputBusId: string;
   /** Post-fader aux sends keyed by destination bus id (linear 0..2). */
@@ -129,6 +137,9 @@ const EQ_BANDS = {
   hi: { idx: 6, type: Eq8BandType.HighShelf, freq: 8000, q: Math.SQRT1_2 },
 } as const;
 export type EqBand = keyof typeof EQ_BANDS;
+
+/** Editable compressor fields (strip sends threshold/ratio; window sends all). */
+export type CompField = 'threshold' | 'ratio' | 'attackMs' | 'releaseMs' | 'makeupDb' | 'knee';
 
 function formatTime(seconds: number): string {
   if (!Number.isFinite(seconds) || seconds < 0) return '0:00';
@@ -324,16 +335,16 @@ function applyEqFullToHost(host: AudioHost, stemId: string, eqFull: ChannelEqFul
   for (const band of eqFull.bands) applyEqBandToHost(host, stemId, band);
 }
 
+type CompParams = ChannelState['comp'];
+
 function applyCompToHost(
   host: AudioHost,
   stemId: string,
-  threshold: number,
-  ratio: number,
-  compType: CompType,
-  bypassed = false
+  comp: CompParams,
+  compType: CompType
 ): void {
   // Whole-insert bypass: park both flavours so neither colours the signal.
-  if (bypassed) {
+  if (comp.bypassed) {
     host.setChannelCompBypassed(stemId, true);
     host.setChannelCompColorBypassed(stemId, true);
     return;
@@ -341,11 +352,11 @@ function applyCompToHost(
   if (compType === 'clean') {
     host.setChannelComp(
       stemId,
-      threshold,
-      ratio,
-      COMP_DEFAULTS.attackMs,
-      COMP_DEFAULTS.releaseMs,
-      COMP_DEFAULTS.makeupDb,
+      comp.threshold,
+      comp.ratio,
+      comp.attackMs,
+      comp.releaseMs,
+      comp.makeupDb,
       COMP_DEFAULTS.mix
     );
     host.setChannelCompBypassed(stemId, false);
@@ -353,12 +364,12 @@ function applyCompToHost(
   } else {
     host.setChannelCompColor(
       stemId,
-      threshold,
-      ratio,
-      COMP_COLOR_DEFAULTS.attackMs,
-      COMP_COLOR_DEFAULTS.releaseMs,
-      COMP_COLOR_DEFAULTS.makeupDb,
-      COMP_COLOR_DEFAULTS.mix,
+      comp.threshold,
+      comp.ratio,
+      comp.attackMs,
+      comp.releaseMs,
+      comp.makeupDb,
+      COMP_DEFAULTS.mix,
       COMP_COLOR_DEFAULTS.driveDb
     );
     host.setChannelCompColorBypassed(stemId, false);
@@ -712,14 +723,7 @@ export function MixerShell({
       host.setChannelSolo(stem.id, ch.soloed);
       applyEqFullToHost(host, stem.id, ch.eqFull);
       host.setChannelEqBypassed(stem.id, ch.eq.bypassed);
-      applyCompToHost(
-        host,
-        stem.id,
-        ch.comp.threshold,
-        ch.comp.ratio,
-        ch.compType,
-        ch.comp.bypassed
-      );
+      applyCompToHost(host, stem.id, ch.comp, ch.compType);
       host.setChannelTransient(stem.id, ch.transient.attack, ch.transient.sustain);
       host.setChannelTransientBypassed(stem.id, ch.transient.bypassed);
       host.setChannelDeEss(stem.id, ch.deess.freq, ch.deess.amount);
@@ -984,20 +988,13 @@ export function MixerShell({
     });
   }, []);
 
-  const setComp = useCallback((stemId: string, field: 'threshold' | 'ratio', value: number) => {
+  const setComp = useCallback((stemId: string, field: CompField, value: number) => {
     setChannelState((prev) => {
       const current = prev[stemId] ?? DEFAULT_CHANNEL;
       const nextComp = { ...current.comp, [field]: value };
+      // `knee` is curve-only — no engine param — but still re-push the rest.
       const host = hostRef.current;
-      if (host)
-        applyCompToHost(
-          host,
-          stemId,
-          nextComp.threshold,
-          nextComp.ratio,
-          current.compType,
-          nextComp.bypassed
-        );
+      if (host) applyCompToHost(host, stemId, nextComp, current.compType);
       return { ...prev, [stemId]: { ...current, comp: nextComp } };
     });
   }, []);
@@ -1006,15 +1003,7 @@ export function MixerShell({
     setChannelState((prev) => {
       const current = prev[stemId] ?? DEFAULT_CHANNEL;
       const host = hostRef.current;
-      if (host)
-        applyCompToHost(
-          host,
-          stemId,
-          current.comp.threshold,
-          current.comp.ratio,
-          compType,
-          current.comp.bypassed
-        );
+      if (host) applyCompToHost(host, stemId, current.comp, compType);
       return { ...prev, [stemId]: { ...current, compType } };
     });
   }, []);
@@ -1032,17 +1021,10 @@ export function MixerShell({
     setChannelState((prev) => {
       const current = prev[stemId] ?? DEFAULT_CHANNEL;
       const bypassed = !current.comp.bypassed;
+      const nextComp = { ...current.comp, bypassed };
       const host = hostRef.current;
-      if (host)
-        applyCompToHost(
-          host,
-          stemId,
-          current.comp.threshold,
-          current.comp.ratio,
-          current.compType,
-          bypassed
-        );
-      return { ...prev, [stemId]: { ...current, comp: { ...current.comp, bypassed } } };
+      if (host) applyCompToHost(host, stemId, nextComp, current.compType);
+      return { ...prev, [stemId]: { ...current, comp: nextComp } };
     });
   }, []);
 
@@ -1786,6 +1768,7 @@ export function MixerShell({
           onEqBypass: toggleEqBypass,
           onComp: setComp,
           onCompType: setCompType,
+          onCompBypass: toggleCompBypass,
         }}
       />
     </>
