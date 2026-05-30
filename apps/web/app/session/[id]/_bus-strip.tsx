@@ -169,130 +169,133 @@ export function BusStrip({
       )}
       <div className="ch-meta">bus</div>
 
-      {referenceRoom != null && onReferenceRoom && (
-        <ReferenceRoomPicker value={referenceRoom} onChange={onReferenceRoom} />
-      )}
+      {/* Bus chain scrolls; the fader/meter footer below stays pinned. */}
+      <div className="ch-chain">
+        {referenceRoom != null && onReferenceRoom && (
+          <ReferenceRoomPicker value={referenceRoom} onChange={onReferenceRoom} />
+        )}
 
-      {limiter && onLimiter && onLimiterBypass && (
-        <div className="bus-limiter">
-          <button
-            type="button"
-            className={`bus-limiter-toggle ${limiter.bypassed ? '' : 'on'}`}
-            onClick={onLimiterBypass}
-            aria-pressed={!limiter.bypassed}
-            title={limiter.bypassed ? 'Limiter bypassed — click to engage' : 'Limiter active'}
-          >
-            Limiter
-          </button>
-          <div className="bus-limiter-knobs">
-            <div className="knob-wrap">
-              <Knob
-                value={limiter.thresholdDb}
-                min={-24}
-                max={0}
-                defaultValue={-1}
-                ariaLabel="Limiter threshold"
-                onChange={(v) => onLimiter('thresholdDb', v)}
-              />
-              <span className="knob-label">Th</span>
-              <span className="knob-readout">{formatLimiterDb(limiter.thresholdDb)}</span>
-            </div>
-            <div className="knob-wrap">
-              <Knob
-                value={limiter.makeupDb}
-                min={-12}
-                max={24}
-                defaultValue={0}
-                ariaLabel="Limiter makeup"
-                onChange={(v) => onLimiter('makeupDb', v)}
-              />
-              <span className="knob-label">Mk</span>
-              <span className="knob-readout">{formatLimiterDb(limiter.makeupDb)}</span>
+        {limiter && onLimiter && onLimiterBypass && (
+          <div className="bus-limiter">
+            <button
+              type="button"
+              className={`bus-limiter-toggle ${limiter.bypassed ? '' : 'on'}`}
+              onClick={onLimiterBypass}
+              aria-pressed={!limiter.bypassed}
+              title={limiter.bypassed ? 'Limiter bypassed — click to engage' : 'Limiter active'}
+            >
+              Limiter
+            </button>
+            <div className="bus-limiter-knobs">
+              <div className="knob-wrap">
+                <Knob
+                  value={limiter.thresholdDb}
+                  min={-24}
+                  max={0}
+                  defaultValue={-1}
+                  ariaLabel="Limiter threshold"
+                  onChange={(v) => onLimiter('thresholdDb', v)}
+                />
+                <span className="knob-label">Th</span>
+                <span className="knob-readout">{formatLimiterDb(limiter.thresholdDb)}</span>
+              </div>
+              <div className="knob-wrap">
+                <Knob
+                  value={limiter.makeupDb}
+                  min={-12}
+                  max={24}
+                  defaultValue={0}
+                  ariaLabel="Limiter makeup"
+                  onChange={(v) => onLimiter('makeupDb', v)}
+                />
+                <span className="knob-label">Mk</span>
+                <span className="knob-readout">{formatLimiterDb(limiter.makeupDb)}</span>
+              </div>
             </div>
           </div>
-        </div>
-      )}
+        )}
 
-      {onAddReverb && (
-        <div className="bus-plate">
-          {reverb ? (
-            <>
-              <div className="bus-plate-header">
-                <select
-                  className="bus-reverb-kind"
-                  value={reverb.kind}
-                  onChange={(e) => onAddReverb(e.target.value as ReverbKind)}
-                  aria-label="Reverb kind"
-                  title="Switch reverb kind"
-                >
-                  <option value="plate">Plate</option>
-                  <option value="hall">Hall</option>
-                </select>
-                <button
-                  type="button"
-                  className={`bus-limiter-toggle ${reverb.bypassed ? '' : 'on'}`}
-                  onClick={onReverbBypass}
-                  aria-pressed={!reverb.bypassed}
-                  title={reverb.bypassed ? 'Reverb bypassed — click to engage' : 'Reverb active'}
-                >
-                  On
-                </button>
-                {onRemoveReverb && (
+        {onAddReverb && (
+          <div className="bus-plate">
+            {reverb ? (
+              <>
+                <div className="bus-plate-header">
+                  <select
+                    className="bus-reverb-kind"
+                    value={reverb.kind}
+                    onChange={(e) => onAddReverb(e.target.value as ReverbKind)}
+                    aria-label="Reverb kind"
+                    title="Switch reverb kind"
+                  >
+                    <option value="plate">Plate</option>
+                    <option value="hall">Hall</option>
+                  </select>
                   <button
                     type="button"
-                    className="bus-plate-remove"
-                    aria-label="Remove reverb"
-                    title="Remove reverb"
-                    onClick={onRemoveReverb}
+                    className={`bus-limiter-toggle ${reverb.bypassed ? '' : 'on'}`}
+                    onClick={onReverbBypass}
+                    aria-pressed={!reverb.bypassed}
+                    title={reverb.bypassed ? 'Reverb bypassed — click to engage' : 'Reverb active'}
                   >
-                    ×
+                    On
                   </button>
-                )}
-              </div>
-              <div className="bus-limiter-knobs">
-                <div className="knob-wrap">
-                  <Knob
-                    value={reverb.decay}
-                    min={0}
-                    max={0.95}
-                    defaultValue={reverb.kind === 'hall' ? 0.75 : 0.55}
-                    ariaLabel="Reverb decay"
-                    onChange={(v) => onReverb?.('decay', v)}
-                  />
-                  <span className="knob-label">Dcy</span>
-                  <span className="knob-readout">{Math.round(reverb.decay * 100)}</span>
+                  {onRemoveReverb && (
+                    <button
+                      type="button"
+                      className="bus-plate-remove"
+                      aria-label="Remove reverb"
+                      title="Remove reverb"
+                      onClick={onRemoveReverb}
+                    >
+                      ×
+                    </button>
+                  )}
                 </div>
-                <div className="knob-wrap">
-                  <Knob
-                    value={reverb.damping}
-                    min={0}
-                    max={1}
-                    defaultValue={reverb.kind === 'hall' ? 0.25 : 0.4}
-                    ariaLabel="Reverb damping"
-                    onChange={(v) => onReverb?.('damping', v)}
-                  />
-                  <span className="knob-label">Dmp</span>
-                  <span className="knob-readout">{Math.round(reverb.damping * 100)}</span>
+                <div className="bus-limiter-knobs">
+                  <div className="knob-wrap">
+                    <Knob
+                      value={reverb.decay}
+                      min={0}
+                      max={0.95}
+                      defaultValue={reverb.kind === 'hall' ? 0.75 : 0.55}
+                      ariaLabel="Reverb decay"
+                      onChange={(v) => onReverb?.('decay', v)}
+                    />
+                    <span className="knob-label">Dcy</span>
+                    <span className="knob-readout">{Math.round(reverb.decay * 100)}</span>
+                  </div>
+                  <div className="knob-wrap">
+                    <Knob
+                      value={reverb.damping}
+                      min={0}
+                      max={1}
+                      defaultValue={reverb.kind === 'hall' ? 0.25 : 0.4}
+                      ariaLabel="Reverb damping"
+                      onChange={(v) => onReverb?.('damping', v)}
+                    />
+                    <span className="knob-label">Dmp</span>
+                    <span className="knob-readout">{Math.round(reverb.damping * 100)}</span>
+                  </div>
                 </div>
-              </div>
-            </>
-          ) : (
-            <select
-              className="bus-add-reverb-select"
-              value=""
-              aria-label="Add reverb"
-              onChange={(e) => {
-                const kind = e.target.value as ReverbKind | '';
-                if (kind) onAddReverb(kind);
-              }}
-            >
-              <option value="">+ reverb…</option>
-              <option value="plate">Plate</option>
-              <option value="hall">Hall</option>
-            </select>
-          )}
-        </div>
-      )}
+              </>
+            ) : (
+              <select
+                className="bus-add-reverb-select"
+                value=""
+                aria-label="Add reverb"
+                onChange={(e) => {
+                  const kind = e.target.value as ReverbKind | '';
+                  if (kind) onAddReverb(kind);
+                }}
+              >
+                <option value="">+ reverb…</option>
+                <option value="plate">Plate</option>
+                <option value="hall">Hall</option>
+              </select>
+            )}
+          </div>
+        )}
+      </div>
 
       <div className="ch-fader-meter">
         <Meter host={host} stemId={bus.id} active={active} variant="bus" />
