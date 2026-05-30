@@ -341,6 +341,10 @@ export function MixerShell({
   const [loadedIds, setLoadedIds] = useState<Set<string>>(new Set());
   const [stemsOpen, setStemsOpen] = useState(initialStems.length === 0);
   const [timelineOpen, setTimelineOpen] = useState(true);
+  /** Expand the mixer to fill the viewport (hides the timeline). */
+  const [expanded, setExpanded] = useState(false);
+  /** Resizable mixer-panel height (px) when not expanded. */
+  const [mixerHeight, setMixerHeight] = useState(440);
   const [peaks, setPeaks] = useState<Record<string, StemPeaks | undefined>>({});
   /** Open floating plugin windows. Last entry renders on top (focus). */
   const [openPlugins, setOpenPlugins] = useState<OpenPlugin[]>([]);
@@ -1340,7 +1344,11 @@ export function MixerShell({
 
   return (
     <>
-      <div className={`mixer mixer-fullscreen ${timelineOpen ? '' : 'timeline-closed'}`}>
+      <div
+        className={`mixer mixer-fullscreen ${timelineOpen && !expanded ? '' : 'timeline-closed'} ${
+          expanded ? 'mixer-expanded' : ''
+        }`}
+      >
         <div className="mixer-transport">
           <Link
             href="/"
@@ -1428,7 +1436,57 @@ export function MixerShell({
           onSelectClip={setSelectedClip}
         />
 
-        <div className="mixer-body">
+        {/* Resize divider — drag to set the mixer height (design app.jsx). */}
+        {!expanded && (
+          <button
+            type="button"
+            className="mixer-resize"
+            aria-label="Drag to resize mixer"
+            onPointerDown={(e) => {
+              const sy = e.clientY;
+              const sh = mixerHeight;
+              const move = (ev: PointerEvent) =>
+                setMixerHeight(
+                  Math.max(240, Math.min(window.innerHeight - 200, sh + (sy - ev.clientY)))
+                );
+              const up = () => {
+                window.removeEventListener('pointermove', move);
+                window.removeEventListener('pointerup', up);
+                document.body.style.cursor = '';
+              };
+              window.addEventListener('pointermove', move);
+              window.addEventListener('pointerup', up);
+              document.body.style.cursor = 'ns-resize';
+            }}
+          >
+            <span className="mixer-resize-grip" />
+          </button>
+        )}
+
+        {/* Mixer panel header — channel count + EXPAND/RESTORE (design app.jsx). */}
+        <div className="mixer-panel-head">
+          <span className="mixer-panel-title">MIXER</span>
+          <span className="mixer-panel-sub">· {stems.length} CHANNELS · FIXED CHAIN</span>
+          <span style={{ flex: 1 }} />
+          <button
+            type="button"
+            className="mixer-expand-btn"
+            onClick={() => setExpanded((v) => !v)}
+            aria-pressed={expanded}
+            title={expanded ? 'Restore' : 'Expand mixer'}
+          >
+            {expanded ? '↙ Restore' : '↗ Expand'}
+          </button>
+        </div>
+
+        <div
+          className="mixer-body"
+          style={
+            expanded
+              ? { flex: '1 1 auto', minHeight: 0 }
+              : { flex: '0 0 auto', height: mixerHeight, minHeight: 0 }
+          }
+        >
           {/* Two-row layout: controls on top scroll vertically inside their
               own container, while the names row below sits OUTSIDE the
               vertical scroll so it stays planted. Both rows share the same

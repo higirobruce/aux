@@ -184,6 +184,69 @@
  * the names row below sits OUTSIDE the vertical scroll and never gets
  * obscured by it.
  */
+/* Resize divider between the timeline and the mixer panel (design app.jsx). */
+.mixer-resize {
+  flex: 0 0 auto;
+  height: 8px;
+  width: 100%;
+  cursor: ns-resize;
+  background: var(--bg-1);
+  border: none;
+  border-top: 1px solid var(--line-2);
+  border-bottom: 1px solid var(--line);
+  display: grid;
+  place-items: center;
+  padding: 0;
+}
+.mixer-resize-grip {
+  width: 40px;
+  height: 3px;
+  border-radius: 3px;
+  background: var(--line-3);
+}
+
+/* Mixer panel header bar — "MIXER · N CHANNELS · FIXED CHAIN" + EXPAND. */
+.mixer-panel-head {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  height: 30px;
+  padding: 0 14px;
+  border-bottom: 1px solid var(--line);
+  background: var(--bg-1);
+}
+.mixer-panel-title {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.18em;
+  color: var(--gold);
+  font-weight: 600;
+}
+.mixer-panel-sub {
+  font-family: var(--font-mono);
+  font-size: 9px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--txt-2);
+}
+.mixer-expand-btn {
+  font-family: var(--font-mono);
+  font-size: 9px;
+  letter-spacing: 0.1em;
+  padding: 3px 9px;
+  border-radius: 3px;
+  border: 1px solid var(--line-2);
+  background: transparent;
+  color: var(--txt-1);
+  cursor: pointer;
+  transition: color var(--fast), border-color var(--fast);
+}
+.mixer-expand-btn:hover {
+  color: var(--gold);
+  border-color: var(--gold);
+}
+
 .mixer-console-area {
   flex: 1 1 auto;
   min-width: 0;
