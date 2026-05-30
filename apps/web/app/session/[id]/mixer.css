@@ -214,7 +214,9 @@
   gap: 0;
   padding: 10px 6px 0;
   overflow-x: hidden;
-  overflow-y: auto;
+  /* No global vertical scroll — each strip fills the height and scrolls its
+     own processing chain internally (the fader/meter footer stays pinned). */
+  overflow-y: hidden;
 }
 
 .mixer-console-names {
@@ -735,8 +737,48 @@
   margin: 0 2px;
   position: relative;
   transition: border-color 120ms ease, box-shadow 120ms ease;
-  min-height: 360px;
+  /* Fill the console height so the chain can scroll inside; the fader footer
+     pins to the bottom. */
+  height: 100%;
+  min-height: 0;
   min-width: 0;
+}
+
+/* Scrollable processing-chain region (EQ → … → sends). The fader/meter +
+   buttons + output below it are pinned (flex:0 0 auto by default). */
+.ch-chain {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+  display: flex;
+  flex-direction: column;
+}
+/* Thin scrollbar inside the strip chain. */
+.ch-chain::-webkit-scrollbar {
+  width: 6px;
+}
+
+/* ─── Per-insert accent strip (visual separation of the fixed chain) ── */
+.ch-eq {
+  border-left: 2px solid var(--gold);
+}
+.ch-comp,
+.ch-mbcomp {
+  border-left: 2px solid var(--sage);
+}
+.ch-transient,
+.ch-deess {
+  border-left: 2px solid var(--teal);
+}
+.ch-imager {
+  border-left: 2px solid var(--mauve);
+}
+.ch-tape {
+  border-left: 2px solid var(--rust);
+}
+.ch-console {
+  border-left: 2px solid var(--gold-2);
 }
 
 .ch-strip.muted {
@@ -1307,8 +1349,11 @@
   display: flex;
   gap: 5px;
   padding: 8px;
-  flex: 1;
-  min-height: 180px;
+  /* Pinned footer item (was flex:1, which starved the scrollable chain).
+     Fixed, compact height so the chain region keeps usable space on the
+     half-height mixer; the chain breathes fully once the mixer is expanded. */
+  flex: 0 0 auto;
+  height: 150px;
   align-items: stretch;
   background: rgba(0, 0, 0, 0.2);
 }
