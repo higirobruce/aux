@@ -27,7 +27,9 @@ interface Props {
   onCompType: (type: CompType) => void;
   onCompBypass: () => void;
   /** Open a floating plugin window for this channel. */
-  onOpenPlugin?: (type: 'eq' | 'comp' | 'trans' | 'tape' | 'img') => void;
+  onOpenPlugin?: (type: 'eq' | 'comp' | 'trans' | 'tape' | 'img' | 'pitch') => void;
+  /** Pitch corrector on/off (placeholder insert). */
+  onPitchBypass: () => void;
   /** Bus directory — used to populate the strip's output picker. */
   buses: Record<string, BusState>;
   onOutput: (busId: string) => void;
@@ -269,6 +271,7 @@ export function ChannelStrip({
   onConsoleBypass,
   onMbComp,
   onMbCompBypass,
+  onPitchBypass,
 }: Props) {
   const effectivelyMuted = state.muted || (anySoloed && !state.soloed);
 
@@ -426,6 +429,18 @@ export function ChannelStrip({
             />
             <span className="knob-label">Sus</span>
             <span className="knob-readout">{formatTransient(state.transient.sustain)}</span>
+          </div>
+        </StripModule>
+
+        <StripModule
+          label="PITCH"
+          accent="violet"
+          on={!state.pitch.bypassed}
+          onToggle={onPitchBypass}
+          onOpen={() => onOpenPlugin?.('pitch')}
+        >
+          <div className="ch-pitch-meta">
+            {state.pitch.key} · {state.pitch.scale}
           </div>
         </StripModule>
 

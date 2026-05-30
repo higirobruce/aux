@@ -47,9 +47,12 @@ import { z } from 'zod';
  * v23 — adds the master limiter's `style` (UI voicing only — engine limits
  *       from threshold/release/makeup). Optional default, so v1–v22 docs
  *       stay valid.
+ * v24 — adds per-channel `pitch` (corrector: key/scale + retune/amount/
+ *       humanize/formant). UI placeholder — no pitch DSP yet, persist-only.
+ *       Optional, so v1–v23 docs stay valid.
  */
 
-export const MIX_STATE_VERSION = 23;
+export const MIX_STATE_VERSION = 24;
 
 /**
  * Versions the strict parse still accepts. During the v15→v16 rollout we
@@ -57,7 +60,7 @@ export const MIX_STATE_VERSION = 23;
  * API strict-parses with this same schema). Narrow back to a single
  * `z.literal(MIX_STATE_VERSION)` once every deployed surface is on v16.
  */
-const ACCEPTED_VERSIONS = [z.literal(20), z.literal(21), z.literal(22), z.literal(23)] as const;
+const ACCEPTED_VERSIONS = [z.literal(21), z.literal(22), z.literal(23), z.literal(24)] as const;
 
 /** Stable id for the always-present Master bus. Sessions can omit it from
  *  their `buses` record; the client treats it as if explicitly present. */
@@ -199,6 +202,43 @@ export const ChannelImagerSchema = z.object({
   mode: ImagerModeSchema.default('STEREO'),
 });
 
+export const PitchKeySchema = z.enum([
+  'C',
+  'C#',
+  'D',
+  'D#',
+  'E',
+  'F',
+  'F#',
+  'G',
+  'G#',
+  'A',
+  'A#',
+  'B',
+]);
+export type PitchKey = z.infer<typeof PitchKeySchema>;
+export const PitchScaleSchema = z.enum(['Major', 'Minor', 'Chromatic', 'Pentatonic']);
+export type PitchScale = z.infer<typeof PitchScaleSchema>;
+
+/**
+ * Pitch corrector per channel (v24+). No pitch DSP yet — persisted UI state
+ * only, surfaced through a fully-interactive placeholder window.
+ */
+export const ChannelPitchSchema = z.object({
+  bypassed: z.boolean(),
+  key: PitchKeySchema,
+  scale: PitchScaleSchema,
+  /** Retune speed 0..100. */
+  speed: z.number().min(0).max(100),
+  /** Correction amount 0..100. */
+  amount: z.number().min(0).max(100),
+  /** Humanize 0..100. */
+  human: z.number().min(0).max(100),
+  /** Formant shift −100..100. */
+  formant: z.number().min(-100).max(100),
+});
+export type ChannelPitch = z.infer<typeof ChannelPitchSchema>;
+
 export const TapeModeSchema = z.enum(['TAPE', 'TUBE', 'TRANS']);
 export type TapeMode = z.infer<typeof TapeModeSchema>;
 
@@ -283,6 +323,8 @@ export const ChannelStateSchema = z.object({
   tape: ChannelTapeSchema,
   console: ChannelConsoleSchema,
   mbcomp: ChannelMbCompSchema,
+  /** Pitch corrector (v24+). Optional — placeholder, persist-only. */
+  pitch: ChannelPitchSchema.optional(),
   /** Timeline regions for this stem. Optional/absent = whole buffer at t=0
    *  (keeps v1–v15 docs valid under the strict parse). Hydration normalises
    *  this to `[]` so the engine + UI can treat "no clips" uniformly. */
@@ -497,6 +539,17 @@ export const DEFAULT_CHANNEL_MBCOMP = {
   hiThreshDb: 0,
   ratio: 4,
   bypassed: false,
+} as const;
+
+/** Default Pitch — off, A Minor, design-default knob positions. */
+export const DEFAULT_CHANNEL_PITCH = {
+  bypassed: true,
+  key: 'A',
+  scale: 'Minor',
+  speed: 40,
+  amount: 100,
+  human: 20,
+  formant: 0,
 } as const;
 
 /** Default clips — empty = play the whole stem buffer at t=0. */

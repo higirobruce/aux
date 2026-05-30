@@ -9,12 +9,12 @@
  */
 
 import type { AudioHost } from '@aux/audio-engine';
-import type { EqFullBand, LimiterState } from '@aux/session-doc';
+import type { EqFullBand, LimiterState, PitchKey, PitchScale } from '@aux/session-doc';
 import { Knob, Readout, Segmented, Spectrum, Toggle, WindowFrame, clamp } from '@aux/ui';
 import { useEffect, useRef, useState } from 'react';
 import type { ChannelState, CompField, EqBand } from './_mixer-shell';
 
-export type PluginType = 'eq' | 'comp' | 'trans' | 'tape' | 'img' | 'limiter';
+export type PluginType = 'eq' | 'comp' | 'trans' | 'tape' | 'img' | 'limiter' | 'pitch';
 export interface OpenPlugin {
   type: PluginType;
   stemId: string;
@@ -46,6 +46,10 @@ interface HostBundle {
   onLimiter: (field: 'thresholdDb' | 'releaseMs' | 'makeupDb', value: number) => void;
   onLimiterStyle: (style: 'CLEAR' | 'PUNCH' | 'GLUE' | 'SAFE') => void;
   onLimiterBypass: () => void;
+  onPitch: (stemId: string, field: 'speed' | 'amount' | 'human' | 'formant', value: number) => void;
+  onPitchKey: (stemId: string, key: PitchKey) => void;
+  onPitchScale: (stemId: string, scale: PitchScale) => void;
+  onPitchBypass: (stemId: string) => void;
 }
 
 /* ============================================================
@@ -1395,6 +1399,243 @@ function LimiterWindow({
   );
 }
 
+/* ============================================================
+   Pitch corrector — animated scale grid + raw/corrected trace
+   (visual placeholder — no pitch DSP yet)
+   ============================================================ */
+const PITCH_NOTES = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'];
+const PITCH_SCALES: Record<string, number[]> = {
+  Major: [0, 2, 4, 5, 7, 9, 11],
+  Minor: [0, 2, 3, 5, 7, 8, 10],
+  Chromatic: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11],
+  Pentatonic: [0, 2, 4, 7, 9],
+};
+const PITCH_SELECT: React.CSSProperties = {
+  background: 'var(--inset)',
+  border: '1px solid var(--line-2)',
+  borderRadius: 'var(--r-sm)',
+  color: 'var(--violet)',
+  fontFamily: 'var(--mono)',
+  fontSize: 12,
+  padding: '5px 8px',
+  fontWeight: 600,
+};
+
+function PitchGraph({
+  pkey,
+  scale,
+  speed,
+  amount,
+}: { pkey: string; scale: string; speed: number; amount: number }) {
+  const ref = useRef<HTMLCanvasElement>(null);
+  const v = useRef({ pkey, scale, speed, amount });
+  v.current = { pkey, scale, speed, amount };
+  useEffect(() => {
+    const cv = ref.current;
+    if (!cv) return;
+    const dpr = window.devicePixelRatio || 1;
+    const ctx = cv.getContext('2d');
+    if (!ctx) return;
+    const rows = 14;
+    const hist: { raw: number; corr: number }[] = [];
+    let raf = 0;
+    let t = 0;
+    const draw = () => {
+      const W = cv.clientWidth;
+      const H = cv.clientHeight;
+      cv.width = W * dpr;
+      cv.height = H * dpr;
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+      t += 0.03;
+      ctx.clearRect(0, 0, W, H);
+      const { pkey: k, scale: sc, speed: sp, amount: am } = v.current;
+      const keyRoot = Math.max(0, PITCH_NOTES.indexOf(k));
+      const scaleNotes = PITCH_SCALES[sc] ?? PITCH_SCALES.Chromatic;
+      const inScale = (semi: number) => (scaleNotes ?? []).includes(((semi % 12) + 12) % 12);
+      const rowH = H / rows;
+      ctx.font = '9px IBM Plex Mono';
+      for (let r = 0; r < rows; r++) {
+        const semi = keyRoot + (rows - 1 - r);
+        const y = r * rowH;
+        if (inScale(semi)) {
+          ctx.fillStyle = 'rgba(143,127,214,0.07)';
+          ctx.fillRect(0, y, W, rowH);
+        }
+        ctx.strokeStyle = 'rgba(255,240,210,0.04)';
+        ctx.beginPath();
+        ctx.moveTo(0, y);
+        ctx.lineTo(W, y);
+        ctx.stroke();
+        ctx.fillStyle = inScale(semi) ? '#8f7fd6' : '#564b39';
+        ctx.fillText(PITCH_NOTES[((semi % 12) + 12) % 12] ?? '', 4, y + rowH / 2 + 3);
+      }
+      const targetSemi = rows / 2 + 2.5 * Math.sin(t * 0.5) + Math.floor((t * 0.7) % 3);
+      const raw = targetSemi + 0.6 * Math.sin(t * 9) + 0.3 * (Math.random() - 0.5);
+      let snapped = Math.round(raw);
+      for (let d = 0; d < 7; d++) {
+        if (inScale(keyRoot + Math.round(raw + d))) {
+          snapped = Math.round(raw + d);
+          break;
+        }
+        if (inScale(keyRoot + Math.round(raw - d))) {
+          snapped = Math.round(raw - d);
+          break;
+        }
+      }
+      const corrected = raw + (snapped - raw) * (0.15 + (sp / 100) * 0.85) * (am / 100);
+      hist.push({ raw, corr: corrected });
+      if (hist.length > W / 2) hist.shift();
+      const yOf = (semi: number) => H - (semi / rows) * H;
+      ctx.strokeStyle = 'rgba(178,133,172,0.5)';
+      ctx.lineWidth = 1.5;
+      ctx.beginPath();
+      hist.forEach((h, i) => (i ? ctx.lineTo(i * 2, yOf(h.raw)) : ctx.moveTo(i * 2, yOf(h.raw))));
+      ctx.stroke();
+      ctx.strokeStyle = '#8f7fd6';
+      ctx.lineWidth = 2.5;
+      ctx.shadowColor = '#8f7fd6';
+      ctx.shadowBlur = 6;
+      ctx.beginPath();
+      hist.forEach((h, i) => (i ? ctx.lineTo(i * 2, yOf(h.corr)) : ctx.moveTo(i * 2, yOf(h.corr))));
+      ctx.stroke();
+      ctx.shadowBlur = 0;
+      const last = hist[hist.length - 1];
+      if (last) {
+        ctx.fillStyle = '#8f7fd6';
+        ctx.beginPath();
+        ctx.arc((hist.length - 1) * 2, yOf(last.corr), 4, 0, 7);
+        ctx.fill();
+      }
+      raf = requestAnimationFrame(draw);
+    };
+    draw();
+    return () => cancelAnimationFrame(raf);
+  }, []);
+  return <canvas ref={ref} style={{ width: '100%', height: '100%', display: 'block' }} />;
+}
+
+function PitchWindow({
+  b,
+  p,
+  z,
+  onClose,
+  onFocus,
+}: { b: HostBundle; p: OpenPlugin; z: number; onClose: () => void; onFocus: () => void }) {
+  const ch = b.channelState[p.stemId];
+  if (!ch) return null;
+  const pt = ch.pitch;
+  return (
+    <WindowFrame
+      title="PITCH"
+      sub={`CORRECTOR · ${b.stemName(p.stemId)}`}
+      accent="violet"
+      width={484}
+      z={z}
+      initial={{ x: 360, y: 110 }}
+      onClose={onClose}
+      onFocus={onFocus}
+      bypass={pt.bypassed}
+      onBypass={() => b.onPitchBypass(p.stemId)}
+    >
+      <div style={{ padding: 12, width: 460 }}>
+        <div
+          style={{
+            height: 180,
+            background: 'var(--inset)',
+            borderRadius: 'var(--r-md)',
+            border: '1px solid var(--line)',
+            overflow: 'hidden',
+          }}
+        >
+          <PitchGraph pkey={pt.key} scale={pt.scale} speed={pt.speed} amount={pt.amount} />
+        </div>
+        <div style={{ display: 'flex', gap: 12, marginTop: 12, alignItems: 'center' }}>
+          <label style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+            <span className="lbl" style={{ fontSize: 8 }}>
+              KEY
+            </span>
+            <select
+              value={pt.key}
+              onChange={(e) => b.onPitchKey(p.stemId, e.target.value as PitchKey)}
+              style={PITCH_SELECT}
+            >
+              {PITCH_NOTES.map((n) => (
+                <option key={n}>{n}</option>
+              ))}
+            </select>
+          </label>
+          <label style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+            <span className="lbl" style={{ fontSize: 8 }}>
+              SCALE
+            </span>
+            <select
+              value={pt.scale}
+              onChange={(e) => b.onPitchScale(p.stemId, e.target.value as PitchScale)}
+              style={PITCH_SELECT}
+            >
+              {Object.keys(PITCH_SCALES).map((n) => (
+                <option key={n}>{n}</option>
+              ))}
+            </select>
+          </label>
+          <div style={{ width: 1, height: 50, background: 'var(--line)' }} />
+          <div style={{ display: 'flex', gap: 16, flex: 1, justifyContent: 'space-around' }}>
+            <Knob
+              size={44}
+              label="RETUNE"
+              value={pt.speed}
+              min={0}
+              max={100}
+              defaultValue={40}
+              accent="violet"
+              display={pt.speed.toFixed(0)}
+              ariaLabel="retune speed"
+              onChange={(val) => b.onPitch(p.stemId, 'speed', val)}
+            />
+            <Knob
+              size={44}
+              label="AMOUNT"
+              value={pt.amount}
+              min={0}
+              max={100}
+              defaultValue={100}
+              accent="violet"
+              display={pt.amount.toFixed(0)}
+              ariaLabel="correction amount"
+              onChange={(val) => b.onPitch(p.stemId, 'amount', val)}
+            />
+            <Knob
+              size={44}
+              label="HUMANIZE"
+              value={pt.human}
+              min={0}
+              max={100}
+              defaultValue={20}
+              accent="violet"
+              display={pt.human.toFixed(0)}
+              ariaLabel="humanize"
+              onChange={(val) => b.onPitch(p.stemId, 'human', val)}
+            />
+            <Knob
+              size={44}
+              label="FORMANT"
+              value={pt.formant}
+              min={-100}
+              max={100}
+              bipolar
+              defaultValue={0}
+              accent="violet"
+              display={(pt.formant > 0 ? '+' : '') + pt.formant.toFixed(0)}
+              ariaLabel="formant"
+              onChange={(val) => b.onPitch(p.stemId, 'formant', val)}
+            />
+          </div>
+        </div>
+      </div>
+    </WindowFrame>
+  );
+}
+
 export function PluginWindows({
   windows,
   onClose,
@@ -1422,6 +1663,7 @@ export function PluginWindows({
         if (p.type === 'trans') return <TransWindow key={key} {...props} />;
         if (p.type === 'tape') return <TapeWindow key={key} {...props} />;
         if (p.type === 'img') return <ImagerWindow key={key} {...props} />;
+        if (p.type === 'pitch') return <PitchWindow key={key} {...props} />;
         if (p.type === 'limiter')
           return (
             <LimiterWindow

@@ -21,6 +21,7 @@ import {
   DEFAULT_CHANNEL_EQ,
   DEFAULT_CHANNEL_IMAGER,
   DEFAULT_CHANNEL_MBCOMP,
+  DEFAULT_CHANNEL_PITCH,
   DEFAULT_CHANNEL_TAPE,
   DEFAULT_CHANNEL_TRANSIENT,
   DEFAULT_COMP_TYPE,
@@ -37,6 +38,8 @@ import {
   MIX_STATE_VERSION,
   type MasterChain,
   MixStateSchema,
+  type PitchKey,
+  type PitchScale,
   type ReverbState,
   type StemClip,
   type TapeMode,
@@ -117,6 +120,16 @@ export interface ChannelState {
     ratio: number;
     bypassed: boolean;
   };
+  /** Pitch corrector — placeholder (no DSP), persisted UI state. */
+  pitch: {
+    bypassed: boolean;
+    key: PitchKey;
+    scale: PitchScale;
+    speed: number;
+    amount: number;
+    human: number;
+    formant: number;
+  };
   /** Timeline regions for this stem. Always concrete in memory (hydration
    *  normalises absent/optional to []); empty = whole buffer at t=0. */
   clips: StemClip[];
@@ -139,6 +152,7 @@ const DEFAULT_CHANNEL: ChannelState = {
   tape: { ...DEFAULT_CHANNEL_TAPE },
   console: { ...DEFAULT_CHANNEL_CONSOLE },
   mbcomp: { ...DEFAULT_CHANNEL_MBCOMP },
+  pitch: { ...DEFAULT_CHANNEL_PITCH },
   clips: [...DEFAULT_STEM_CLIPS],
 };
 const AUTOSAVE_DEBOUNCE_MS = 600;
@@ -206,6 +220,7 @@ function hydrateMixState(raw: unknown): HydratedMix {
         clips: ch.clips ?? [],
         eqFull,
         eq: { ...ch.eq, ...quickFromEqFull(eqFull) },
+        pitch: ch.pitch ?? { ...DEFAULT_CHANNEL_PITCH },
       };
     }
     return {
@@ -256,6 +271,7 @@ function hydrateMixState(raw: unknown): HydratedMix {
       tape: { ...DEFAULT_CHANNEL_TAPE, ...c.tape },
       console: c.console ?? { ...DEFAULT_CHANNEL_CONSOLE },
       mbcomp: c.mbcomp ?? { ...DEFAULT_CHANNEL_MBCOMP },
+      pitch: { ...DEFAULT_CHANNEL_PITCH, ...c.pitch },
       clips: c.clips ?? [],
     };
   }
@@ -1125,6 +1141,39 @@ export function MixerShell({
     });
   }, []);
 
+  // Pitch is a placeholder (no DSP) — these only update + persist UI state.
+  const setPitch = useCallback(
+    (stemId: string, field: 'speed' | 'amount' | 'human' | 'formant', value: number) => {
+      setChannelState((prev) => {
+        const current = prev[stemId] ?? DEFAULT_CHANNEL;
+        return { ...prev, [stemId]: { ...current, pitch: { ...current.pitch, [field]: value } } };
+      });
+    },
+    []
+  );
+
+  const setPitchKey = useCallback((stemId: string, key: PitchKey) => {
+    setChannelState((prev) => {
+      const current = prev[stemId] ?? DEFAULT_CHANNEL;
+      return { ...prev, [stemId]: { ...current, pitch: { ...current.pitch, key } } };
+    });
+  }, []);
+
+  const setPitchScale = useCallback((stemId: string, scale: PitchScale) => {
+    setChannelState((prev) => {
+      const current = prev[stemId] ?? DEFAULT_CHANNEL;
+      return { ...prev, [stemId]: { ...current, pitch: { ...current.pitch, scale } } };
+    });
+  }, []);
+
+  const togglePitchBypass = useCallback((stemId: string) => {
+    setChannelState((prev) => {
+      const current = prev[stemId] ?? DEFAULT_CHANNEL;
+      const bypassed = !current.pitch.bypassed;
+      return { ...prev, [stemId]: { ...current, pitch: { ...current.pitch, bypassed } } };
+    });
+  }, []);
+
   const toggleImagerBypass = useCallback((stemId: string) => {
     setChannelState((prev) => {
       const current = prev[stemId] ?? DEFAULT_CHANNEL;
@@ -1703,6 +1752,7 @@ export function MixerShell({
                           onConsoleBypass={() => toggleConsoleBypass(stem.id)}
                           onMbComp={(field, value) => setMbComp(stem.id, field, value)}
                           onMbCompBypass={() => toggleMbCompBypass(stem.id)}
+                          onPitchBypass={() => togglePitchBypass(stem.id)}
                         />
                       );
                     })
@@ -1841,6 +1891,10 @@ export function MixerShell({
           onLimiter: setLimiter,
           onLimiterStyle: setLimiterStyle,
           onLimiterBypass: toggleLimiterBypass,
+          onPitch: setPitch,
+          onPitchKey: setPitchKey,
+          onPitchScale: setPitchScale,
+          onPitchBypass: togglePitchBypass,
         }}
       />
     </>

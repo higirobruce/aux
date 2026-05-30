@@ -938,6 +938,16 @@
   font-size: 8px;
   color: var(--txt-3, #7e7058);
 }
+/* PITCH module has no strip knobs (window-only) — show key/scale instead. */
+.ch-pitch-meta {
+  width: 100%;
+  text-align: center;
+  font-family: var(--font-mono);
+  font-size: 9px;
+  letter-spacing: 0.08em;
+  color: var(--txt-2, #b6a88f);
+}
+
 /* COMP stacks the clean/color selector above its knob pair. */
 .ch-comp-stack {
   width: 100%;
