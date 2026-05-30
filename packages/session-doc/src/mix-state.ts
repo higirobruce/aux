@@ -30,9 +30,13 @@ import { z } from 'zod';
  *       at t=0, so v1–v15 docs stay correct without a rewrite.
  * v17 — adds `bypassed` to per-channel `eq` and `comp`. Optional with a
  *       `false` default, so v1–v16 docs stay valid (missing = engaged).
+ * v18 — adds per-channel `eqFull` (5-band parametric: HP / low-shelf / two
+ *       peaks / high-shelf, each type/freq/gain/q/on + an analyzer flag).
+ *       Optional; when absent, hydration derives it from the legacy
+ *       `eq.{lo,mid,hi}` quick knobs, which stay a mirror of bands 1/2/4.
  */
 
-export const MIX_STATE_VERSION = 17;
+export const MIX_STATE_VERSION = 18;
 
 /**
  * Versions the strict parse still accepts. During the v15→v16 rollout we
@@ -40,7 +44,7 @@ export const MIX_STATE_VERSION = 17;
  * API strict-parses with this same schema). Narrow back to a single
  * `z.literal(MIX_STATE_VERSION)` once every deployed surface is on v16.
  */
-const ACCEPTED_VERSIONS = [z.literal(15), z.literal(16), z.literal(17)] as const;
+const ACCEPTED_VERSIONS = [z.literal(15), z.literal(16), z.literal(17), z.literal(18)] as const;
 
 /** Stable id for the always-present Master bus. Sessions can omit it from
  *  their `buses` record; the client treats it as if explicitly present. */
@@ -84,15 +88,44 @@ export const CompTypeSchema = z.enum(['clean', 'color']);
 export type CompType = z.infer<typeof CompTypeSchema>;
 
 export const ChannelEqSchema = z.object({
-  /** Low-shelf gain in dB (band 1, freq 100 Hz). */
+  /** Low-shelf gain in dB — mirrors eqFull band 1. */
   lo: z.number().min(-24).max(24),
-  /** Mid-peak gain in dB (band 3, freq 1 kHz). */
+  /** Mid-peak gain in dB — mirrors eqFull band 2. */
   mid: z.number().min(-24).max(24),
-  /** High-shelf gain in dB (band 6, freq 8 kHz). */
+  /** High-shelf gain in dB — mirrors eqFull band 4. */
   hi: z.number().min(-24).max(24),
   /** Insert bypass (v17+). Optional/false on v1–v16 docs = engaged. */
   bypassed: z.boolean().default(false),
 });
+
+/** Band types for the full parametric EQ (mirror the engine's Eq8 enum). */
+export const EqFullBandTypeSchema = z.enum(['hp', 'lowshelf', 'peak', 'highshelf', 'lp']);
+export type EqFullBandType = z.infer<typeof EqFullBandTypeSchema>;
+
+/** One band of the 5-band parametric EQ (v18+). */
+export const EqFullBandSchema = z.object({
+  /** Stable band index 0..4 (also its EQ-8 slot). */
+  id: z.number().int().min(0).max(7),
+  type: EqFullBandTypeSchema,
+  /** Centre/corner frequency in Hz, 20..20000. */
+  freq: z.number().min(20).max(20000),
+  /** Gain in dB (shelves + peaks; ignored by HP/LP), −24..24. */
+  gain: z.number().min(-24).max(24),
+  /** Resonance (peaks) / slope (shelves, HP/LP), 0.2..6. */
+  q: z.number().min(0.2).max(6),
+  /** Per-band enable; off = that slot passes through. */
+  on: z.boolean(),
+});
+export type EqFullBand = z.infer<typeof EqFullBandSchema>;
+
+/** Full parametric EQ (v18+). Optional; hydration derives it from the
+ *  legacy `eq.{lo,mid,hi}` quick knobs when a v1–v17 doc lacks it. */
+export const ChannelEqFullSchema = z.object({
+  bands: z.array(EqFullBandSchema),
+  /** Live analyzer (spectrum) shown behind the curve. */
+  analyzer: z.boolean().default(true),
+});
+export type ChannelEqFull = z.infer<typeof ChannelEqFullSchema>;
 
 export const ChannelCompSchema = z.object({
   /** Threshold in dB, −80..+12. */
@@ -196,6 +229,8 @@ export const ChannelStateSchema = z.object({
   muted: z.boolean(),
   soloed: z.boolean(),
   eq: ChannelEqSchema,
+  /** Full 5-band parametric EQ (v18+). Optional — derived from `eq` on load. */
+  eqFull: ChannelEqFullSchema.optional(),
   comp: ChannelCompSchema,
   compType: CompTypeSchema,
   outputBusId: z.string().min(1),
@@ -310,6 +345,47 @@ export const DEFAULT_MASTER_BUS: BusState = {
 };
 
 export const DEFAULT_CHANNEL_EQ: ChannelEq = { lo: 0, mid: 0, hi: 0, bypassed: false };
+
+/**
+ * Default 5-band parametric layout (HP / low-shelf / two peaks / high-shelf),
+ * all flat. The HP starts off so a fresh channel is fully transparent. Band
+ * ids double as EQ-8 slots; the strip's Lo/Mid/Hi mirror bands 1/2/4.
+ */
+export const DEFAULT_EQ_FULL_BANDS: EqFullBand[] = [
+  { id: 0, type: 'hp', freq: 32, gain: 0, q: 0.7, on: false },
+  { id: 1, type: 'lowshelf', freq: 120, gain: 0, q: 0.7, on: true },
+  { id: 2, type: 'peak', freq: 650, gain: 0, q: 1.4, on: true },
+  { id: 3, type: 'peak', freq: 3200, gain: 0, q: 1.0, on: true },
+  { id: 4, type: 'highshelf', freq: 9000, gain: 0, q: 0.7, on: true },
+];
+
+/** Band ids the strip's Lo / Mid / Hi quick knobs drive. */
+export const EQ_QUICK_BAND_IDS = { lo: 1, mid: 2, hi: 4 } as const;
+
+/** Build a full-EQ state from the legacy quick knobs (used on hydration of a
+ *  pre-v18 doc, and as the v18 default). */
+/** Read the Lo/Mid/Hi quick-knob gains back out of a full-EQ state, so the
+ *  strip's quick knobs stay a faithful mirror of bands 1/2/4 on load. */
+export function quickFromEqFull(eqFull: ChannelEqFull): { lo: number; mid: number; hi: number } {
+  const gainOf = (id: number) => eqFull.bands.find((b) => b.id === id)?.gain ?? 0;
+  return {
+    lo: gainOf(EQ_QUICK_BAND_IDS.lo),
+    mid: gainOf(EQ_QUICK_BAND_IDS.mid),
+    hi: gainOf(EQ_QUICK_BAND_IDS.hi),
+  };
+}
+
+export function eqFullFromQuick(eq: { lo: number; mid: number; hi: number }): ChannelEqFull {
+  const quickGain: Record<number, number> = {
+    [EQ_QUICK_BAND_IDS.lo]: eq.lo,
+    [EQ_QUICK_BAND_IDS.mid]: eq.mid,
+    [EQ_QUICK_BAND_IDS.hi]: eq.hi,
+  };
+  const bands = DEFAULT_EQ_FULL_BANDS.map((b) =>
+    b.id in quickGain ? { ...b, gain: quickGain[b.id] ?? b.gain } : { ...b }
+  );
+  return { bands, analyzer: true };
+}
 /**
  * Default Comp-Clean state — ratio 1.0 means the DSP fast-paths to a
  * passthrough, so a fresh channel is acoustically transparent.

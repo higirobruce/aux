@@ -13,6 +13,7 @@ import {
   type BusState,
   COMP_COLOR_DEFAULTS,
   COMP_DEFAULTS,
+  type ChannelEqFull,
   type CompType,
   DEFAULT_CHANNEL_COMP,
   DEFAULT_CHANNEL_CONSOLE,
@@ -27,6 +28,9 @@ import {
   DEFAULT_MASTER_BUS,
   DEFAULT_MASTER_CHAIN,
   DEFAULT_STEM_CLIPS,
+  EQ_QUICK_BAND_IDS,
+  type EqFullBand,
+  type EqFullBandType,
   type LimiterState,
   MIX_STATE_VERSION,
   type MasterChain,
@@ -34,6 +38,8 @@ import {
   type ReverbState,
   type StemClip,
   defaultReverb,
+  eqFullFromQuick,
+  quickFromEqFull,
 } from '@aux/session-doc';
 import Link from 'next/link';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
@@ -60,7 +66,9 @@ export interface ChannelState {
   pan: number; // -1..1
   muted: boolean;
   soloed: boolean;
-  eq: { lo: number; mid: number; hi: number; bypassed: boolean }; // dB, ±24
+  eq: { lo: number; mid: number; hi: number; bypassed: boolean }; // dB, ±24 (quick knobs)
+  /** Full 5-band parametric EQ — source of truth; eq.{lo,mid,hi} mirror bands 1/2/4. */
+  eqFull: ChannelEqFull;
   comp: { threshold: number; ratio: number; bypassed: boolean }; // dB threshold + n:1 ratio
   compType: CompType; // 'clean' (VCA) or 'color' (FET)
   outputBusId: string;
@@ -95,6 +103,7 @@ const DEFAULT_CHANNEL: ChannelState = {
   muted: false,
   soloed: false,
   eq: { ...DEFAULT_CHANNEL_EQ },
+  eqFull: eqFullFromQuick(DEFAULT_CHANNEL_EQ),
   comp: { ...DEFAULT_CHANNEL_COMP },
   compType: DEFAULT_COMP_TYPE,
   outputBusId: MASTER_BUS_ID,
@@ -163,7 +172,13 @@ function hydrateMixState(raw: unknown): HydratedMix {
     // engine + timeline can treat "no clips" uniformly as a whole-buffer clip.
     const channels: Record<string, ChannelState> = {};
     for (const [id, ch] of Object.entries(current.data.channels)) {
-      channels[id] = { ...ch, clips: ch.clips ?? [] };
+      const eqFull = ch.eqFull ?? eqFullFromQuick(ch.eq);
+      channels[id] = {
+        ...ch,
+        clips: ch.clips ?? [],
+        eqFull,
+        eq: { ...ch.eq, ...quickFromEqFull(eqFull) },
+      };
     }
     return {
       channels,
@@ -196,7 +211,13 @@ function hydrateMixState(raw: unknown): HydratedMix {
       pan: c.pan,
       muted: c.muted,
       soloed: c.soloed,
-      eq: { ...DEFAULT_CHANNEL_EQ, ...c.eq, bypassed: c.eq?.bypassed ?? false },
+      eq: {
+        ...DEFAULT_CHANNEL_EQ,
+        ...c.eq,
+        bypassed: c.eq?.bypassed ?? false,
+        ...quickFromEqFull(c.eqFull ?? eqFullFromQuick({ ...DEFAULT_CHANNEL_EQ, ...c.eq })),
+      },
+      eqFull: c.eqFull ?? eqFullFromQuick({ ...DEFAULT_CHANNEL_EQ, ...c.eq }),
       comp: { ...DEFAULT_CHANNEL_COMP, ...c.comp, bypassed: c.comp?.bypassed ?? false },
       compType: c.compType ?? DEFAULT_COMP_TYPE,
       outputBusId: c.outputBusId ?? MASTER_BUS_ID,
@@ -282,6 +303,27 @@ function hydrateMixState(raw: unknown): HydratedMix {
  * Module-level (not closed over component state) so it can be referenced
  * from useCallback bodies without joining their dep arrays.
  */
+/** Design band type → engine Eq8 numeric band type. */
+const EQ_TYPE_TO_ENGINE: Record<EqFullBandType, Eq8BandType> = {
+  hp: Eq8BandType.HighPass,
+  lowshelf: Eq8BandType.LowShelf,
+  peak: Eq8BandType.Peak,
+  highshelf: Eq8BandType.HighShelf,
+  lp: Eq8BandType.LowPass,
+};
+
+/** Push one full-EQ band to the engine. A disabled band parks its slot as
+ *  Bypass so it passes through without disturbing the others. */
+function applyEqBandToHost(host: AudioHost, stemId: string, band: EqFullBand): void {
+  const type = band.on ? EQ_TYPE_TO_ENGINE[band.type] : Eq8BandType.Bypass;
+  host.setChannelEqBand(stemId, band.id, type, band.freq, band.gain, band.q);
+}
+
+/** Push the whole 5-band EQ to the engine (used on load + flavour changes). */
+function applyEqFullToHost(host: AudioHost, stemId: string, eqFull: ChannelEqFull): void {
+  for (const band of eqFull.bands) applyEqBandToHost(host, stemId, band);
+}
+
 function applyCompToHost(
   host: AudioHost,
   stemId: string,
@@ -668,10 +710,7 @@ export function MixerShell({
       host.setChannelPan(stem.id, ch.pan, 0);
       host.setChannelMute(stem.id, ch.muted);
       host.setChannelSolo(stem.id, ch.soloed);
-      for (const band of ['lo', 'mid', 'hi'] as const) {
-        const { idx, type, freq, q } = EQ_BANDS[band];
-        host.setChannelEqBand(stem.id, idx, type, freq, ch.eq[band], q);
-      }
+      applyEqFullToHost(host, stem.id, ch.eqFull);
       host.setChannelEqBypassed(stem.id, ch.eq.bypassed);
       applyCompToHost(
         host,
@@ -900,15 +939,48 @@ export function MixerShell({
     });
   }, []);
 
+  // Strip quick knob (Lo/Mid/Hi) → drive the mapped full-EQ band's gain, and
+  // keep eq.{lo,mid,hi} as a mirror so the legacy fields persist.
   const setEq = useCallback((stemId: string, band: EqBand, gainDb: number) => {
-    const { idx, type, freq, q } = EQ_BANDS[band];
-    hostRef.current?.setChannelEqBand(stemId, idx, type, freq, gainDb, q);
+    const bandId = EQ_QUICK_BAND_IDS[band];
     setChannelState((prev) => {
       const current = prev[stemId] ?? DEFAULT_CHANNEL;
+      const bands = current.eqFull.bands.map((b) => (b.id === bandId ? { ...b, gain: gainDb } : b));
+      const changed = bands.find((b) => b.id === bandId);
+      if (changed && hostRef.current) applyEqBandToHost(hostRef.current, stemId, changed);
       return {
         ...prev,
-        [stemId]: { ...current, eq: { ...current.eq, [band]: gainDb } },
+        [stemId]: {
+          ...current,
+          eq: { ...current.eq, [band]: gainDb },
+          eqFull: { ...current.eqFull, bands },
+        },
       };
+    });
+  }, []);
+
+  // EQ window → edit any band (freq/gain/q/type/on). Mirror gain back into the
+  // quick knobs when a mapped band changes so the strip stays in sync.
+  const setEqBand = useCallback((stemId: string, bandId: number, patch: Partial<EqFullBand>) => {
+    setChannelState((prev) => {
+      const current = prev[stemId] ?? DEFAULT_CHANNEL;
+      const bands = current.eqFull.bands.map((b) => (b.id === bandId ? { ...b, ...patch } : b));
+      const changed = bands.find((b) => b.id === bandId);
+      if (changed && hostRef.current) applyEqBandToHost(hostRef.current, stemId, changed);
+      const eq = { ...current.eq };
+      if (patch.gain !== undefined) {
+        if (bandId === EQ_QUICK_BAND_IDS.lo) eq.lo = patch.gain;
+        else if (bandId === EQ_QUICK_BAND_IDS.mid) eq.mid = patch.gain;
+        else if (bandId === EQ_QUICK_BAND_IDS.hi) eq.hi = patch.gain;
+      }
+      return { ...prev, [stemId]: { ...current, eq, eqFull: { ...current.eqFull, bands } } };
+    });
+  }, []);
+
+  const setEqAnalyzer = useCallback((stemId: string, analyzer: boolean) => {
+    setChannelState((prev) => {
+      const current = prev[stemId] ?? DEFAULT_CHANNEL;
+      return { ...prev, [stemId]: { ...current, eqFull: { ...current.eqFull, analyzer } } };
     });
   }, []);
 
@@ -1709,6 +1781,9 @@ export function MixerShell({
           channelState,
           stemName: (id) => stems.find((s) => s.id === id)?.name ?? id,
           onEq: setEq,
+          onEqBand: setEqBand,
+          onEqAnalyzer: setEqAnalyzer,
+          onEqBypass: toggleEqBypass,
           onComp: setComp,
           onCompType: setCompType,
         }}
