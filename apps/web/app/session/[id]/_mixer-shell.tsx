@@ -13,6 +13,7 @@ import {
   type BusState,
   COMP_COLOR_DEFAULTS,
   COMP_DEFAULTS,
+  type ChannelEqFull,
   type CompType,
   DEFAULT_CHANNEL_COMP,
   DEFAULT_CHANNEL_CONSOLE,
@@ -20,6 +21,7 @@ import {
   DEFAULT_CHANNEL_EQ,
   DEFAULT_CHANNEL_IMAGER,
   DEFAULT_CHANNEL_MBCOMP,
+  DEFAULT_CHANNEL_PITCH,
   DEFAULT_CHANNEL_TAPE,
   DEFAULT_CHANNEL_TRANSIENT,
   DEFAULT_COMP_TYPE,
@@ -27,18 +29,29 @@ import {
   DEFAULT_MASTER_BUS,
   DEFAULT_MASTER_CHAIN,
   DEFAULT_STEM_CLIPS,
+  EQ_QUICK_BAND_IDS,
+  type EqFullBand,
+  type EqFullBandType,
+  type ImagerMode,
   type LimiterState,
+  type LimiterStyle,
   MIX_STATE_VERSION,
   type MasterChain,
   MixStateSchema,
+  type PitchKey,
+  type PitchScale,
   type ReverbState,
   type StemClip,
+  type TapeMode,
+  type TransientMode,
   defaultReverb,
+  eqFullFromQuick,
+  quickFromEqFull,
 } from '@aux/session-doc';
 import Link from 'next/link';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { BusStrip } from './_bus-strip';
-import { ChannelStrip, ChannelStripName } from './_channel-strip';
+import { ChannelStrip } from './_channel-strip';
 import { type OpenPlugin, type PluginType, PluginWindows } from './_plugin-windows';
 import { StemDropZone } from './_stem-drop-zone';
 import { type StemPeaks, StemTimeline } from './_stem-timeline';
@@ -60,20 +73,43 @@ export interface ChannelState {
   pan: number; // -1..1
   muted: boolean;
   soloed: boolean;
-  eq: { lo: number; mid: number; hi: number }; // dB, ±24
-  comp: { threshold: number; ratio: number }; // dB threshold + n:1 ratio
+  eq: { lo: number; mid: number; hi: number; bypassed: boolean }; // dB, ±24 (quick knobs)
+  /** Full 5-band parametric EQ — source of truth; eq.{lo,mid,hi} mirror bands 1/2/4. */
+  eqFull: ChannelEqFull;
+  comp: {
+    threshold: number; // dB
+    ratio: number; // n:1
+    bypassed: boolean;
+    attackMs: number;
+    releaseMs: number;
+    makeupDb: number;
+    knee: number; // UI/curve only
+  };
   compType: CompType; // 'clean' (VCA) or 'color' (FET)
   outputBusId: string;
   /** Post-fader aux sends keyed by destination bus id (linear 0..2). */
   sends: Record<string, number>;
-  /** Transient designer — both knobs ∈ [-1, 1]. */
-  transient: { attack: number; sustain: number; bypassed: boolean };
+  /** Transient designer — both knobs ∈ [-1, 1]; sens/mode are UI-only. */
+  transient: {
+    attack: number;
+    sustain: number;
+    bypassed: boolean;
+    sens: number;
+    mode: TransientMode;
+  };
   /** DeEss — split-band sibilance tamer. */
   deess: { freq: number; amount: number; bypassed: boolean };
-  /** Imager — M/S stereo width. */
-  imager: { width: number; bypassed: boolean };
-  /** Tape — single-stage saturation. */
-  tape: { driveDb: number; tone: number; mix: number; bypassed: boolean };
+  /** Imager — M/S stereo width; balance/mode are UI/goniometer-only. */
+  imager: { width: number; bypassed: boolean; balance: number; mode: ImagerMode };
+  /** Tape — single-stage saturation; bias/mode are UI/visual-only. */
+  tape: {
+    driveDb: number;
+    tone: number;
+    mix: number;
+    bypassed: boolean;
+    bias: number;
+    mode: TapeMode;
+  };
   /** Console — asymmetric channel-strip saturation. */
   console: { driveDb: number; character: number; mix: number; bypassed: boolean };
   /** MB-Comp — 3-band multiband compressor (per-band thresholds + shared ratio). */
@@ -83,6 +119,16 @@ export interface ChannelState {
     hiThreshDb: number;
     ratio: number;
     bypassed: boolean;
+  };
+  /** Pitch corrector — placeholder (no DSP), persisted UI state. */
+  pitch: {
+    bypassed: boolean;
+    key: PitchKey;
+    scale: PitchScale;
+    speed: number;
+    amount: number;
+    human: number;
+    formant: number;
   };
   /** Timeline regions for this stem. Always concrete in memory (hydration
    *  normalises absent/optional to []); empty = whole buffer at t=0. */
@@ -95,6 +141,7 @@ const DEFAULT_CHANNEL: ChannelState = {
   muted: false,
   soloed: false,
   eq: { ...DEFAULT_CHANNEL_EQ },
+  eqFull: eqFullFromQuick(DEFAULT_CHANNEL_EQ),
   comp: { ...DEFAULT_CHANNEL_COMP },
   compType: DEFAULT_COMP_TYPE,
   outputBusId: MASTER_BUS_ID,
@@ -105,6 +152,7 @@ const DEFAULT_CHANNEL: ChannelState = {
   tape: { ...DEFAULT_CHANNEL_TAPE },
   console: { ...DEFAULT_CHANNEL_CONSOLE },
   mbcomp: { ...DEFAULT_CHANNEL_MBCOMP },
+  pitch: { ...DEFAULT_CHANNEL_PITCH },
   clips: [...DEFAULT_STEM_CLIPS],
 };
 const AUTOSAVE_DEBOUNCE_MS = 600;
@@ -120,6 +168,9 @@ const EQ_BANDS = {
   hi: { idx: 6, type: Eq8BandType.HighShelf, freq: 8000, q: Math.SQRT1_2 },
 } as const;
 export type EqBand = keyof typeof EQ_BANDS;
+
+/** Editable compressor fields (strip sends threshold/ratio; window sends all). */
+export type CompField = 'threshold' | 'ratio' | 'attackMs' | 'releaseMs' | 'makeupDb' | 'knee';
 
 function formatTime(seconds: number): string {
   if (!Number.isFinite(seconds) || seconds < 0) return '0:00';
@@ -163,7 +214,14 @@ function hydrateMixState(raw: unknown): HydratedMix {
     // engine + timeline can treat "no clips" uniformly as a whole-buffer clip.
     const channels: Record<string, ChannelState> = {};
     for (const [id, ch] of Object.entries(current.data.channels)) {
-      channels[id] = { ...ch, clips: ch.clips ?? [] };
+      const eqFull = ch.eqFull ?? eqFullFromQuick(ch.eq);
+      channels[id] = {
+        ...ch,
+        clips: ch.clips ?? [],
+        eqFull,
+        eq: { ...ch.eq, ...quickFromEqFull(eqFull) },
+        pitch: ch.pitch ?? { ...DEFAULT_CHANNEL_PITCH },
+      };
     }
     return {
       channels,
@@ -196,17 +254,24 @@ function hydrateMixState(raw: unknown): HydratedMix {
       pan: c.pan,
       muted: c.muted,
       soloed: c.soloed,
-      eq: c.eq ?? { ...DEFAULT_CHANNEL_EQ },
-      comp: c.comp ?? { ...DEFAULT_CHANNEL_COMP },
+      eq: {
+        ...DEFAULT_CHANNEL_EQ,
+        ...c.eq,
+        bypassed: c.eq?.bypassed ?? false,
+        ...quickFromEqFull(c.eqFull ?? eqFullFromQuick({ ...DEFAULT_CHANNEL_EQ, ...c.eq })),
+      },
+      eqFull: c.eqFull ?? eqFullFromQuick({ ...DEFAULT_CHANNEL_EQ, ...c.eq }),
+      comp: { ...DEFAULT_CHANNEL_COMP, ...c.comp, bypassed: c.comp?.bypassed ?? false },
       compType: c.compType ?? DEFAULT_COMP_TYPE,
       outputBusId: c.outputBusId ?? MASTER_BUS_ID,
       sends: c.sends ?? {},
-      transient: c.transient ?? { ...DEFAULT_CHANNEL_TRANSIENT },
+      transient: { ...DEFAULT_CHANNEL_TRANSIENT, ...c.transient },
       deess: c.deess ?? { ...DEFAULT_CHANNEL_DEESS },
-      imager: c.imager ?? { ...DEFAULT_CHANNEL_IMAGER },
-      tape: c.tape ?? { ...DEFAULT_CHANNEL_TAPE },
+      imager: { ...DEFAULT_CHANNEL_IMAGER, ...c.imager },
+      tape: { ...DEFAULT_CHANNEL_TAPE, ...c.tape },
       console: c.console ?? { ...DEFAULT_CHANNEL_CONSOLE },
       mbcomp: c.mbcomp ?? { ...DEFAULT_CHANNEL_MBCOMP },
+      pitch: { ...DEFAULT_CHANNEL_PITCH, ...c.pitch },
       clips: c.clips ?? [],
     };
   }
@@ -261,6 +326,7 @@ function hydrateMixState(raw: unknown): HydratedMix {
           releaseMs: oldLim.releaseMs,
           makeupDb: oldLim.makeupDb,
           bypassed: oldLim.bypassed,
+          style: oldLim.style ?? DEFAULT_LIMITER_STATE.style,
         }
       : { ...DEFAULT_LIMITER_STATE };
 
@@ -282,21 +348,49 @@ function hydrateMixState(raw: unknown): HydratedMix {
  * Module-level (not closed over component state) so it can be referenced
  * from useCallback bodies without joining their dep arrays.
  */
+/** Design band type → engine Eq8 numeric band type. */
+const EQ_TYPE_TO_ENGINE: Record<EqFullBandType, Eq8BandType> = {
+  hp: Eq8BandType.HighPass,
+  lowshelf: Eq8BandType.LowShelf,
+  peak: Eq8BandType.Peak,
+  highshelf: Eq8BandType.HighShelf,
+  lp: Eq8BandType.LowPass,
+};
+
+/** Push one full-EQ band to the engine. A disabled band parks its slot as
+ *  Bypass so it passes through without disturbing the others. */
+function applyEqBandToHost(host: AudioHost, stemId: string, band: EqFullBand): void {
+  const type = band.on ? EQ_TYPE_TO_ENGINE[band.type] : Eq8BandType.Bypass;
+  host.setChannelEqBand(stemId, band.id, type, band.freq, band.gain, band.q);
+}
+
+/** Push the whole 5-band EQ to the engine (used on load + flavour changes). */
+function applyEqFullToHost(host: AudioHost, stemId: string, eqFull: ChannelEqFull): void {
+  for (const band of eqFull.bands) applyEqBandToHost(host, stemId, band);
+}
+
+type CompParams = ChannelState['comp'];
+
 function applyCompToHost(
   host: AudioHost,
   stemId: string,
-  threshold: number,
-  ratio: number,
+  comp: CompParams,
   compType: CompType
 ): void {
+  // Whole-insert bypass: park both flavours so neither colours the signal.
+  if (comp.bypassed) {
+    host.setChannelCompBypassed(stemId, true);
+    host.setChannelCompColorBypassed(stemId, true);
+    return;
+  }
   if (compType === 'clean') {
     host.setChannelComp(
       stemId,
-      threshold,
-      ratio,
-      COMP_DEFAULTS.attackMs,
-      COMP_DEFAULTS.releaseMs,
-      COMP_DEFAULTS.makeupDb,
+      comp.threshold,
+      comp.ratio,
+      comp.attackMs,
+      comp.releaseMs,
+      comp.makeupDb,
       COMP_DEFAULTS.mix
     );
     host.setChannelCompBypassed(stemId, false);
@@ -304,12 +398,12 @@ function applyCompToHost(
   } else {
     host.setChannelCompColor(
       stemId,
-      threshold,
-      ratio,
-      COMP_COLOR_DEFAULTS.attackMs,
-      COMP_COLOR_DEFAULTS.releaseMs,
-      COMP_COLOR_DEFAULTS.makeupDb,
-      COMP_COLOR_DEFAULTS.mix,
+      comp.threshold,
+      comp.ratio,
+      comp.attackMs,
+      comp.releaseMs,
+      comp.makeupDb,
+      COMP_DEFAULTS.mix,
       COMP_COLOR_DEFAULTS.driveDb
     );
     host.setChannelCompColorBypassed(stemId, false);
@@ -341,6 +435,10 @@ export function MixerShell({
   const [loadedIds, setLoadedIds] = useState<Set<string>>(new Set());
   const [stemsOpen, setStemsOpen] = useState(initialStems.length === 0);
   const [timelineOpen, setTimelineOpen] = useState(true);
+  /** Expand the mixer to fill the viewport (hides the timeline). */
+  const [expanded, setExpanded] = useState(false);
+  /** Resizable mixer-panel height (px) when not expanded. */
+  const [mixerHeight, setMixerHeight] = useState(440);
   const [peaks, setPeaks] = useState<Record<string, StemPeaks | undefined>>({});
   /** Open floating plugin windows. Last entry renders on top (focus). */
   const [openPlugins, setOpenPlugins] = useState<OpenPlugin[]>([]);
@@ -657,11 +755,9 @@ export function MixerShell({
       host.setChannelPan(stem.id, ch.pan, 0);
       host.setChannelMute(stem.id, ch.muted);
       host.setChannelSolo(stem.id, ch.soloed);
-      for (const band of ['lo', 'mid', 'hi'] as const) {
-        const { idx, type, freq, q } = EQ_BANDS[band];
-        host.setChannelEqBand(stem.id, idx, type, freq, ch.eq[band], q);
-      }
-      applyCompToHost(host, stem.id, ch.comp.threshold, ch.comp.ratio, ch.compType);
+      applyEqFullToHost(host, stem.id, ch.eqFull);
+      host.setChannelEqBypassed(stem.id, ch.eq.bypassed);
+      applyCompToHost(host, stem.id, ch.comp, ch.compType);
       host.setChannelTransient(stem.id, ch.transient.attack, ch.transient.sustain);
       host.setChannelTransientBypassed(stem.id, ch.transient.bypassed);
       host.setChannelDeEss(stem.id, ch.deess.freq, ch.deess.amount);
@@ -881,24 +977,58 @@ export function MixerShell({
     });
   }, []);
 
+  // Strip quick knob (Lo/Mid/Hi) → drive the mapped full-EQ band's gain, and
+  // keep eq.{lo,mid,hi} as a mirror so the legacy fields persist.
   const setEq = useCallback((stemId: string, band: EqBand, gainDb: number) => {
-    const { idx, type, freq, q } = EQ_BANDS[band];
-    hostRef.current?.setChannelEqBand(stemId, idx, type, freq, gainDb, q);
+    const bandId = EQ_QUICK_BAND_IDS[band];
     setChannelState((prev) => {
       const current = prev[stemId] ?? DEFAULT_CHANNEL;
+      const bands = current.eqFull.bands.map((b) => (b.id === bandId ? { ...b, gain: gainDb } : b));
+      const changed = bands.find((b) => b.id === bandId);
+      if (changed && hostRef.current) applyEqBandToHost(hostRef.current, stemId, changed);
       return {
         ...prev,
-        [stemId]: { ...current, eq: { ...current.eq, [band]: gainDb } },
+        [stemId]: {
+          ...current,
+          eq: { ...current.eq, [band]: gainDb },
+          eqFull: { ...current.eqFull, bands },
+        },
       };
     });
   }, []);
 
-  const setComp = useCallback((stemId: string, field: 'threshold' | 'ratio', value: number) => {
+  // EQ window → edit any band (freq/gain/q/type/on). Mirror gain back into the
+  // quick knobs when a mapped band changes so the strip stays in sync.
+  const setEqBand = useCallback((stemId: string, bandId: number, patch: Partial<EqFullBand>) => {
+    setChannelState((prev) => {
+      const current = prev[stemId] ?? DEFAULT_CHANNEL;
+      const bands = current.eqFull.bands.map((b) => (b.id === bandId ? { ...b, ...patch } : b));
+      const changed = bands.find((b) => b.id === bandId);
+      if (changed && hostRef.current) applyEqBandToHost(hostRef.current, stemId, changed);
+      const eq = { ...current.eq };
+      if (patch.gain !== undefined) {
+        if (bandId === EQ_QUICK_BAND_IDS.lo) eq.lo = patch.gain;
+        else if (bandId === EQ_QUICK_BAND_IDS.mid) eq.mid = patch.gain;
+        else if (bandId === EQ_QUICK_BAND_IDS.hi) eq.hi = patch.gain;
+      }
+      return { ...prev, [stemId]: { ...current, eq, eqFull: { ...current.eqFull, bands } } };
+    });
+  }, []);
+
+  const setEqAnalyzer = useCallback((stemId: string, analyzer: boolean) => {
+    setChannelState((prev) => {
+      const current = prev[stemId] ?? DEFAULT_CHANNEL;
+      return { ...prev, [stemId]: { ...current, eqFull: { ...current.eqFull, analyzer } } };
+    });
+  }, []);
+
+  const setComp = useCallback((stemId: string, field: CompField, value: number) => {
     setChannelState((prev) => {
       const current = prev[stemId] ?? DEFAULT_CHANNEL;
       const nextComp = { ...current.comp, [field]: value };
+      // `knee` is curve-only — no engine param — but still re-push the rest.
       const host = hostRef.current;
-      if (host) applyCompToHost(host, stemId, nextComp.threshold, nextComp.ratio, current.compType);
+      if (host) applyCompToHost(host, stemId, nextComp, current.compType);
       return { ...prev, [stemId]: { ...current, comp: nextComp } };
     });
   }, []);
@@ -907,17 +1037,48 @@ export function MixerShell({
     setChannelState((prev) => {
       const current = prev[stemId] ?? DEFAULT_CHANNEL;
       const host = hostRef.current;
-      if (host) applyCompToHost(host, stemId, current.comp.threshold, current.comp.ratio, compType);
+      if (host) applyCompToHost(host, stemId, current.comp, compType);
       return { ...prev, [stemId]: { ...current, compType } };
     });
   }, []);
 
-  const setTransient = useCallback((stemId: string, field: 'attack' | 'sustain', value: number) => {
+  const toggleEqBypass = useCallback((stemId: string) => {
     setChannelState((prev) => {
       const current = prev[stemId] ?? DEFAULT_CHANNEL;
-      const nextTransient = { ...current.transient, [field]: value };
-      hostRef.current?.setChannelTransient(stemId, nextTransient.attack, nextTransient.sustain);
-      return { ...prev, [stemId]: { ...current, transient: nextTransient } };
+      const bypassed = !current.eq.bypassed;
+      hostRef.current?.setChannelEqBypassed(stemId, bypassed);
+      return { ...prev, [stemId]: { ...current, eq: { ...current.eq, bypassed } } };
+    });
+  }, []);
+
+  const toggleCompBypass = useCallback((stemId: string) => {
+    setChannelState((prev) => {
+      const current = prev[stemId] ?? DEFAULT_CHANNEL;
+      const bypassed = !current.comp.bypassed;
+      const nextComp = { ...current.comp, bypassed };
+      const host = hostRef.current;
+      if (host) applyCompToHost(host, stemId, nextComp, current.compType);
+      return { ...prev, [stemId]: { ...current, comp: nextComp } };
+    });
+  }, []);
+
+  const setTransient = useCallback(
+    (stemId: string, field: 'attack' | 'sustain' | 'sens', value: number) => {
+      setChannelState((prev) => {
+        const current = prev[stemId] ?? DEFAULT_CHANNEL;
+        const nextTransient = { ...current.transient, [field]: value };
+        // attack/sustain reach the engine; sens is detector/UI only.
+        hostRef.current?.setChannelTransient(stemId, nextTransient.attack, nextTransient.sustain);
+        return { ...prev, [stemId]: { ...current, transient: nextTransient } };
+      });
+    },
+    []
+  );
+
+  const setTransientMode = useCallback((stemId: string, mode: TransientMode) => {
+    setChannelState((prev) => {
+      const current = prev[stemId] ?? DEFAULT_CHANNEL;
+      return { ...prev, [stemId]: { ...current, transient: { ...current.transient, mode } } };
     });
   }, []);
 
@@ -965,6 +1126,54 @@ export function MixerShell({
     });
   }, []);
 
+  // Balance + mode are goniometer/UI only (engine images from width).
+  const setImagerBalance = useCallback((stemId: string, balance: number) => {
+    setChannelState((prev) => {
+      const current = prev[stemId] ?? DEFAULT_CHANNEL;
+      return { ...prev, [stemId]: { ...current, imager: { ...current.imager, balance } } };
+    });
+  }, []);
+
+  const setImagerMode = useCallback((stemId: string, mode: ImagerMode) => {
+    setChannelState((prev) => {
+      const current = prev[stemId] ?? DEFAULT_CHANNEL;
+      return { ...prev, [stemId]: { ...current, imager: { ...current.imager, mode } } };
+    });
+  }, []);
+
+  // Pitch is a placeholder (no DSP) — these only update + persist UI state.
+  const setPitch = useCallback(
+    (stemId: string, field: 'speed' | 'amount' | 'human' | 'formant', value: number) => {
+      setChannelState((prev) => {
+        const current = prev[stemId] ?? DEFAULT_CHANNEL;
+        return { ...prev, [stemId]: { ...current, pitch: { ...current.pitch, [field]: value } } };
+      });
+    },
+    []
+  );
+
+  const setPitchKey = useCallback((stemId: string, key: PitchKey) => {
+    setChannelState((prev) => {
+      const current = prev[stemId] ?? DEFAULT_CHANNEL;
+      return { ...prev, [stemId]: { ...current, pitch: { ...current.pitch, key } } };
+    });
+  }, []);
+
+  const setPitchScale = useCallback((stemId: string, scale: PitchScale) => {
+    setChannelState((prev) => {
+      const current = prev[stemId] ?? DEFAULT_CHANNEL;
+      return { ...prev, [stemId]: { ...current, pitch: { ...current.pitch, scale } } };
+    });
+  }, []);
+
+  const togglePitchBypass = useCallback((stemId: string) => {
+    setChannelState((prev) => {
+      const current = prev[stemId] ?? DEFAULT_CHANNEL;
+      const bypassed = !current.pitch.bypassed;
+      return { ...prev, [stemId]: { ...current, pitch: { ...current.pitch, bypassed } } };
+    });
+  }, []);
+
   const toggleImagerBypass = useCallback((stemId: string) => {
     setChannelState((prev) => {
       const current = prev[stemId] ?? DEFAULT_CHANNEL;
@@ -978,16 +1187,24 @@ export function MixerShell({
   }, []);
 
   const setTape = useCallback(
-    (stemId: string, field: 'driveDb' | 'tone' | 'mix', value: number) => {
+    (stemId: string, field: 'driveDb' | 'tone' | 'mix' | 'bias', value: number) => {
       setChannelState((prev) => {
         const current = prev[stemId] ?? DEFAULT_CHANNEL;
         const nextTape = { ...current.tape, [field]: value };
+        // drive/tone/mix reach the engine; bias is curve/UI only.
         hostRef.current?.setChannelTape(stemId, nextTape.driveDb, nextTape.tone, nextTape.mix);
         return { ...prev, [stemId]: { ...current, tape: nextTape } };
       });
     },
     []
   );
+
+  const setTapeMode = useCallback((stemId: string, mode: TapeMode) => {
+    setChannelState((prev) => {
+      const current = prev[stemId] ?? DEFAULT_CHANNEL;
+      return { ...prev, [stemId]: { ...current, tape: { ...current.tape, mode } } };
+    });
+  }, []);
 
   const toggleTapeBypass = useCallback((stemId: string) => {
     setChannelState((prev) => {
@@ -1100,6 +1317,11 @@ export function MixerShell({
       hostRef.current?.setMasterLimiterBypassed(bypassed);
       return { ...prev, limiter: { ...prev.limiter, bypassed } };
     });
+  }, []);
+
+  // Style is voicing/UI only — engine limits from threshold/release/makeup.
+  const setLimiterStyle = useCallback((style: LimiterStyle) => {
+    setMasterChain((prev) => ({ ...prev, limiter: { ...prev.limiter, style } }));
   }, []);
 
   const setReferenceRoom = useCallback((preset: ReferenceRoomPreset) => {
@@ -1340,7 +1562,11 @@ export function MixerShell({
 
   return (
     <>
-      <div className={`mixer mixer-fullscreen ${timelineOpen ? '' : 'timeline-closed'}`}>
+      <div
+        className={`mixer mixer-fullscreen ${timelineOpen && !expanded ? '' : 'timeline-closed'} ${
+          expanded ? 'mixer-expanded' : ''
+        }`}
+      >
         <div className="mixer-transport">
           <Link
             href="/"
@@ -1428,7 +1654,57 @@ export function MixerShell({
           onSelectClip={setSelectedClip}
         />
 
-        <div className="mixer-body">
+        {/* Resize divider — drag to set the mixer height (design app.jsx). */}
+        {!expanded && (
+          <button
+            type="button"
+            className="mixer-resize"
+            aria-label="Drag to resize mixer"
+            onPointerDown={(e) => {
+              const sy = e.clientY;
+              const sh = mixerHeight;
+              const move = (ev: PointerEvent) =>
+                setMixerHeight(
+                  Math.max(240, Math.min(window.innerHeight - 200, sh + (sy - ev.clientY)))
+                );
+              const up = () => {
+                window.removeEventListener('pointermove', move);
+                window.removeEventListener('pointerup', up);
+                document.body.style.cursor = '';
+              };
+              window.addEventListener('pointermove', move);
+              window.addEventListener('pointerup', up);
+              document.body.style.cursor = 'ns-resize';
+            }}
+          >
+            <span className="mixer-resize-grip" />
+          </button>
+        )}
+
+        {/* Mixer panel header — channel count + EXPAND/RESTORE (design app.jsx). */}
+        <div className="mixer-panel-head">
+          <span className="mixer-panel-title">MIXER</span>
+          <span className="mixer-panel-sub">· {stems.length} CHANNELS · FIXED CHAIN</span>
+          <span style={{ flex: 1 }} />
+          <button
+            type="button"
+            className="mixer-expand-btn"
+            onClick={() => setExpanded((v) => !v)}
+            aria-pressed={expanded}
+            title={expanded ? 'Restore' : 'Expand mixer'}
+          >
+            {expanded ? '↙ Restore' : '↗ Expand'}
+          </button>
+        </div>
+
+        <div
+          className="mixer-body"
+          style={
+            expanded
+              ? { flex: '1 1 auto', minHeight: 0 }
+              : { flex: '0 0 auto', height: mixerHeight, minHeight: 0 }
+          }
+        >
           {/* Two-row layout: controls on top scroll vertically inside their
               own container, while the names row below sits OUTSIDE the
               vertical scroll so it stays planted. Both rows share the same
@@ -1455,8 +1731,10 @@ export function MixerShell({
                           onMute={() => toggleMute(stem.id)}
                           onSolo={() => toggleSolo(stem.id)}
                           onEq={(band, db) => setEq(stem.id, band, db)}
+                          onEqBypass={() => toggleEqBypass(stem.id)}
                           onComp={(field, value) => setComp(stem.id, field, value)}
                           onCompType={(type) => setCompType(stem.id, type)}
+                          onCompBypass={() => toggleCompBypass(stem.id)}
                           onOpenPlugin={(type) => openPlugin(type, stem.id)}
                           buses={busState}
                           onOutput={(busId) => setChannelOutput(stem.id, busId)}
@@ -1474,6 +1752,7 @@ export function MixerShell({
                           onConsoleBypass={() => toggleConsoleBypass(stem.id)}
                           onMbComp={(field, value) => setMbComp(stem.id, field, value)}
                           onMbCompBypass={() => toggleMbCompBypass(stem.id)}
+                          onPitchBypass={() => togglePitchBypass(stem.id)}
                         />
                       );
                     })
@@ -1490,21 +1769,6 @@ export function MixerShell({
                     </div>
                   )}
                 </div>
-                {stems.length > 0 && (
-                  <div className="mixer-console-names">
-                    {stems.map((stem) => {
-                      const state = channelState[stem.id] ?? DEFAULT_CHANNEL;
-                      const effectivelyMuted = state.muted || (anySoloed && !state.soloed);
-                      return (
-                        <ChannelStripName
-                          key={stem.id}
-                          stem={stem}
-                          effectivelyMuted={effectivelyMuted}
-                        />
-                      );
-                    })}
-                  </div>
-                )}
               </div>
             </div>
           </div>
@@ -1550,6 +1814,7 @@ export function MixerShell({
                 limiter={masterChain.limiter}
                 onLimiter={setLimiter}
                 onLimiterBypass={toggleLimiterBypass}
+                onOpenLimiter={() => openPlugin('limiter', MASTER_BUS_ID)}
                 referenceRoom={masterChain.referenceRoom.preset}
                 onReferenceRoom={setReferenceRoom}
               />
@@ -1606,8 +1871,30 @@ export function MixerShell({
           channelState,
           stemName: (id) => stems.find((s) => s.id === id)?.name ?? id,
           onEq: setEq,
+          onEqBand: setEqBand,
+          onEqAnalyzer: setEqAnalyzer,
+          onEqBypass: toggleEqBypass,
           onComp: setComp,
           onCompType: setCompType,
+          onCompBypass: toggleCompBypass,
+          onTransient: setTransient,
+          onTransientMode: setTransientMode,
+          onTransientBypass: toggleTransientBypass,
+          onTape: setTape,
+          onTapeMode: setTapeMode,
+          onTapeBypass: toggleTapeBypass,
+          onImager: setImager,
+          onImagerBalance: setImagerBalance,
+          onImagerMode: setImagerMode,
+          onImagerBypass: toggleImagerBypass,
+          limiter: masterChain.limiter,
+          onLimiter: setLimiter,
+          onLimiterStyle: setLimiterStyle,
+          onLimiterBypass: toggleLimiterBypass,
+          onPitch: setPitch,
+          onPitchKey: setPitchKey,
+          onPitchScale: setPitchScale,
+          onPitchBypass: togglePitchBypass,
         }}
       />
     </>

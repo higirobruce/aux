@@ -184,6 +184,69 @@
  * the names row below sits OUTSIDE the vertical scroll and never gets
  * obscured by it.
  */
+/* Resize divider between the timeline and the mixer panel (design app.jsx). */
+.mixer-resize {
+  flex: 0 0 auto;
+  height: 8px;
+  width: 100%;
+  cursor: ns-resize;
+  background: var(--bg-1);
+  border: none;
+  border-top: 1px solid var(--line-2);
+  border-bottom: 1px solid var(--line);
+  display: grid;
+  place-items: center;
+  padding: 0;
+}
+.mixer-resize-grip {
+  width: 40px;
+  height: 3px;
+  border-radius: 3px;
+  background: var(--line-3);
+}
+
+/* Mixer panel header bar — "MIXER · N CHANNELS · FIXED CHAIN" + EXPAND. */
+.mixer-panel-head {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  height: 30px;
+  padding: 0 14px;
+  border-bottom: 1px solid var(--line);
+  background: var(--bg-1);
+}
+.mixer-panel-title {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.18em;
+  color: var(--gold);
+  font-weight: 600;
+}
+.mixer-panel-sub {
+  font-family: var(--font-mono);
+  font-size: 9px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--txt-2);
+}
+.mixer-expand-btn {
+  font-family: var(--font-mono);
+  font-size: 9px;
+  letter-spacing: 0.1em;
+  padding: 3px 9px;
+  border-radius: 3px;
+  border: 1px solid var(--line-2);
+  background: transparent;
+  color: var(--txt-1);
+  cursor: pointer;
+  transition: color var(--fast), border-color var(--fast);
+}
+.mixer-expand-btn:hover {
+  color: var(--gold);
+  border-color: var(--gold);
+}
+
 .mixer-console-area {
   flex: 1 1 auto;
   min-width: 0;
@@ -214,7 +277,9 @@
   gap: 0;
   padding: 10px 6px 0;
   overflow-x: hidden;
-  overflow-y: auto;
+  /* No global vertical scroll — each strip fills the height and scrolls its
+     own processing chain internally (the fader/meter footer stays pinned). */
+  overflow-y: hidden;
 }
 
 .mixer-console-names {
@@ -240,37 +305,39 @@
 }
 
 .bus-strip {
-  width: 96px;
+  width: 150px;
   margin: 0 2px 0 6px;
-  background: linear-gradient(180deg, #283040, #14110c);
+  background: linear-gradient(180deg, var(--bg-3, #283040), var(--bg-2, #1c2028));
   border-color: #0b0906;
-  /* Master gets a faint blue accent to read as "different". */
-  box-shadow: inset 0 1px 0 rgba(231, 169, 72, 0.18);
+  border-left: 1px solid var(--line-2, #3a4250);
 }
 
+/* Bus header follows the design's Master block: a gold name label over a
+   "BUS · 2.0" format sub. flex: 0 0 auto is load-bearing — without it the
+   master strip's extra sections squeeze the header under the fixed-height
+   parent and clip the letters. */
 .bus-strip .ch-name {
-  /* Bus strips show their name as a top header on the strip itself
-     (different from the channel-strip names which live in their own
-     bottom row). flex: 0 0 auto is load-bearing — without it the
-     master strip's extra children (Ref Room + Limiter sections) under
-     a fixed-height parent squeeze the header and clip the top of the
-     letters. */
   flex: 0 0 auto;
-  background: linear-gradient(180deg, #344058, #221d15);
-  color: #ece2cf;
-  font-size: 11px;
+  background: transparent;
+  color: var(--gold, #e7a948);
+  font-size: 12px;
   font-weight: 600;
-  letter-spacing: 0.08em;
-  padding: 8px 4px;
+  letter-spacing: 0.2em;
+  padding: 10px 12px;
   line-height: 1.2;
-  border-bottom: 1px solid #0b0906;
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.08);
+  text-align: left;
+  border-bottom: 1px solid var(--line, #2a3038);
+  box-shadow: none;
 }
 
 .bus-strip .ch-meta {
   flex: 0 0 auto;
-  color: #7e7058;
+  text-align: left;
+  color: var(--txt-2, #b6a88f);
+  font-size: 9px;
   letter-spacing: 0.15em;
+  padding: 10px 12px;
+  background: transparent;
   text-transform: uppercase;
 }
 
@@ -292,6 +359,30 @@
   padding: 8px 6px;
   border-bottom: 1px solid #0b0906;
   background: rgba(231, 169, 72, 0.06);
+}
+
+.bus-limiter-head {
+  display: flex;
+  align-items: stretch;
+  gap: 4px;
+}
+.bus-limiter-head .bus-limiter-toggle {
+  flex: 1;
+}
+.bus-limiter-open {
+  flex: 0 0 auto;
+  width: 18px;
+  border: 1px solid var(--line-2, #3a4250);
+  border-radius: 2px;
+  background: transparent;
+  color: var(--txt-3, #7e7058);
+  font-size: 10px;
+  cursor: pointer;
+  transition: color 100ms ease, border-color 100ms ease;
+}
+.bus-limiter-open:hover {
+  color: var(--gold, #e7a948);
+  border-color: var(--gold, #e7a948);
 }
 
 .bus-limiter-toggle {
@@ -726,7 +817,7 @@
 
 .ch-strip {
   flex: 0 0 auto;
-  width: 88px;
+  width: 150px;
   display: flex;
   flex-direction: column;
   background: linear-gradient(180deg, #221d15, #1b1711);
@@ -735,8 +826,134 @@
   margin: 0 2px;
   position: relative;
   transition: border-color 120ms ease, box-shadow 120ms ease;
-  min-height: 360px;
+  /* Fill the console height so the chain can scroll inside; the fader footer
+     pins to the bottom. */
+  height: 100%;
+  min-height: 0;
   min-width: 0;
+}
+
+/* Scrollable processing-chain region (EQ → … → sends). The fader/meter +
+   buttons + output below it are pinned (flex:0 0 auto by default). */
+.ch-chain {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+  display: flex;
+  flex-direction: column;
+}
+/* Thin scrollbar inside the strip chain. */
+.ch-chain::-webkit-scrollbar {
+  width: 6px;
+}
+
+/* ─── Insert accordion (design StripModule) ──────────────────────────── */
+/* Each fixed-chain insert is a collapsible module: header row (toggle dot +
+   label + ↗ open-window) with knobs shown only when on. The per-insert
+   accent (set via --mod inline) tints the dot, label and arrow. */
+.ch-mod {
+  border-top: 1px solid var(--line, #2a3038);
+}
+.ch-chain > .ch-mod:first-of-type {
+  border-top: none;
+}
+.ch-mod-head2 {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 8px;
+}
+.ch-mod-dot {
+  flex: 0 0 auto;
+  width: 8px;
+  height: 8px;
+  padding: 0;
+  border-radius: 2px;
+  border: 1px solid var(--line-2, #3a4250);
+  background: transparent;
+  cursor: pointer;
+  transition: background 120ms ease, border-color 120ms ease, box-shadow 120ms ease;
+}
+.ch-mod[data-on="true"] .ch-mod-dot {
+  background: var(--mod);
+  border-color: var(--mod);
+  box-shadow: 0 0 6px -1px var(--mod);
+}
+.ch-mod-dot:focus-visible {
+  outline: 2px solid var(--mod);
+  outline-offset: 2px;
+}
+.ch-mod-open-btn {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  padding: 0;
+  background: transparent;
+  border: none;
+  font-family: var(--font-mono);
+  font-size: 9px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--txt-3, #7e7058);
+  cursor: pointer;
+}
+.ch-mod-open-btn:disabled {
+  cursor: default;
+}
+.ch-mod[data-on="true"] .ch-mod-label {
+  color: var(--mod);
+}
+.ch-mod-label {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.ch-mod-open {
+  margin-left: auto;
+  flex: 0 0 auto;
+  color: var(--txt-3, #7e7058);
+  font-size: 9px;
+}
+.ch-mod-open-btn:not(:disabled):hover .ch-mod-open,
+.ch-mod-open-btn:not(:disabled):hover .ch-mod-label {
+  color: var(--mod);
+}
+.ch-mod-body {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-around;
+  gap: 4px;
+  padding: 0 6px 8px;
+}
+.ch-mod-body .knob-wrap {
+  gap: 3px;
+}
+.ch-mod-body .knob-label {
+  font-size: 7px;
+}
+.ch-mod-body .knob-readout {
+  font-size: 8px;
+  color: var(--txt-3, #7e7058);
+}
+/* PITCH module has no strip knobs (window-only) — show key/scale instead. */
+.ch-pitch-meta {
+  width: 100%;
+  text-align: center;
+  font-family: var(--font-mono);
+  font-size: 9px;
+  letter-spacing: 0.08em;
+  color: var(--txt-2, #b6a88f);
+}
+
+/* COMP stacks the clean/color selector above its knob pair. */
+.ch-comp-stack {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
 }
 
 .ch-strip.muted {
@@ -754,7 +971,9 @@
  *     (.bus-strip .ch-name)
  * Base provides the type/colour treatment; row-specific layout (width,
  * margin) lives in those contexts below. */
+/* Track name — pinned at the bottom of each channel strip (footer item). */
 .ch-name {
+  flex: 0 0 auto;
   text-align: center;
   font-size: 10px;
   letter-spacing: 0.06em;
@@ -762,31 +981,14 @@
   color: #ece2cf;
   padding: 7px 6px;
   background: linear-gradient(180deg, #2a241b, #14110c);
+  border-top: 1px solid #0b0906;
   text-transform: uppercase;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
   /* The full name lives in the title attribute — hover for the long form. */
 }
-
-/* Names-row cells — one per strip column, kept in 1:1 alignment with the
-   strips above by mirroring .ch-strip's 88 px width + 2 px side margin. */
-.mixer-console-names .ch-name {
-  width: 88px;
-  margin: 0 2px;
-  padding: 8px 6px;
-  border: 1px solid #0b0906;
-  border-top: 0;
-  border-radius: 0 0 3px 3px;
-  /* Brighter gradient + faint top hairline so the scribble strip reads as
-     a distinct "name plate" rather than blending into the dark band below
-     the controls. */
-  background: linear-gradient(180deg, #3a4250, #1f242c);
-  color: #ece2cf;
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.1), inset 0 -1px 0 rgba(0, 0, 0, 0.3);
-}
-
-.mixer-console-names .ch-name.muted {
+.ch-strip.muted .ch-name {
   opacity: 0.5;
 }
 
@@ -1307,10 +1509,20 @@
   display: flex;
   gap: 5px;
   padding: 8px;
-  flex: 1;
-  min-height: 180px;
+  /* Pinned footer item (was flex:1, which starved the scrollable chain).
+     Fixed, compact height so the chain region keeps usable space on the
+     half-height mixer; the chain breathes fully once the mixer is expanded. */
+  flex: 0 0 auto;
+  height: 168px;
   align-items: stretch;
+  justify-content: center;
   background: rgba(0, 0, 0, 0.2);
+}
+
+/* Pan knob on the right of the fader/meter, vertically centered. */
+.ch-pan-side {
+  justify-content: center;
+  flex: 0 0 auto;
 }
 
 .ch-meter {
@@ -1371,17 +1583,9 @@
 
 .fader {
   position: relative;
-  flex: 1;
-  width: 24px;
-  background: linear-gradient(
-    to right,
-    rgba(0, 0, 0, 0.6) 0%,
-    rgba(0, 0, 0, 0.8) 50%,
-    rgba(0, 0, 0, 0.6) 100%
-  );
-  border: 1px solid #000;
-  border-radius: 3px;
-  box-shadow: inset 0 0 8px rgba(0, 0, 0, 0.85), 0 1px 0 rgba(255, 255, 255, 0.05);
+  flex: 0 0 auto;
+  width: 20px;
+  background: transparent;
   cursor: ns-resize;
 }
 
@@ -1401,7 +1605,7 @@
   position: absolute;
   left: -3px;
   right: -3px;
-  height: 22px;
+  height: 20px;
   transform: translateY(50%);
   background: linear-gradient(
     180deg,
@@ -1621,7 +1825,12 @@
 
 .stem-timeline {
   position: relative;
-  flex: 0 0 auto;
+  /* Flex to absorb the mixer resize: the mixer panel has a fixed (draggable)
+     height, so the timeline grows/shrinks to fill the rest. */
+  flex: 1 1 auto;
+  min-height: 60px;
+  display: flex;
+  flex-direction: column;
   background: linear-gradient(180deg, #14110c 0%, #0d1015 100%);
   border-top: 1px solid #000;
   border-bottom: 1px solid #000;
@@ -1679,9 +1888,10 @@
 }
 
 .stem-timeline-lanes {
-  /* Show ~6 lanes (≈360 px) before scrolling kicks in. Capped at 40vh so
-     a tall stem list never crowds out the mixer console underneath. */
-  max-height: min(40vh, 360px);
+  /* Fill the flexing timeline area and scroll internally, so the timeline
+     shrinks/grows cleanly as the mixer is resized. */
+  flex: 1 1 auto;
+  min-height: 0;
   overflow-y: auto;
   /* Sit above the seek-track overlay (z-index 1) so clip rects are
      interactive; the wave background passes clicks through (pointer-events
