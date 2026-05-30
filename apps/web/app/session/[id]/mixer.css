@@ -1713,7 +1713,12 @@
 
 .stem-timeline {
   position: relative;
-  flex: 0 0 auto;
+  /* Flex to absorb the mixer resize: the mixer panel has a fixed (draggable)
+     height, so the timeline grows/shrinks to fill the rest. */
+  flex: 1 1 auto;
+  min-height: 60px;
+  display: flex;
+  flex-direction: column;
   background: linear-gradient(180deg, #14110c 0%, #0d1015 100%);
   border-top: 1px solid #000;
   border-bottom: 1px solid #000;
@@ -1771,9 +1776,10 @@
 }
 
 .stem-timeline-lanes {
-  /* Show ~6 lanes (≈360 px) before scrolling kicks in. Capped at 40vh so
-     a tall stem list never crowds out the mixer console underneath. */
-  max-height: min(40vh, 360px);
+  /* Fill the flexing timeline area and scroll internally, so the timeline
+     shrinks/grows cleanly as the mixer is resized. */
+  flex: 1 1 auto;
+  min-height: 0;
   overflow-y: auto;
   /* Sit above the seek-track overlay (z-index 1) so clip rects are
      interactive; the wave background passes clicks through (pointer-events
