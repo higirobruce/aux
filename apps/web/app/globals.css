@@ -6,34 +6,59 @@
 @source "../../../packages/ui/src";
 
 @theme {
-  /* Color · paper & ink */
-  --color-paper: #eef2f7;
-  --color-paper-2: #e3eaf3;
-  --color-paper-3: #d2dce8;
-  --color-ink: #16181d;
-  --color-ink-2: #353a43;
-  --color-ink-3: #626973;
-  --color-ink-4: #939aa5;
+  /* ---- Warm-analog neutrals ---- */
+  --color-bg-0: #0d0b08;
+  --color-bg-1: #14110c;
+  --color-bg-2: #1b1711;
+  --color-bg-3: #221d15;
+  --color-bg-4: #2a241b;
+  --color-inset: #0b0906;
+  --color-line: #2c2519;
+  --color-line-2: #3a3122;
+  --color-line-3: #4a3f2d;
 
-  /* Color · azure accent */
-  --color-azure: #2e5fa8;
-  --color-azure-soft: #c5d5ec;
-  --color-azure-deep: #14355f;
+  /* ---- Warm cream text ---- */
+  --color-txt-0: #ece2cf;
+  --color-txt-1: #b6a88f;
+  --color-txt-2: #7e7058;
+  --color-txt-3: #564b39;
 
-  /* Color · semantic */
-  --color-line: #d3dce7;
-  --color-line-strong: #b5c2d2;
-  --color-highlight: #dce7f5;
-  --color-ring: #2e5fa8;
+  /* ---- Analog accents ---- */
+  --color-gold: #e7a948;
+  --color-gold-2: #f2c071;
+  --color-rust: #cf6b39;
+  --color-sage: #9aa85e;
+  --color-teal: #4fa39b;
+  --color-mauve: #b285ac;
+  --color-violet: #8f7fd6;
+  --color-red: #db5642;
+  --color-green: #6fae6a;
+  --color-wave: #c8b287;
 
-  /* Fonts */
-  --font-display: "Tiempos", "Iowan Old Style", "Georgia", serif;
-  --font-sans: "Söhne", "Inter", -apple-system, BlinkMacSystemFont, "Helvetica Neue", sans-serif;
-  --font-mono: "JetBrains Mono", "SF Mono", "Menlo", monospace;
+  /* ---- Back-compat names (old paper/ink/azure) remapped to warm hex so
+     existing @aux/ui + dashboard utilities resolve dark-on-graphite ---- */
+  --color-paper: #1b1711;
+  --color-paper-2: #221d15;
+  --color-paper-3: #2a241b;
+  --color-ink: #ece2cf;
+  --color-ink-2: #b6a88f;
+  --color-ink-3: #7e7058;
+  --color-ink-4: #564b39;
+  --color-azure: #e7a948;
+  --color-azure-soft: #f2c071;
+  --color-azure-deep: #4a3f2d;
+  --color-line-strong: #3a3122;
+  --color-highlight: #2a241b;
+  --color-ring: #e7a948;
+
+  /* Fonts — point at the next/font CSS vars (see layout.tsx) */
+  --font-sans: var(--sans);
+  --font-mono: var(--mono);
+  --font-display: var(--sans);
 
   /* Radius */
-  --radius-sm: 2px;
-  --radius-md: 4px;
+  --radius-sm: 3px;
+  --radius-md: 5px;
   --radius-lg: 8px;
 }
 
@@ -43,8 +68,8 @@ body {
 }
 
 body {
-  background: var(--paper);
-  color: var(--ink);
-  font-family: var(--font-sans);
+  background: var(--bg-0);
+  color: var(--txt-0);
+  font-family: var(--sans);
   -webkit-font-smoothing: antialiased;
 }

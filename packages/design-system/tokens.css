@@ -1,34 +1,127 @@
 /**
- * aux design system tokens — paper & ink, azure accent.
- * Sourced from docs/brainstorm.html. Edit there first, then mirror here.
+ * aux design system tokens — "warm analog terminal".
+ * Dark, monospace-driven, hairline, warm graphite ramp with an analog accent
+ * palette (level-gold, tape-rust, dynamics-sage, image-mauve, pitch-violet).
+ *
+ * Fonts (IBM Plex Mono / Sans) are loaded via next/font in apps/web/app/layout.tsx
+ * and exposed as --font-ibm-plex-mono / --font-ibm-plex-sans; this file points
+ * --mono/--sans at those vars.
  */
 :root {
-  /* Color · paper & ink */
-  --paper: #eef2f7;
-  --paper-2: #e3eaf3;
-  --paper-3: #d2dce8;
-  --ink: #16181d;
-  --ink-2: #353a43;
-  --ink-3: #626973;
-  --ink-4: #939aa5;
+  /* ---- Neutrals — warm graphite ramp ---- */
+  --bg-0: #0d0b08; /* app void / behind everything */
+  --bg-1: #14110c; /* timeline gutter, deepest panel */
+  --bg-2: #1b1711; /* panel */
+  --bg-3: #221d15; /* raised panel / channel strip */
+  --bg-4: #2a241b; /* hover / active surface */
+  --inset: #0b0906; /* knob wells, meter troughs, insets */
 
-  /* Color · azure accent */
-  --azure: #2e5fa8;
-  --azure-soft: #c5d5ec;
-  --azure-deep: #14355f;
+  --line: #2c2519; /* hairline divider */
+  --line-2: #3a3122; /* stronger border */
+  --line-3: #4a3f2d; /* focus / strong edge */
 
-  /* Color · semantic */
-  --line: #d3dce7;
-  --line-strong: #b5c2d2;
-  --highlight: #dce7f5;
-  --ring: var(--azure); /* focus-visible ring, per docs/implementation.html §21 */
+  /* ---- Text — warm cream ---- */
+  --txt-0: #ece2cf; /* primary */
+  --txt-1: #b6a88f; /* secondary / labels-on */
+  --txt-2: #7e7058; /* dim labels */
+  --txt-3: #564b39; /* faint / disabled */
 
-  /* Type */
-  --font-display: "Tiempos", "Iowan Old Style", "Georgia", serif;
-  --font-sans: "Söhne", "Inter", -apple-system, BlinkMacSystemFont, "Helvetica Neue", sans-serif;
-  --font-mono: "JetBrains Mono", "SF Mono", "Menlo", monospace;
+  /* ---- Analog accent palette ---- */
+  --gold: #e7a948; /* PRIMARY — level, EQ, focus, selection */
+  --gold-2: #f2c071; /* gold highlight */
+  --rust: #cf6b39; /* tape / saturation / drive */
+  --sage: #9aa85e; /* dynamics / compressor */
+  --teal: #4fa39b; /* transient / info */
+  --mauve: #b285ac; /* imaging / stereo */
+  --violet: #8f7fd6; /* pitch */
+  --red: #db5642; /* alert / clip / record / save-failed */
+  --green: #6fae6a; /* ok / saved / monitor-on */
 
-  /* Scale (modular, 1.25 minor third) */
+  /* waveform */
+  --wave: #c8b287; /* default cream-amber waveform */
+  --wave-dim: #6f6045; /* waveform behind / unfocused */
+  --wave-sel: #f0c577; /* selected clip waveform */
+
+  /* ---- Accent soft fills (chip backgrounds @ low alpha) ---- */
+  --gold-a: rgba(231, 169, 72, 0.14);
+  --rust-a: rgba(207, 107, 57, 0.16);
+  --sage-a: rgba(154, 168, 94, 0.15);
+  --teal-a: rgba(79, 163, 155, 0.15);
+  --mauve-a: rgba(178, 133, 172, 0.16);
+  --violet-a: rgba(143, 127, 214, 0.16);
+  --red-a: rgba(219, 86, 66, 0.16);
+
+  /* ---- Type ---- */
+  --mono: var(--font-ibm-plex-mono), ui-monospace, "SF Mono", Menlo, monospace;
+  --sans: var(--font-ibm-plex-sans), system-ui, sans-serif;
+
+  --fs-micro: 9px; /* knob value sub-labels */
+  --fs-label: 10px; /* control labels (tracked caps) */
+  --fs-sm: 11px;
+  --fs-base: 12px;
+  --fs-md: 13px;
+  --fs-lg: 16px;
+  --fs-xl: 20px;
+  --fs-display: 28px;
+
+  --track-caps: 0.14em; /* letter-spacing for tracked uppercase */
+
+  /* ---- Radius / shape ---- */
+  --r-xs: 2px;
+  --r-sm: 3px;
+  --r-md: 5px;
+  --r-lg: 8px;
+  --r-win: 9px;
+
+  /* ---- Elevation ---- */
+  --sh-1: 0 1px 0 rgba(255, 240, 210, 0.025) inset, 0 1px 2px rgba(0, 0, 0, 0.4);
+  --sh-2: 0 2px 8px rgba(0, 0, 0, 0.5);
+  --sh-win: 0 18px 50px -12px rgba(0, 0, 0, 0.7), 0 4px 14px rgba(0, 0, 0, 0.5), 0 0 0 1px
+    var(--line-2), 0 1px 0 rgba(255, 240, 210, 0.05) inset;
+  --glow-gold: 0 0 0 1px rgba(231, 169, 72, 0.5), 0 0 14px -2px rgba(231, 169, 72, 0.45);
+
+  /* ---- Spacing scale (4px base) ---- */
+  --s1: 4px;
+  --s2: 8px;
+  --s3: 12px;
+  --s4: 16px;
+  --s5: 20px;
+  --s6: 24px;
+  --s8: 32px;
+
+  /* ---- Motion ---- */
+  --ease: cubic-bezier(0.4, 0.1, 0.2, 1);
+  --fast: 90ms;
+  --med: 160ms;
+
+  /* ============================================================
+     BACK-COMPAT ALIASES — old "paper & ink / azure" token names
+     remapped onto the warm-analog ramp so the dashboard and @aux/ui
+     flip to dark-on-graphite without touching every utility. Prefer
+     the warm tokens above for new work; these are a migration bridge.
+     ============================================================ */
+  --paper: var(--bg-2);
+  --paper-2: var(--bg-3);
+  --paper-3: var(--bg-4);
+  --ink: var(--txt-0);
+  --ink-2: var(--txt-1);
+  --ink-3: var(--txt-2);
+  --ink-4: var(--txt-3);
+
+  --azure: var(--gold);
+  --azure-soft: var(--gold-2);
+  --azure-deep: var(--line-3);
+
+  --line-strong: var(--line-2);
+  --highlight: var(--bg-4);
+  --ring: var(--gold);
+
+  /* type aliases — design has no serif display; headings use the sans */
+  --font-display: var(--sans);
+  --font-sans: var(--sans);
+  --font-mono: var(--mono);
+
+  /* legacy type scale (rem) — kept for the dashboard until reskinned */
   --t-12: 0.75rem;
   --t-14: 0.875rem;
   --t-16: 1rem;
@@ -39,7 +132,7 @@
   --t-48: 3rem;
   --t-64: 4rem;
 
-  /* Space (4pt grid) */
+  /* legacy space scale */
   --s-1: 4px;
   --s-2: 8px;
   --s-3: 12px;
@@ -50,12 +143,9 @@
   --s-8: 64px;
   --s-9: 96px;
 
-  /* Radius — subtle, never round */
+  /* legacy radius + motion */
   --r-1: 2px;
   --r-2: 4px;
   --r-3: 8px;
-
-  /* Motion */
-  --ease: cubic-bezier(0.2, 0, 0, 1);
   --dur: 160ms;
 }
