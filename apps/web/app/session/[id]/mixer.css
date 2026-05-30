@@ -1810,6 +1810,27 @@
   color: #4a3f2d;
 }
 
+/* Clickable module header on a channel strip — opens the plugin window. */
+.ch-mod-head {
+  display: block;
+  width: 100%;
+  text-align: left;
+  padding: 4px 6px 2px;
+  background: transparent;
+  border: none;
+  border-top: 1px solid var(--line);
+  color: var(--txt-2);
+  font-family: var(--font-mono);
+  font-size: 9px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  cursor: pointer;
+  transition: color var(--fast) ease;
+}
+.ch-mod-head:hover {
+  color: var(--gold);
+}
+
 /* ─── Clips (timeline regions, v0.3 clip editing) ──────────────────── */
 
 /* Container spanning the lane; clip rects are absolutely placed within.

@@ -22,6 +22,8 @@ interface Props {
   onEq: (band: EqBand, gainDb: number) => void;
   onComp: (field: 'threshold' | 'ratio', value: number) => void;
   onCompType: (type: CompType) => void;
+  /** Open a floating plugin window for this channel (EQ / Compressor). */
+  onOpenPlugin?: (type: 'eq' | 'comp') => void;
   /** Bus directory — used to populate the strip's output picker. */
   buses: Record<string, BusState>;
   onOutput: (busId: string) => void;
@@ -174,6 +176,7 @@ export function ChannelStrip({
   onEq,
   onComp,
   onCompType,
+  onOpenPlugin,
   buses,
   onOutput,
   onSend,
@@ -200,6 +203,14 @@ export function ChannelStrip({
         {!loaded && <div>(not loaded)</div>}
       </div>
 
+      <button
+        type="button"
+        className="ch-mod-head"
+        onClick={() => onOpenPlugin?.('eq')}
+        title="Open EQ"
+      >
+        EQ
+      </button>
       <div className="ch-eq">
         <div className="knob-wrap">
           <Knob
@@ -239,6 +250,14 @@ export function ChannelStrip({
         </div>
       </div>
 
+      <button
+        type="button"
+        className="ch-mod-head"
+        onClick={() => onOpenPlugin?.('comp')}
+        title="Open Compressor"
+      >
+        COMP
+      </button>
       <div className="ch-comp">
         <fieldset className="ch-comp-type">
           <legend className="sr-only">{stem.name} comp flavour</legend>
