@@ -728,7 +728,7 @@
 
 .ch-strip {
   flex: 0 0 auto;
-  width: 88px;
+  width: 150px;
   display: flex;
   flex-direction: column;
   background: linear-gradient(180deg, #221d15, #1b1711);
@@ -796,7 +796,9 @@
  *     (.bus-strip .ch-name)
  * Base provides the type/colour treatment; row-specific layout (width,
  * margin) lives in those contexts below. */
+/* Track name — pinned at the bottom of each channel strip (footer item). */
 .ch-name {
+  flex: 0 0 auto;
   text-align: center;
   font-size: 10px;
   letter-spacing: 0.06em;
@@ -804,31 +806,14 @@
   color: #ece2cf;
   padding: 7px 6px;
   background: linear-gradient(180deg, #2a241b, #14110c);
+  border-top: 1px solid #0b0906;
   text-transform: uppercase;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
   /* The full name lives in the title attribute — hover for the long form. */
 }
-
-/* Names-row cells — one per strip column, kept in 1:1 alignment with the
-   strips above by mirroring .ch-strip's 88 px width + 2 px side margin. */
-.mixer-console-names .ch-name {
-  width: 88px;
-  margin: 0 2px;
-  padding: 8px 6px;
-  border: 1px solid #0b0906;
-  border-top: 0;
-  border-radius: 0 0 3px 3px;
-  /* Brighter gradient + faint top hairline so the scribble strip reads as
-     a distinct "name plate" rather than blending into the dark band below
-     the controls. */
-  background: linear-gradient(180deg, #3a4250, #1f242c);
-  color: #ece2cf;
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.1), inset 0 -1px 0 rgba(0, 0, 0, 0.3);
-}
-
-.mixer-console-names .ch-name.muted {
+.ch-strip.muted .ch-name {
   opacity: 0.5;
 }
 
@@ -1353,9 +1338,16 @@
      Fixed, compact height so the chain region keeps usable space on the
      half-height mixer; the chain breathes fully once the mixer is expanded. */
   flex: 0 0 auto;
-  height: 150px;
+  height: 168px;
   align-items: stretch;
+  justify-content: center;
   background: rgba(0, 0, 0, 0.2);
+}
+
+/* Pan knob on the right of the fader/meter, vertically centered. */
+.ch-pan-side {
+  justify-content: center;
+  flex: 0 0 auto;
 }
 
 .ch-meter {
@@ -1416,17 +1408,9 @@
 
 .fader {
   position: relative;
-  flex: 1;
-  width: 24px;
-  background: linear-gradient(
-    to right,
-    rgba(0, 0, 0, 0.6) 0%,
-    rgba(0, 0, 0, 0.8) 50%,
-    rgba(0, 0, 0, 0.6) 100%
-  );
-  border: 1px solid #000;
-  border-radius: 3px;
-  box-shadow: inset 0 0 8px rgba(0, 0, 0, 0.85), 0 1px 0 rgba(255, 255, 255, 0.05);
+  flex: 0 0 auto;
+  width: 14px;
+  background: transparent;
   cursor: ns-resize;
 }
 
@@ -1444,9 +1428,9 @@
 
 .fader-cap {
   position: absolute;
-  left: -3px;
-  right: -3px;
-  height: 22px;
+  left: -1px;
+  right: -1px;
+  height: 16px;
   transform: translateY(50%);
   background: linear-gradient(
     180deg,

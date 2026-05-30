@@ -41,7 +41,7 @@ export function Knob({
       min={min}
       max={max}
       defaultValue={defaultValue}
-      size={22}
+      size={32}
       accent={accent}
       bipolar={variant === 'pan'}
       ariaLabel={ariaLabel}

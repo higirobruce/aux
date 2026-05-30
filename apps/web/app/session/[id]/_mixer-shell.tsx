@@ -38,7 +38,7 @@ import {
 import Link from 'next/link';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { BusStrip } from './_bus-strip';
-import { ChannelStrip, ChannelStripName } from './_channel-strip';
+import { ChannelStrip } from './_channel-strip';
 import { type OpenPlugin, type PluginType, PluginWindows } from './_plugin-windows';
 import { StemDropZone } from './_stem-drop-zone';
 import { type StemPeaks, StemTimeline } from './_stem-timeline';
@@ -1490,21 +1490,6 @@ export function MixerShell({
                     </div>
                   )}
                 </div>
-                {stems.length > 0 && (
-                  <div className="mixer-console-names">
-                    {stems.map((stem) => {
-                      const state = channelState[stem.id] ?? DEFAULT_CHANNEL;
-                      const effectivelyMuted = state.muted || (anySoloed && !state.soloed);
-                      return (
-                        <ChannelStripName
-                          key={stem.id}
-                          stem={stem}
-                          effectivelyMuted={effectivelyMuted}
-                        />
-                      );
-                    })}
-                  </div>
-                )}
               </div>
             </div>
           </div>

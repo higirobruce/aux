@@ -593,8 +593,16 @@ export function ChannelStrip({
         />
       </div>
 
-      <div className="ch-pan-row">
-        <div className="knob-wrap">
+      {/* Footer: fader + meter, with pan on the right, vertically centered. */}
+      <div className="ch-fader-meter">
+        <Fader
+          position={volumeToPosition(state.volume)}
+          ariaLabel={`${stem.name} volume`}
+          onChange={(pos) => onVolume(positionToVolume(pos))}
+          onReset={() => onVolume(1)}
+        />
+        <Meter host={host} stemId={stem.id} active={active && loaded} />
+        <div className="knob-wrap ch-pan-side">
           <Knob
             variant="pan"
             value={state.pan}
@@ -607,16 +615,6 @@ export function ChannelStrip({
           <span className="knob-label">Pan</span>
           <span className="knob-readout">{formatPan(state.pan)}</span>
         </div>
-      </div>
-
-      <div className="ch-fader-meter">
-        <Meter host={host} stemId={stem.id} active={active && loaded} />
-        <Fader
-          position={volumeToPosition(state.volume)}
-          ariaLabel={`${stem.name} volume`}
-          onChange={(pos) => onVolume(positionToVolume(pos))}
-          onReset={() => onVolume(1)}
-        />
       </div>
 
       <div className="ch-buttons">
@@ -661,10 +659,11 @@ export function ChannelStrip({
           ))}
         </select>
       </div>
-      {/* The track's scribble-strip name is rendered by MixerShell into a
-          sibling row below .mixer-console — see <ChannelStripName> — so it
-          stays always-visible regardless of how the engineer has scrolled
-          the controls vertically. */}
+      {/* Track name — pinned at the bottom of the strip (design: the name is
+          part of the channel strip, not a separate scribble row). */}
+      <div className="ch-name" title={stem.name}>
+        {stem.name}
+      </div>
     </div>
   );
 }
