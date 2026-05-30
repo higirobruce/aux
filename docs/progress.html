@@ -141,7 +141,7 @@
        HEADER
        ============================================================ -->
   <section class="section">
-    <p class="eyebrow">aux · progress snapshot · 2026-05-29</p>
+    <p class="eyebrow">aux · progress snapshot · 2026-05-30</p>
     <h1>v0.3 — Real mixing</h1>
     <p style="font-size: var(--t-18); color: var(--ink-2); max-width: 64ch;">
       A living view of what's shipped against
@@ -194,15 +194,15 @@
         <div class="lbl">Must-ship plugins</div>
       </div>
       <div class="stat">
-        <div class="num">5<span style="color: var(--ink-3); font-size: var(--t-22);"> / 7</span></div>
+        <div class="num">6<span style="color: var(--ink-3); font-size: var(--t-22);"> / 7</span></div>
         <div class="lbl">v0.3 scope items done</div>
       </div>
       <div class="stat">
-        <div class="num">21</div>
+        <div class="num">53</div>
         <div class="lbl">v0.3 commits to date</div>
       </div>
       <div class="stat">
-        <div class="num">12</div>
+        <div class="num">24</div>
         <div class="lbl">MixState versions</div>
       </div>
     </div>
@@ -270,8 +270,30 @@
             <div class="lbl">Smart EQ panel</div>
             <div class="why">Polished UI for the existing EQ-8 DSP — curve display, frequency-response plot, draggable nodes, all eight bands exposed.</div>
           </td>
-          <td class="status"><span class="pill-st pill-planned">Planned</span></td>
-          <td>Today the channel strip only exposes three bands (Lo / Mid / Hi). The DSP itself has all eight; the panel surfaces them.</td>
+          <td class="status"><span class="pill-st pill-shipped">Shipped</span></td>
+          <td>
+            Full 5-band parametric window: draggable response nodes (drag = freq/gain,
+            wheel = Q), live spectrum behind the curve, per-band on + analyzer toggles,
+            band selector with TYPE/FREQ/GAIN/Q. Wired to the EQ-8 worklet; the strip's
+            Lo/Mid/Hi quick knobs now mirror three of its bands. Shipped as one of the
+            seven floating plugin windows (next row).
+          </td>
+        </tr>
+        <tr>
+          <td>
+            <div class="lbl">Plugin windows + warm-analog UI</div>
+            <div class="why">The "warm-analog terminal" redesign + seven floating, draggable plugin windows, animations driven by the live signal.</div>
+          </td>
+          <td class="status"><span class="pill-st pill-shipped">Shipped</span></td>
+          <td>
+            Full reskin (warm graphite + analog-accent tokens, IBM Plex, thin-ring primitive kit) across
+            launcher / transport / timeline / mixer. Insert accordion (toggle-dot hides knobs) with real
+            EQ/Comp bypass, resizable mixer + EXPAND, design Master/Bus labels. Seven plugin windows —
+            EQ, Compressor, Transient, Tape, Imager, Limiter, Pitch — wired to the real engine where DSP
+            exists (Pitch is a persisted visual placeholder; no pitch DSP yet). Visualisers (spectrum,
+            comp/limiter GR, tape harmonics, transient envelope, goniometer) read the live per-channel /
+            master signal and idle when silent.
+          </td>
         </tr>
         <tr>
           <td>
@@ -313,8 +335,8 @@
 
     <div class="meter-row">
       <div class="label">Must-ship</div>
-      <div class="meter"><div class="fill" style="width: 69%;"></div></div>
-      <div class="pct">9 / 13</div>
+      <div class="meter"><div class="fill" style="width: 92%;"></div></div>
+      <div class="pct">12 / 13</div>
     </div>
     <div class="meter-row">
       <div class="label">v1.1 stretch</div>
@@ -450,51 +472,21 @@
     <h2 style="margin-top: 0;">Recommended next move</h2>
 
     <div class="callout callout-tip">
-      <span class="mark">Pick one</span>
+      <span class="mark">One lane left</span>
       <p>
-        The channel-plugin marathon is done — Tape, Console, and MB-Comp
-        all landed, closing the headline &ldquo;all native plugins&rdquo;
-        line on the v0.3 list. That leaves two v0.3 lanes: Smart EQ panel
-        (the only remaining UI-heavy item) and Clip editing v1 (the largest
-        unlanded feature, now reachable on top of the stem timeline).
+        The plugin marathon and the whole warm-analog UI are done — the
+        channel DSP suite, the seven floating plugin windows (incl. the Smart
+        EQ panel), live signal-driven meters, and the reskin all landed and
+        merged to <code>staging</code>. That leaves a single big v0.3 lane:
+        <strong>Clip editing v1</strong> — cut / move / trim per stem on the
+        timeline, now reachable on top of the read-only stem timeline. The
+        design-system doc route is the only minor item still open.
       </p>
     </div>
 
     <div class="grid-2">
       <div>
-        <h3 style="margin-top: 0;">Option A — Tape (cheapest plugin)</h3>
-        <p>
-          Single-stage tape-style saturation. Smooth nonlinearity (typically
-          tanh / soft-clip), drive + bias + low-shelf bias to model the
-          tape head's frequency-dependent compression. Mono per channel.
-        </p>
-        <p class="caption">
-          <strong>Cost:</strong> Small Rust crate, the plugin plumbing is
-          by-rote at this point. Probably a single slice.
-        </p>
-        <p class="caption">
-          <strong>Progress:</strong> 9 / 13 must-ship plugins → 10 / 13.
-        </p>
-      </div>
-      <div>
-        <h3 style="margin-top: 0;">Option B — Finish the plugin suite</h3>
-        <p>
-          Three plugins to go: Tape (easy — single-stage saturation
-          curve), Console (medium — channel-style nonlinear coloration),
-          MB-Comp (heavy — 3 or 4 bands × compressor + Linkwitz-Riley
-          crossovers). Tape first, then Console, then MB-Comp.
-        </p>
-        <p class="caption">
-          <strong>Cost:</strong> 3 slices, roughly one each. Work is in
-          tuning the DSP, not wiring it up.
-        </p>
-        <p class="caption">
-          <strong>Unlocks:</strong> Closes &ldquo;all 12 native
-          plugins&rdquo; on the v0.3 checklist; 9 / 13 → 12 / 13.
-        </p>
-      </div>
-      <div>
-        <h3 style="margin-top: 0;">Option C — Clip editing v1 (heaviest)</h3>
+        <h3 style="margin-top: 0;">Option A — Clip editing v1 (the lane)</h3>
         <p>
           Cut / move / trim per stem inside the timeline. Stays inside one
           stem — no inserts, no MIDI. Drag handles on each lane, snap,
@@ -502,26 +494,49 @@
         </p>
         <p class="caption">
           <strong>Cost:</strong> Largest unlanded v0.3 lane. Edit-state in
-          MixState, drag interactions on each lane, undo/redo stack, and
-          host-side per-clip playback offsets in the audio engine.
+          MixState (the <code>clips</code> field already exists), drag
+          interactions on each lane, undo/redo stack, and host-side per-clip
+          playback offsets in the audio engine.
         </p>
         <p class="caption">
-          <strong>Unblocked since:</strong> Stem timeline shipped, so the
-          editing surface exists.
+          <strong>Unblocked since:</strong> the read-only stem timeline
+          shipped, so the editing surface exists.
         </p>
       </div>
       <div>
-        <h3 style="margin-top: 0;">Option D — Smart EQ panel</h3>
+        <h3 style="margin-top: 0;">Option B — Design-system doc route</h3>
         <p>
-          Polished UI for the existing EQ-8 DSP — curve display,
-          frequency-response plot, draggable band nodes, all eight bands
-          exposed (today only Lo / Mid / Hi are surfaced on the channel
-          strip).
+          A <code>/design-system</code> page showcasing the warm-analog
+          tokens + the primitive kit (knob / fader / meter / spectrum /
+          window-frame), ported from the design's <code>ds.jsx</code>.
         </p>
         <p class="caption">
-          <strong>Cost:</strong> Larger than the plugin slices because the
-          interaction model is bespoke (drag points on a log-frequency
-          canvas). DSP is already done.
+          <strong>Cost:</strong> Small — the tokens and primitives already
+          exist; this is a presentation page. The last minor open item.
+        </p>
+      </div>
+      <div>
+        <h3 style="margin-top: 0;">Option C — Real pitch DSP</h3>
+        <p>
+          The Pitch window ships as a faithful visual placeholder; a real
+          corrector needs pitch detection + resynthesis (PSOLA / phase
+          vocoder) in a Rust worklet to back its key/scale/retune controls.
+        </p>
+        <p class="caption">
+          <strong>Cost:</strong> A genuine DSP project — deferred. The UI is
+          ready to wire once the engine lands.
+        </p>
+      </div>
+      <div>
+        <h3 style="margin-top: 0;">Option D — Engine taps for the meters</h3>
+        <p>
+          Two visualisers run on the mono peak level for want of an engine
+          tap: a true L/R goniometer needs a stereo time-domain feed, and
+          per-channel LUFS/true-peak readouts need their own meters.
+        </p>
+        <p class="caption">
+          <strong>Cost:</strong> Small-to-medium engine work; the windows
+          already read whatever the host exposes.
         </p>
       </div>
     </div>
@@ -539,6 +554,19 @@
     </p>
 
     <div class="commitlog">
+<span class="sha">cffdb8c</span> <span class="v03">v0.3</span> <span class="msg">fix(ui): quantize Knob SVG coords to kill SSR hydration mismatch</span>
+<span class="sha">cf3f303</span> <span class="v03">v0.3</span> <span class="msg">plugins: drive window animations from the live signal, not Date.now()</span>
+<span class="sha">1aa19c4</span> <span class="v03">v0.3</span> <span class="msg">plugins (7/7): Pitch corrector window (visual placeholder)</span>
+<span class="sha">8ecc327</span> <span class="v03">v0.3</span> <span class="msg">plugins (6/7): Master Limiter window, wired to the engine</span>
+<span class="sha">2724472</span> <span class="v03">v0.3</span> <span class="msg">plugins (5/7): Stereo Imager window, wired to the engine</span>
+<span class="sha">52bc5de</span> <span class="v03">v0.3</span> <span class="msg">plugins (4/7): Tape / Saturation window, wired to the engine</span>
+<span class="sha">db2a0cf</span> <span class="v03">v0.3</span> <span class="msg">plugins (3/7): Transient designer window, wired to the engine</span>
+<span class="sha">693aec2</span> <span class="v03">v0.3</span> <span class="msg">plugins (2/7): full Compressor window, wired to the engine</span>
+<span class="sha">0d4c3bb</span> <span class="v03">v0.3</span> <span class="msg">plugins (1/7): full 5-band parametric EQ window, wired to the engine</span>
+<span class="sha">109177e</span> <span class="v03">v0.3</span> <span class="msg">warm-analog reskin (7h): real EQ/Comp bypass behind the accordion dot</span>
+<span class="sha">4d4c5fc</span> <span class="v03">v0.3</span> <span class="msg">warm-analog reskin (7g): insert accordion + design Master/Bus labels</span>
+<span class="sha">d1bdee6</span> <span class="v03">v0.3</span> <span class="msg">warm-analog reskin (7f): make mixer resize actually work</span>
+<span class="sha">26b210d</span> <span class="v03">v0.3</span> <span class="msg">warm-analog reskin (7e): mixer panel header (EXPAND) + resize divider</span>
 <span class="sha">16be651</span> <span class="v03">v0.3</span> <span class="msg">MB-Comp: per-channel multiband compressor (lo / mid / hi / ratio)</span>
 <span class="sha">0443c89</span> <span class="v03">v0.3</span> <span class="msg">Console: per-channel asymmetric saturation (drive / character / mix)</span>
 <span class="sha">243d03d</span> <span class="v03">v0.3</span> <span class="msg">Tape: per-channel tape saturation (drive / tone / mix)</span>
