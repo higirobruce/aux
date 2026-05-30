@@ -198,7 +198,7 @@
         <div class="lbl">v0.3 scope items done</div>
       </div>
       <div class="stat">
-        <div class="num">53</div>
+        <div class="num">54</div>
         <div class="lbl">v0.3 commits to date</div>
       </div>
       <div class="stat">
@@ -290,9 +290,24 @@
             launcher / transport / timeline / mixer. Insert accordion (toggle-dot hides knobs) with real
             EQ/Comp bypass, resizable mixer + EXPAND, design Master/Bus labels. Seven plugin windows —
             EQ, Compressor, Transient, Tape, Imager, Limiter, Pitch — wired to the real engine where DSP
-            exists (Pitch is a persisted visual placeholder; no pitch DSP yet). Visualisers (spectrum,
+            exists (Pitch is now backed by real DSP — see next row). Visualisers (spectrum,
             comp/limiter GR, tape harmonics, transient envelope, goniometer) read the live per-channel /
             master signal and idle when silent.
+          </td>
+        </tr>
+        <tr>
+          <td>
+            <div class="lbl">Pitch corrector — real DSP + delay-compensation</div>
+            <div class="why">Make the Pitch insert real (it shipped as a UI placeholder) + add plugin-delay-compensation so its latency doesn't drift the stem against the mix.</div>
+          </td>
+          <td class="status"><span class="pill-st pill-flight">In review</span></td>
+          <td>
+            New <code>@aux/dsp-pitch</code> Rust crate (PR #12): YIN f0 detection → key/scale snap →
+            cents glide (amount/humanize) → two-tap overlap-add shift; time-domain, monophonic, no FFT.
+            Constant latency when engaged, zero-latency bypass. Engine gains plugin-delay-compensation
+            (per-channel <code>compDelay</code> + <code>recomputePdc()</code>) so engaging Pitch keeps
+            every stem aligned. FORMANT persists but is inert (no DSP yet); the detected-pitch UI tap is
+            a follow-up. First-cut quality — monophonic, time-domain.
           </td>
         </tr>
         <tr>
@@ -476,11 +491,13 @@
       <p>
         The plugin marathon and the whole warm-analog UI are done — the
         channel DSP suite, the seven floating plugin windows (incl. the Smart
-        EQ panel), live signal-driven meters, and the reskin all landed and
-        merged to <code>staging</code>. That leaves a single big v0.3 lane:
-        <strong>Clip editing v1</strong> — cut / move / trim per stem on the
-        timeline, now reachable on top of the read-only stem timeline. The
-        design-system doc route is the only minor item still open.
+        EQ panel), live signal-driven meters, and the reskin all merged to
+        <code>staging</code>; the <strong>real Pitch corrector + plugin-delay-
+        compensation</strong> is in review (PR #12). That leaves a single big
+        v0.3 lane: <strong>Clip editing v1</strong> — cut / move / trim per
+        stem on the timeline, now reachable on top of the read-only stem
+        timeline. The design-system doc route is the only minor item still
+        open.
       </p>
     </div>
 
@@ -554,6 +571,7 @@
     </p>
 
     <div class="commitlog">
+<span class="sha">34c0fea</span> <span class="v03">v0.3</span> <span class="msg">feat(pitch): real monophonic pitch corrector + plugin-delay-compensation (PR #12)</span>
 <span class="sha">cffdb8c</span> <span class="v03">v0.3</span> <span class="msg">fix(ui): quantize Knob SVG coords to kill SSR hydration mismatch</span>
 <span class="sha">cf3f303</span> <span class="v03">v0.3</span> <span class="msg">plugins: drive window animations from the live signal, not Date.now()</span>
 <span class="sha">1aa19c4</span> <span class="v03">v0.3</span> <span class="msg">plugins (7/7): Pitch corrector window (visual placeholder)</span>
