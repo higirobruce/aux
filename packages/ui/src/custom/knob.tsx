@@ -53,9 +53,13 @@ export function Knob({
   const cx = r;
   const cy = r;
 
+  // Quantize emitted SVG coords so the server-rendered and client strings are
+  // byte-identical — raw trig differs by an ULP between runtimes, which trips
+  // React's hydration check on knobs whose value isn't a round number.
+  const q = (n: number) => Math.round(n * 1000) / 1000;
   const toXY = (deg: number): [number, number] => {
     const rad = ((deg - 90) * Math.PI) / 180;
-    return [cx + ringR * Math.cos(rad), cy + ringR * Math.sin(rad)];
+    return [q(cx + ringR * Math.cos(rad)), q(cy + ringR * Math.sin(rad))];
   };
   const arcPath = (from: number, to: number) => {
     const [x0, y0] = toXY(from);
@@ -67,8 +71,8 @@ export function Knob({
   const down = useDrag({ value, min, max, onChange });
   const ptr = toXY(ang);
   const pin: [number, number] = [
-    cx + (ringR - 7) * Math.cos(((ang - 90) * Math.PI) / 180),
-    cy + (ringR - 7) * Math.sin(((ang - 90) * Math.PI) / 180),
+    q(cx + (ringR - 7) * Math.cos(((ang - 90) * Math.PI) / 180)),
+    q(cy + (ringR - 7) * Math.sin(((ang - 90) * Math.PI) / 180)),
   ];
 
   return (
