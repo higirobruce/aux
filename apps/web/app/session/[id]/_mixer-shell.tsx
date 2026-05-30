@@ -31,6 +31,7 @@ import {
   EQ_QUICK_BAND_IDS,
   type EqFullBand,
   type EqFullBandType,
+  type ImagerMode,
   type LimiterState,
   MIX_STATE_VERSION,
   type MasterChain,
@@ -94,8 +95,8 @@ export interface ChannelState {
   };
   /** DeEss — split-band sibilance tamer. */
   deess: { freq: number; amount: number; bypassed: boolean };
-  /** Imager — M/S stereo width. */
-  imager: { width: number; bypassed: boolean };
+  /** Imager — M/S stereo width; balance/mode are UI/goniometer-only. */
+  imager: { width: number; bypassed: boolean; balance: number; mode: ImagerMode };
   /** Tape — single-stage saturation; bias/mode are UI/visual-only. */
   tape: {
     driveDb: number;
@@ -250,7 +251,7 @@ function hydrateMixState(raw: unknown): HydratedMix {
       sends: c.sends ?? {},
       transient: { ...DEFAULT_CHANNEL_TRANSIENT, ...c.transient },
       deess: c.deess ?? { ...DEFAULT_CHANNEL_DEESS },
-      imager: c.imager ?? { ...DEFAULT_CHANNEL_IMAGER },
+      imager: { ...DEFAULT_CHANNEL_IMAGER, ...c.imager },
       tape: { ...DEFAULT_CHANNEL_TAPE, ...c.tape },
       console: c.console ?? { ...DEFAULT_CHANNEL_CONSOLE },
       mbcomp: c.mbcomp ?? { ...DEFAULT_CHANNEL_MBCOMP },
@@ -1107,6 +1108,21 @@ export function MixerShell({
     });
   }, []);
 
+  // Balance + mode are goniometer/UI only (engine images from width).
+  const setImagerBalance = useCallback((stemId: string, balance: number) => {
+    setChannelState((prev) => {
+      const current = prev[stemId] ?? DEFAULT_CHANNEL;
+      return { ...prev, [stemId]: { ...current, imager: { ...current.imager, balance } } };
+    });
+  }, []);
+
+  const setImagerMode = useCallback((stemId: string, mode: ImagerMode) => {
+    setChannelState((prev) => {
+      const current = prev[stemId] ?? DEFAULT_CHANNEL;
+      return { ...prev, [stemId]: { ...current, imager: { ...current.imager, mode } } };
+    });
+  }, []);
+
   const toggleImagerBypass = useCallback((stemId: string) => {
     setChannelState((prev) => {
       const current = prev[stemId] ?? DEFAULT_CHANNEL;
@@ -1809,6 +1825,10 @@ export function MixerShell({
           onTape: setTape,
           onTapeMode: setTapeMode,
           onTapeBypass: toggleTapeBypass,
+          onImager: setImager,
+          onImagerBalance: setImagerBalance,
+          onImagerMode: setImagerMode,
+          onImagerBypass: toggleImagerBypass,
         }}
       />
     </>

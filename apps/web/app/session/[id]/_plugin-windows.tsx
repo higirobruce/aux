@@ -14,7 +14,7 @@ import { Knob, Readout, Segmented, Spectrum, Toggle, WindowFrame, clamp } from '
 import { useEffect, useRef, useState } from 'react';
 import type { ChannelState, CompField, EqBand } from './_mixer-shell';
 
-export type PluginType = 'eq' | 'comp' | 'trans' | 'tape';
+export type PluginType = 'eq' | 'comp' | 'trans' | 'tape' | 'img';
 export interface OpenPlugin {
   type: PluginType;
   stemId: string;
@@ -37,6 +37,10 @@ interface HostBundle {
   onTape: (stemId: string, field: 'driveDb' | 'tone' | 'mix' | 'bias', value: number) => void;
   onTapeMode: (stemId: string, mode: 'TAPE' | 'TUBE' | 'TRANS') => void;
   onTapeBypass: (stemId: string) => void;
+  onImager: (stemId: string, width: number) => void;
+  onImagerBalance: (stemId: string, balance: number) => void;
+  onImagerMode: (stemId: string, mode: 'STEREO' | 'MS') => void;
+  onImagerBypass: (stemId: string) => void;
 }
 
 /* ============================================================
@@ -1108,6 +1112,191 @@ function TapeWindow({
   );
 }
 
+/* ============================================================
+   Stereo Imager — animated goniometer + correlation
+   ============================================================ */
+const GONIO = 160;
+
+function Goniometer({ width, balance }: { width: number; balance: number }) {
+  const ref = useRef<HTMLCanvasElement>(null);
+  const v = useRef({ width, balance });
+  v.current = { width, balance };
+  useEffect(() => {
+    const cv = ref.current;
+    if (!cv) return;
+    const dpr = window.devicePixelRatio || 1;
+    const ctx = cv.getContext('2d');
+    if (!ctx) return;
+    const S = GONIO;
+    cv.width = S * dpr;
+    cv.height = S * dpr;
+    let raf = 0;
+    let t = 0;
+    const draw = () => {
+      t += 0.04;
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+      ctx.clearRect(0, 0, S, S);
+      ctx.save();
+      ctx.translate(S / 2, S / 2);
+      ctx.strokeStyle = 'rgba(255,240,210,0.06)';
+      ctx.beginPath();
+      ctx.arc(0, 0, S / 2 - 6, 0, 7);
+      ctx.stroke();
+      ctx.beginPath();
+      ctx.moveTo(0, -S / 2);
+      ctx.lineTo(0, S / 2);
+      ctx.moveTo(-S / 2, 0);
+      ctx.lineTo(S / 2, 0);
+      ctx.stroke();
+      const w = v.current.width;
+      const bal = v.current.balance;
+      for (let i = 0; i < 90; i++) {
+        const a = t + i * 0.4;
+        const r = (S / 2 - 12) * (0.3 + 0.6 * Math.abs(Math.sin(a * 1.3 + i)));
+        const spread = w * (0.4 + 0.6 * Math.sin(a));
+        const x = r * spread * Math.cos(a) + bal * 30;
+        const y = -r * Math.abs(Math.cos(a * 0.7));
+        ctx.fillStyle = `rgba(178,133,172,${0.5 - i / 200})`;
+        ctx.fillRect(x - 1, y - 1, 2, 2);
+      }
+      ctx.restore();
+      raf = requestAnimationFrame(draw);
+    };
+    draw();
+    return () => cancelAnimationFrame(raf);
+  }, []);
+  return <canvas ref={ref} style={{ width: GONIO, height: GONIO }} />;
+}
+
+function ImagerWindow({
+  b,
+  p,
+  z,
+  onClose,
+  onFocus,
+}: { b: HostBundle; p: OpenPlugin; z: number; onClose: () => void; onFocus: () => void }) {
+  const ch = b.channelState[p.stemId];
+  if (!ch) return null;
+  const im = ch.imager;
+  const corr = (im.width - 1) * 0.6;
+  const corrCol = corr < 0 ? 'var(--red)' : 'var(--mauve)';
+  return (
+    <WindowFrame
+      title="STEREO IMAGER"
+      sub={`WIDTH · ${b.stemName(p.stemId)}`}
+      accent="mauve"
+      width={420}
+      z={z}
+      initial={{ x: 400, y: 150 }}
+      onClose={onClose}
+      onFocus={onFocus}
+      bypass={im.bypassed}
+      onBypass={() => b.onImagerBypass(p.stemId)}
+    >
+      <div style={{ display: 'flex', gap: 14, padding: 14 }}>
+        <div
+          style={{
+            width: GONIO,
+            height: GONIO,
+            flexShrink: 0,
+            background: 'var(--inset)',
+            borderRadius: 'var(--r-md)',
+            border: '1px solid var(--line)',
+            overflow: 'hidden',
+          }}
+        >
+          <Goniometer width={im.width} balance={im.balance} />
+        </div>
+        <div
+          style={{ display: 'flex', flexDirection: 'column', gap: 16, justifyContent: 'center' }}
+        >
+          <div style={{ display: 'flex', gap: 16 }}>
+            <Knob
+              size={48}
+              label="WIDTH"
+              value={im.width}
+              min={0}
+              max={2}
+              defaultValue={1}
+              accent="mauve"
+              display={im.width.toFixed(2)}
+              ariaLabel="imager width"
+              onChange={(val) => b.onImager(p.stemId, val)}
+            />
+            <Knob
+              size={48}
+              label="BALANCE"
+              value={im.balance}
+              min={-1}
+              max={1}
+              bipolar
+              defaultValue={0}
+              accent="mauve"
+              display={
+                im.balance === 0
+                  ? 'C'
+                  : (im.balance > 0 ? 'R' : 'L') + Math.abs(im.balance * 100).toFixed(0)
+              }
+              ariaLabel="imager balance"
+              onChange={(val) => b.onImagerBalance(p.stemId, val)}
+            />
+          </div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+              <span className="lbl" style={{ fontSize: 8 }}>
+                CORRELATION
+              </span>
+              <span className="val" style={{ fontSize: 10, color: corrCol }}>
+                {corr.toFixed(2)}
+              </span>
+            </div>
+            <div
+              style={{
+                position: 'relative',
+                height: 10,
+                background: 'var(--inset)',
+                borderRadius: 3,
+                boxShadow: 'inset 0 0 0 1px var(--line)',
+              }}
+            >
+              <div
+                style={{
+                  position: 'absolute',
+                  left: '50%',
+                  top: 0,
+                  bottom: 0,
+                  width: 1,
+                  background: 'var(--line-2)',
+                }}
+              />
+              <div
+                style={{
+                  position: 'absolute',
+                  left: `${50 + clamp(corr, -1, 1) * 50}%`,
+                  top: -2,
+                  width: 3,
+                  height: 14,
+                  background: corrCol,
+                  borderRadius: 2,
+                }}
+              />
+            </div>
+          </div>
+          <Segmented
+            options={[
+              { value: 'STEREO', label: 'STEREO' },
+              { value: 'MS', label: 'M/S' },
+            ]}
+            value={im.mode}
+            accent="mauve"
+            onChange={(val) => b.onImagerMode(p.stemId, val as 'STEREO' | 'MS')}
+          />
+        </div>
+      </div>
+    </WindowFrame>
+  );
+}
+
 export function PluginWindows({
   windows,
   onClose,
@@ -1134,6 +1323,7 @@ export function PluginWindows({
         if (p.type === 'eq') return <EqWindow key={key} {...props} />;
         if (p.type === 'trans') return <TransWindow key={key} {...props} />;
         if (p.type === 'tape') return <TapeWindow key={key} {...props} />;
+        if (p.type === 'img') return <ImagerWindow key={key} {...props} />;
         return <CompWindow key={key} {...props} />;
       })}
     </>

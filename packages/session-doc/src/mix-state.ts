@@ -42,9 +42,11 @@ import { z } from 'zod';
  *       v1–v19 docs stay valid.
  * v21 — adds the tape's `bias` + `mode` (UI/visual only — engine drives from
  *       drive/tone/mix). Optional with defaults, so v1–v20 docs stay valid.
+ * v22 — adds the imager's `balance` + `mode` (UI/goniometer only — engine
+ *       images from width). Optional with defaults, so v1–v21 docs stay valid.
  */
 
-export const MIX_STATE_VERSION = 21;
+export const MIX_STATE_VERSION = 22;
 
 /**
  * Versions the strict parse still accepts. During the v15→v16 rollout we
@@ -52,7 +54,7 @@ export const MIX_STATE_VERSION = 21;
  * API strict-parses with this same schema). Narrow back to a single
  * `z.literal(MIX_STATE_VERSION)` once every deployed surface is on v16.
  */
-const ACCEPTED_VERSIONS = [z.literal(18), z.literal(19), z.literal(20), z.literal(21)] as const;
+const ACCEPTED_VERSIONS = [z.literal(19), z.literal(20), z.literal(21), z.literal(22)] as const;
 
 /** Stable id for the always-present Master bus. Sessions can omit it from
  *  their `buses` record; the client treats it as if explicitly present. */
@@ -180,11 +182,18 @@ export const ChannelDeEssSchema = z.object({
   bypassed: z.boolean(),
 });
 
+export const ImagerModeSchema = z.enum(['STEREO', 'MS']);
+export type ImagerMode = z.infer<typeof ImagerModeSchema>;
+
 /** Imager per channel — M/S stereo width. */
 export const ChannelImagerSchema = z.object({
   /** Width, 0..2; 1 = unity (passthrough). */
   width: z.number().min(0).max(2),
   bypassed: z.boolean(),
+  /** Stereo balance −1..1 (v22+). UI/goniometer only. */
+  balance: z.number().min(-1).max(1).default(0),
+  /** Display mode (v22+). UI/goniometer only. */
+  mode: ImagerModeSchema.default('STEREO'),
 });
 
 export const TapeModeSchema = z.enum(['TAPE', 'TUBE', 'TRANS']);
@@ -450,6 +459,8 @@ export const DEFAULT_CHANNEL_DEESS = {
 export const DEFAULT_CHANNEL_IMAGER = {
   width: 1,
   bypassed: false,
+  balance: 0,
+  mode: 'STEREO',
 } as const;
 
 /** Default Tape — clean, dry. */

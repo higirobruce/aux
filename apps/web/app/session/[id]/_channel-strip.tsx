@@ -27,7 +27,7 @@ interface Props {
   onCompType: (type: CompType) => void;
   onCompBypass: () => void;
   /** Open a floating plugin window for this channel. */
-  onOpenPlugin?: (type: 'eq' | 'comp' | 'trans' | 'tape') => void;
+  onOpenPlugin?: (type: 'eq' | 'comp' | 'trans' | 'tape' | 'img') => void;
   /** Bus directory — used to populate the strip's output picker. */
   buses: Record<string, BusState>;
   onOutput: (busId: string) => void;
@@ -468,6 +468,7 @@ export function ChannelStrip({
           accent="mauve"
           on={!state.imager.bypassed}
           onToggle={onImagerBypass}
+          onOpen={() => onOpenPlugin?.('img')}
         >
           <div className="knob-wrap">
             <Knob
