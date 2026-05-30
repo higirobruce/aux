@@ -33,6 +33,7 @@ import {
   type EqFullBandType,
   type ImagerMode,
   type LimiterState,
+  type LimiterStyle,
   MIX_STATE_VERSION,
   type MasterChain,
   MixStateSchema,
@@ -309,6 +310,7 @@ function hydrateMixState(raw: unknown): HydratedMix {
           releaseMs: oldLim.releaseMs,
           makeupDb: oldLim.makeupDb,
           bypassed: oldLim.bypassed,
+          style: oldLim.style ?? DEFAULT_LIMITER_STATE.style,
         }
       : { ...DEFAULT_LIMITER_STATE };
 
@@ -1268,6 +1270,11 @@ export function MixerShell({
     });
   }, []);
 
+  // Style is voicing/UI only — engine limits from threshold/release/makeup.
+  const setLimiterStyle = useCallback((style: LimiterStyle) => {
+    setMasterChain((prev) => ({ ...prev, limiter: { ...prev.limiter, style } }));
+  }, []);
+
   const setReferenceRoom = useCallback((preset: ReferenceRoomPreset) => {
     setMasterChain((prev) => {
       if (prev.referenceRoom.preset === preset) return prev;
@@ -1757,6 +1764,7 @@ export function MixerShell({
                 limiter={masterChain.limiter}
                 onLimiter={setLimiter}
                 onLimiterBypass={toggleLimiterBypass}
+                onOpenLimiter={() => openPlugin('limiter', MASTER_BUS_ID)}
                 referenceRoom={masterChain.referenceRoom.preset}
                 onReferenceRoom={setReferenceRoom}
               />
@@ -1829,6 +1837,10 @@ export function MixerShell({
           onImagerBalance: setImagerBalance,
           onImagerMode: setImagerMode,
           onImagerBypass: toggleImagerBypass,
+          limiter: masterChain.limiter,
+          onLimiter: setLimiter,
+          onLimiterStyle: setLimiterStyle,
+          onLimiterBypass: toggleLimiterBypass,
         }}
       />
     </>

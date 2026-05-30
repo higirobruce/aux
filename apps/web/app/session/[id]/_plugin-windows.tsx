@@ -9,12 +9,12 @@
  */
 
 import type { AudioHost } from '@aux/audio-engine';
-import type { EqFullBand } from '@aux/session-doc';
+import type { EqFullBand, LimiterState } from '@aux/session-doc';
 import { Knob, Readout, Segmented, Spectrum, Toggle, WindowFrame, clamp } from '@aux/ui';
 import { useEffect, useRef, useState } from 'react';
 import type { ChannelState, CompField, EqBand } from './_mixer-shell';
 
-export type PluginType = 'eq' | 'comp' | 'trans' | 'tape' | 'img';
+export type PluginType = 'eq' | 'comp' | 'trans' | 'tape' | 'img' | 'limiter';
 export interface OpenPlugin {
   type: PluginType;
   stemId: string;
@@ -41,6 +41,11 @@ interface HostBundle {
   onImagerBalance: (stemId: string, balance: number) => void;
   onImagerMode: (stemId: string, mode: 'STEREO' | 'MS') => void;
   onImagerBypass: (stemId: string) => void;
+  /** Master limiter (the only master-bus plugin). */
+  limiter: LimiterState;
+  onLimiter: (field: 'thresholdDb' | 'releaseMs' | 'makeupDb', value: number) => void;
+  onLimiterStyle: (style: 'CLEAR' | 'PUNCH' | 'GLUE' | 'SAFE') => void;
+  onLimiterBypass: () => void;
 }
 
 /* ============================================================
@@ -1297,6 +1302,99 @@ function ImagerWindow({
   );
 }
 
+/* ============================================================
+   Master Limiter — ceiling / gain / release + voicing + GR
+   ============================================================ */
+function LimiterWindow({
+  b,
+  z,
+  onClose,
+  onFocus,
+}: { b: HostBundle; z: number; onClose: () => void; onFocus: () => void }) {
+  const lim = b.limiter;
+  // The engine exposes no master-limiter GR tap yet, so the meter + readouts
+  // are simulated against the ceiling (flagged in the plan as future work).
+  const getGr = () => {
+    const t = Date.now() / 1000;
+    const inDb = -8 + 8 * Math.abs(Math.sin(t * 3));
+    return Math.max(0, inDb - lim.thresholdDb) * 1.2;
+  };
+  return (
+    <WindowFrame
+      title="MASTER LIMITER"
+      sub="TRUE PEAK · MASTER"
+      accent="red"
+      width={404}
+      z={z}
+      initial={{ x: 420, y: 150 }}
+      onClose={onClose}
+      onFocus={onFocus}
+      bypass={lim.bypassed}
+      onBypass={b.onLimiterBypass}
+    >
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 14, padding: 14 }}>
+        <div style={{ display: 'flex', justifyContent: 'space-around' }}>
+          <Knob
+            size={48}
+            label="CEILING"
+            value={lim.thresholdDb}
+            min={-12}
+            max={0}
+            defaultValue={-1}
+            accent="red"
+            display={lim.thresholdDb.toFixed(1)}
+            unit="dB"
+            ariaLabel="ceiling"
+            onChange={(v) => b.onLimiter('thresholdDb', v)}
+          />
+          <Knob
+            size={48}
+            label="GAIN"
+            value={lim.makeupDb}
+            min={0}
+            max={18}
+            defaultValue={0}
+            accent="gold"
+            display={`+${lim.makeupDb.toFixed(1)}`}
+            ariaLabel="gain"
+            onChange={(v) => b.onLimiter('makeupDb', v)}
+          />
+          <Knob
+            size={48}
+            label="RELEASE"
+            value={lim.releaseMs}
+            min={5}
+            max={500}
+            defaultValue={100}
+            accent="red"
+            display={lim.releaseMs.toFixed(0)}
+            unit="ms"
+            ariaLabel="release"
+            onChange={(v) => b.onLimiter('releaseMs', v)}
+          />
+        </div>
+        <Segmented
+          options={[
+            { value: 'CLEAR', label: 'CLEAR' },
+            { value: 'PUNCH', label: 'PUNCH' },
+            { value: 'GLUE', label: 'GLUE' },
+            { value: 'SAFE', label: 'SAFE' },
+          ]}
+          value={lim.style}
+          accent="red"
+          onChange={(v) => b.onLimiterStyle(v as 'CLEAR' | 'PUNCH' | 'GLUE' | 'SAFE')}
+        />
+        <GrMeterH getGr={getGr} max={12} width={376} />
+        <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+          <Readout label="PEAK" value={lim.thresholdDb.toFixed(1)} unit="dB" accent="red" />
+          <Readout label="LUFS" value={(-14).toFixed(1)} accent="gold" />
+          <Readout label="OVERS" value="0" accent="green" />
+        </div>
+      </div>
+    </WindowFrame>
+  );
+}
+
 export function PluginWindows({
   windows,
   onClose,
@@ -1324,6 +1422,16 @@ export function PluginWindows({
         if (p.type === 'trans') return <TransWindow key={key} {...props} />;
         if (p.type === 'tape') return <TapeWindow key={key} {...props} />;
         if (p.type === 'img') return <ImagerWindow key={key} {...props} />;
+        if (p.type === 'limiter')
+          return (
+            <LimiterWindow
+              key={key}
+              b={bundle}
+              z={z}
+              onClose={() => onClose(i)}
+              onFocus={() => onFocus(i)}
+            />
+          );
         return <CompWindow key={key} {...props} />;
       })}
     </>

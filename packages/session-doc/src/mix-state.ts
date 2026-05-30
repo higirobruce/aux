@@ -44,9 +44,12 @@ import { z } from 'zod';
  *       drive/tone/mix). Optional with defaults, so v1–v20 docs stay valid.
  * v22 — adds the imager's `balance` + `mode` (UI/goniometer only — engine
  *       images from width). Optional with defaults, so v1–v21 docs stay valid.
+ * v23 — adds the master limiter's `style` (UI voicing only — engine limits
+ *       from threshold/release/makeup). Optional default, so v1–v22 docs
+ *       stay valid.
  */
 
-export const MIX_STATE_VERSION = 22;
+export const MIX_STATE_VERSION = 23;
 
 /**
  * Versions the strict parse still accepts. During the v15→v16 rollout we
@@ -54,7 +57,7 @@ export const MIX_STATE_VERSION = 22;
  * API strict-parses with this same schema). Narrow back to a single
  * `z.literal(MIX_STATE_VERSION)` once every deployed surface is on v16.
  */
-const ACCEPTED_VERSIONS = [z.literal(19), z.literal(20), z.literal(21), z.literal(22)] as const;
+const ACCEPTED_VERSIONS = [z.literal(20), z.literal(21), z.literal(22), z.literal(23)] as const;
 
 /** Stable id for the always-present Master bus. Sessions can omit it from
  *  their `buses` record; the client treats it as if explicitly present. */
@@ -286,6 +289,9 @@ export const ChannelStateSchema = z.object({
   clips: StemClipsSchema.optional(),
 });
 
+export const LimiterStyleSchema = z.enum(['CLEAR', 'PUNCH', 'GLUE', 'SAFE']);
+export type LimiterStyle = z.infer<typeof LimiterStyleSchema>;
+
 export const LimiterStateSchema = z.object({
   /** Brick-wall threshold in dBFS (typically −1.0 for true-peak safety). */
   thresholdDb: z.number().min(-24).max(0),
@@ -294,6 +300,8 @@ export const LimiterStateSchema = z.object({
   /** Pre-limit makeup gain in dB. */
   makeupDb: z.number().min(-12).max(24),
   bypassed: z.boolean(),
+  /** Voicing (v23+). UI only — engine limits from threshold/release/makeup. */
+  style: LimiterStyleSchema.default('GLUE'),
 });
 
 /**
@@ -364,6 +372,7 @@ export const DEFAULT_LIMITER_STATE: LimiterState = {
   releaseMs: 100,
   makeupDb: 0,
   bypassed: false,
+  style: 'GLUE',
 };
 
 export const DEFAULT_REFERENCE_ROOM = {

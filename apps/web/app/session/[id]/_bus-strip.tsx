@@ -21,6 +21,8 @@ interface Props {
   limiter?: LimiterState;
   onLimiter?: (field: 'thresholdDb' | 'releaseMs' | 'makeupDb', value: number) => void;
   onLimiterBypass?: () => void;
+  /** Master-only — open the floating Limiter window. */
+  onOpenLimiter?: () => void;
   /** User-bus-only — optional reverb insert (Plate or Hall). */
   reverb?: ReverbState;
   onAddReverb?: (kind: ReverbKind) => void;
@@ -90,6 +92,7 @@ export function BusStrip({
   limiter,
   onLimiter,
   onLimiterBypass,
+  onOpenLimiter,
   reverb,
   onAddReverb,
   onRemoveReverb,
@@ -177,15 +180,28 @@ export function BusStrip({
 
         {limiter && onLimiter && onLimiterBypass && (
           <div className="bus-limiter">
-            <button
-              type="button"
-              className={`bus-limiter-toggle ${limiter.bypassed ? '' : 'on'}`}
-              onClick={onLimiterBypass}
-              aria-pressed={!limiter.bypassed}
-              title={limiter.bypassed ? 'Limiter bypassed — click to engage' : 'Limiter active'}
-            >
-              Limiter
-            </button>
+            <div className="bus-limiter-head">
+              <button
+                type="button"
+                className={`bus-limiter-toggle ${limiter.bypassed ? '' : 'on'}`}
+                onClick={onLimiterBypass}
+                aria-pressed={!limiter.bypassed}
+                title={limiter.bypassed ? 'Limiter bypassed — click to engage' : 'Limiter active'}
+              >
+                Limiter
+              </button>
+              {onOpenLimiter && (
+                <button
+                  type="button"
+                  className="bus-limiter-open"
+                  onClick={onOpenLimiter}
+                  title="Open Limiter"
+                  aria-label="Open Limiter"
+                >
+                  ↗
+                </button>
+              )}
+            </div>
             <div className="bus-limiter-knobs">
               <div className="knob-wrap">
                 <Knob
