@@ -1489,6 +1489,28 @@ export class AudioHost {
     return peak;
   }
 
+  /**
+   * Fill `out` (length = number of bins wanted) with the channel's current
+   * frequency magnitudes mapped to 0..1, for the EQ-window spectrum backdrop.
+   * Resamples the analyser's 128 frequency bins (fftSize 256) onto `out.length`
+   * with a mild dB→linear curve. Returns false when the channel isn't live.
+   */
+  getChannelFrequencyData(stemId: string, out: Float32Array): boolean {
+    const channel = this.channels.get(stemId);
+    if (!channel) return false;
+    const a = channel.analyser;
+    const src = new Uint8Array(a.frequencyBinCount);
+    a.getByteFrequencyData(src);
+    const n = out.length;
+    for (let i = 0; i < n; i++) {
+      // log-ish frequency mapping so lows aren't over-represented
+      const f = i / (n - 1 || 1);
+      const idx = Math.min(src.length - 1, Math.floor(f ** 1.4 * (src.length - 1)));
+      out[i] = (src[idx] ?? 0) / 255;
+    }
+    return true;
+  }
+
   // ────────────────────────────────────────────────────────────────────
   // Channel parameters
   // ────────────────────────────────────────────────────────────────────
