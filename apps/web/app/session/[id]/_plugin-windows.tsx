@@ -99,10 +99,17 @@ function compTransfer(x: number, s: CompShape): number {
 
 const COMP_GRAPH = 200;
 
-function CompGraph({ shape }: { shape: CompShape }) {
+/** dB from a 0..1 peak level (−60 floor when silent). */
+function levelToDb(level: number): number {
+  return level > 0.0001 ? Math.max(-60, 20 * Math.log10(level)) : -60;
+}
+
+function CompGraph({ shape, getInDb }: { shape: CompShape; getInDb: () => number }) {
   const ref = useRef<HTMLCanvasElement>(null);
   const s = useRef(shape);
   s.current = shape;
+  const inDbFn = useRef(getInDb);
+  inDbFn.current = getInDb;
   useEffect(() => {
     const cv = ref.current;
     if (!cv) return;
@@ -162,17 +169,18 @@ function CompGraph({ shape }: { shape: CompShape }) {
       ctx.lineTo(toX(sh.threshold), H);
       ctx.stroke();
       ctx.setLineDash([]);
-      // moving input dot (simulated programme level, like the design)
-      const t = Date.now() / 1000;
-      const inDb = -22 + 18 * Math.abs(Math.sin(t * 2.2)) * (0.6 + 0.4 * Math.sin(t * 0.7));
-      const outDb = compTransfer(inDb, sh) + sh.makeup;
-      ctx.fillStyle = '#e7a948';
-      ctx.shadowColor = '#e7a948';
-      ctx.shadowBlur = 6;
-      ctx.beginPath();
-      ctx.arc(toX(inDb), toY(outDb), 4, 0, 7);
-      ctx.fill();
-      ctx.shadowBlur = 0;
+      // live operating-point dot — real channel input level → transfer curve
+      const inDb = inDbFn.current();
+      if (inDb > -60) {
+        const outDb = compTransfer(inDb, sh) + sh.makeup;
+        ctx.fillStyle = '#e7a948';
+        ctx.shadowColor = '#e7a948';
+        ctx.shadowBlur = 6;
+        ctx.beginPath();
+        ctx.arc(toX(inDb), toY(outDb), 4, 0, 7);
+        ctx.fill();
+        ctx.shadowBlur = 0;
+      }
       raf = requestAnimationFrame(draw);
     };
     draw();
@@ -579,6 +587,7 @@ function CompWindow({
         >
           <CompGraph
             shape={{ threshold: c.threshold, ratio: c.ratio, knee: c.knee, makeup: c.makeupDb }}
+            getInDb={() => levelToDb(b.host?.getChannelLevel(p.stemId) ?? 0)}
           />
           <span
             className="lbl"
@@ -699,10 +708,16 @@ function CompWindow({
 const TRANS_W = 280;
 const TRANS_H = 130;
 
-function TransGraph({ attack, sustain }: { attack: number; sustain: number }) {
+function TransGraph({
+  attack,
+  sustain,
+  getLevel,
+}: { attack: number; sustain: number; getLevel: () => number }) {
   const ref = useRef<HTMLCanvasElement>(null);
   const v = useRef({ attack, sustain });
   v.current = { attack, sustain };
+  const lvlFn = useRef(getLevel);
+  lvlFn.current = getLevel;
   useEffect(() => {
     const cv = ref.current;
     if (!cv) return;
@@ -710,6 +725,7 @@ function TransGraph({ attack, sustain }: { attack: number; sustain: number }) {
     const ctx = cv.getContext('2d');
     if (!ctx) return;
     let raf = 0;
+    let smooth = 0;
     const draw = () => {
       const W = TRANS_W;
       const H = TRANS_H;
@@ -720,12 +736,16 @@ function TransGraph({ attack, sustain }: { attack: number; sustain: number }) {
       const { attack: a, sustain: s } = v.current;
       const aBoost = 1 + a;
       const sBoost = 1 + s;
+      // Live signal scales the shaped envelope's amplitude.
+      const lvl = clamp(lvlFn.current(), 0, 1);
+      smooth += (lvl - smooth) * 0.25;
+      const energy = 0.08 + 0.92 * smooth;
       const pts: [number, number][] = [];
       for (let x = 0; x <= W; x += 2) {
         const hit = ((x / W) * 4) % 1;
         const att = Math.exp(-hit * 30) * aBoost;
         const sus = Math.exp(-hit * 3) * 0.5 * sBoost;
-        const val = clamp(Math.max(att, sus), 0, 1.6);
+        const val = clamp(Math.max(att, sus) * energy, 0, 1.6);
         pts.push([x, H - val * (H - 10) * 0.6 - 4]);
       }
       // baseline
@@ -798,7 +818,11 @@ function TransWindow({
             overflow: 'hidden',
           }}
         >
-          <TransGraph attack={tr.attack} sustain={tr.sustain} />
+          <TransGraph
+            attack={tr.attack}
+            sustain={tr.sustain}
+            getLevel={() => b.host?.getChannelLevel(p.stemId) ?? 0}
+          />
           <span
             className="lbl"
             style={{ position: 'absolute', top: 5, left: 7, fontSize: 8, color: 'var(--teal)' }}
@@ -932,14 +956,23 @@ function TapeCurve({ driveDb, bias }: { driveDb: number; bias: number }) {
   return <canvas ref={ref} style={{ width: TAPE_BOX, height: TAPE_BOX, display: 'block' }} />;
 }
 
-function TapeHarmonics({ driveDb, mode }: { driveDb: number; mode: 'TAPE' | 'TUBE' | 'TRANS' }) {
+function TapeHarmonics({
+  driveDb,
+  mode,
+  getLevel,
+}: { driveDb: number; mode: 'TAPE' | 'TUBE' | 'TRANS'; getLevel: () => number }) {
   const refs = useRef<(HTMLDivElement | null)[]>([]);
   const v = useRef({ driveDb, mode });
   v.current = { driveDb, mode };
+  const lvlFn = useRef(getLevel);
+  lvlFn.current = getLevel;
   useEffect(() => {
     let raf = 0;
+    let smooth = 0;
     const tick = () => {
-      const t = Date.now() / 600;
+      // Real signal energy drives the harmonic display; drive + mode shape it.
+      const lvl = clamp(lvlFn.current(), 0, 1);
+      smooth += (lvl - smooth) * 0.3; // ballistic smoothing
       const drvNorm = v.current.driveDb / 24;
       for (let i = 0; i < 6; i++) {
         const even = (i + 1) % 2 === 0;
@@ -954,7 +987,7 @@ function TapeHarmonics({ driveDb, mode }: { driveDb: number; mode: 'TAPE' | 'TUB
                 ? 0.6
                 : 1.2
               : 1;
-        const h = clamp(base * flav * (0.7 + 0.3 * Math.sin(t + i)), 0.02, 1);
+        const h = clamp(base * flav * (0.05 + 1.6 * smooth), 0.02, 1);
         const el = refs.current[i];
         if (el) el.style.height = `${h * 100}%`;
       }
@@ -1040,7 +1073,11 @@ function TapeWindow({
               CURVE
             </span>
           </div>
-          <TapeHarmonics driveDb={tp.driveDb} mode={tp.mode} />
+          <TapeHarmonics
+            driveDb={tp.driveDb}
+            mode={tp.mode}
+            getLevel={() => b.host?.getChannelLevel(p.stemId) ?? 0}
+          />
         </div>
         <div
           style={{ display: 'flex', flexDirection: 'column', gap: 14, justifyContent: 'center' }}
@@ -1126,10 +1163,16 @@ function TapeWindow({
    ============================================================ */
 const GONIO = 160;
 
-function Goniometer({ width, balance }: { width: number; balance: number }) {
+function Goniometer({
+  width,
+  balance,
+  getLevel,
+}: { width: number; balance: number; getLevel: () => number }) {
   const ref = useRef<HTMLCanvasElement>(null);
   const v = useRef({ width, balance });
   v.current = { width, balance };
+  const lvlFn = useRef(getLevel);
+  lvlFn.current = getLevel;
   useEffect(() => {
     const cv = ref.current;
     if (!cv) return;
@@ -1141,6 +1184,7 @@ function Goniometer({ width, balance }: { width: number; balance: number }) {
     cv.height = S * dpr;
     let raf = 0;
     let t = 0;
+    let smooth = 0;
     const draw = () => {
       t += 0.04;
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
@@ -1159,9 +1203,13 @@ function Goniometer({ width, balance }: { width: number; balance: number }) {
       ctx.stroke();
       const w = v.current.width;
       const bal = v.current.balance;
+      // Real signal energy drives the scatter radius; width sets the spread.
+      const lvl = clamp(lvlFn.current(), 0, 1);
+      smooth += (lvl - smooth) * 0.3;
+      const energy = 0.05 + 1.25 * smooth;
       for (let i = 0; i < 90; i++) {
         const a = t + i * 0.4;
-        const r = (S / 2 - 12) * (0.3 + 0.6 * Math.abs(Math.sin(a * 1.3 + i)));
+        const r = (S / 2 - 12) * energy * (0.3 + 0.6 * Math.abs(Math.sin(a * 1.3 + i)));
         const spread = w * (0.4 + 0.6 * Math.sin(a));
         const x = r * spread * Math.cos(a) + bal * 30;
         const y = -r * Math.abs(Math.cos(a * 0.7));
@@ -1214,7 +1262,11 @@ function ImagerWindow({
             overflow: 'hidden',
           }}
         >
-          <Goniometer width={im.width} balance={im.balance} />
+          <Goniometer
+            width={im.width}
+            balance={im.balance}
+            getLevel={() => b.host?.getChannelLevel(p.stemId) ?? 0}
+          />
         </div>
         <div
           style={{ display: 'flex', flexDirection: 'column', gap: 16, justifyContent: 'center' }}
@@ -1316,13 +1368,8 @@ function LimiterWindow({
   onFocus,
 }: { b: HostBundle; z: number; onClose: () => void; onFocus: () => void }) {
   const lim = b.limiter;
-  // The engine exposes no master-limiter GR tap yet, so the meter + readouts
-  // are simulated against the ceiling (flagged in the plan as future work).
-  const getGr = () => {
-    const t = Date.now() / 1000;
-    const inDb = -8 + 8 * Math.abs(Math.sin(t * 3));
-    return Math.max(0, inDb - lim.thresholdDb) * 1.2;
-  };
+  // Live gain-reduction straight off the master limiter worklet.
+  const getGr = () => b.host?.getMasterLimiterGr() ?? 0;
   return (
     <WindowFrame
       title="MASTER LIMITER"
@@ -1426,10 +1473,13 @@ function PitchGraph({
   scale,
   speed,
   amount,
-}: { pkey: string; scale: string; speed: number; amount: number }) {
+  getLevel,
+}: { pkey: string; scale: string; speed: number; amount: number; getLevel: () => number }) {
   const ref = useRef<HTMLCanvasElement>(null);
   const v = useRef({ pkey, scale, speed, amount });
   v.current = { pkey, scale, speed, amount };
+  const lvlFn = useRef(getLevel);
+  lvlFn.current = getLevel;
   useEffect(() => {
     const cv = ref.current;
     if (!cv) return;
@@ -1446,7 +1496,10 @@ function PitchGraph({
       cv.width = W * dpr;
       cv.height = H * dpr;
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-      t += 0.03;
+      // Trace only advances while the channel is sounding (no pitch DSP — the
+      // line itself is illustrative, but its motion is gated on the signal).
+      const live = lvlFn.current() > 0.002;
+      if (live) t += 0.03;
       ctx.clearRect(0, 0, W, H);
       const { pkey: k, scale: sc, speed: sp, amount: am } = v.current;
       const keyRoot = Math.max(0, PITCH_NOTES.indexOf(k));
@@ -1483,8 +1536,10 @@ function PitchGraph({
         }
       }
       const corrected = raw + (snapped - raw) * (0.15 + (sp / 100) * 0.85) * (am / 100);
-      hist.push({ raw, corr: corrected });
-      if (hist.length > W / 2) hist.shift();
+      if (live) {
+        hist.push({ raw, corr: corrected });
+        if (hist.length > W / 2) hist.shift();
+      }
       const yOf = (semi: number) => H - (semi / rows) * H;
       ctx.strokeStyle = 'rgba(178,133,172,0.5)';
       ctx.lineWidth = 1.5;
@@ -1547,7 +1602,13 @@ function PitchWindow({
             overflow: 'hidden',
           }}
         >
-          <PitchGraph pkey={pt.key} scale={pt.scale} speed={pt.speed} amount={pt.amount} />
+          <PitchGraph
+            pkey={pt.key}
+            scale={pt.scale}
+            speed={pt.speed}
+            amount={pt.amount}
+            getLevel={() => b.host?.getChannelLevel(p.stemId) ?? 0}
+          />
         </div>
         <div style={{ display: 'flex', gap: 12, marginTop: 12, alignItems: 'center' }}>
           <label style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
