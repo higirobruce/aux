@@ -39,6 +39,7 @@ import Link from 'next/link';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { BusStrip } from './_bus-strip';
 import { ChannelStrip, ChannelStripName } from './_channel-strip';
+import { type OpenPlugin, type PluginType, PluginWindows } from './_plugin-windows';
 import { StemDropZone } from './_stem-drop-zone';
 import { type StemPeaks, StemTimeline } from './_stem-timeline';
 import './mixer.css';
@@ -341,6 +342,24 @@ export function MixerShell({
   const [stemsOpen, setStemsOpen] = useState(initialStems.length === 0);
   const [timelineOpen, setTimelineOpen] = useState(true);
   const [peaks, setPeaks] = useState<Record<string, StemPeaks | undefined>>({});
+  /** Open floating plugin windows. Last entry renders on top (focus). */
+  const [openPlugins, setOpenPlugins] = useState<OpenPlugin[]>([]);
+  const openPlugin = useCallback((type: PluginType, stemId: string) => {
+    setOpenPlugins((prev) => {
+      const key = `${type}:${stemId}`;
+      return [...prev.filter((p) => `${p.type}:${p.stemId}` !== key), { type, stemId }];
+    });
+  }, []);
+  const closePlugin = useCallback((i: number) => {
+    setOpenPlugins((prev) => prev.filter((_, idx) => idx !== i));
+  }, []);
+  const focusPlugin = useCallback((i: number) => {
+    setOpenPlugins((prev) => {
+      const p = prev[i];
+      if (!p || i === prev.length - 1) return prev;
+      return [...prev.filter((_, idx) => idx !== i), p];
+    });
+  }, []);
   /** Currently-selected timeline clip (for trim/move highlight + delete). */
   const [selectedClip, setSelectedClip] = useState<{ stemId: string; clipId: string } | null>(null);
   const [saveStatus, setSaveStatus] = useState<SaveStatus>('idle');
@@ -1438,6 +1457,7 @@ export function MixerShell({
                           onEq={(band, db) => setEq(stem.id, band, db)}
                           onComp={(field, value) => setComp(stem.id, field, value)}
                           onCompType={(type) => setCompType(stem.id, type)}
+                          onOpenPlugin={(type) => openPlugin(type, stem.id)}
                           buses={busState}
                           onOutput={(busId) => setChannelOutput(stem.id, busId)}
                           onSend={(busId, level) => setChannelSend(stem.id, busId, level)}
@@ -1575,6 +1595,20 @@ export function MixerShell({
         onStemAdded={onStemAdded}
         onStemRemoved={onStemRemoved}
         onStemSwapped={onStemSwapped}
+      />
+
+      <PluginWindows
+        windows={openPlugins}
+        onClose={closePlugin}
+        onFocus={focusPlugin}
+        bundle={{
+          host: hostRef.current,
+          channelState,
+          stemName: (id) => stems.find((s) => s.id === id)?.name ?? id,
+          onEq: setEq,
+          onComp: setComp,
+          onCompType: setCompType,
+        }}
       />
     </>
   );
