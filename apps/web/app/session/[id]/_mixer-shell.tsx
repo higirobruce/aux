@@ -60,8 +60,8 @@ export interface ChannelState {
   pan: number; // -1..1
   muted: boolean;
   soloed: boolean;
-  eq: { lo: number; mid: number; hi: number }; // dB, ±24
-  comp: { threshold: number; ratio: number }; // dB threshold + n:1 ratio
+  eq: { lo: number; mid: number; hi: number; bypassed: boolean }; // dB, ±24
+  comp: { threshold: number; ratio: number; bypassed: boolean }; // dB threshold + n:1 ratio
   compType: CompType; // 'clean' (VCA) or 'color' (FET)
   outputBusId: string;
   /** Post-fader aux sends keyed by destination bus id (linear 0..2). */
@@ -196,8 +196,8 @@ function hydrateMixState(raw: unknown): HydratedMix {
       pan: c.pan,
       muted: c.muted,
       soloed: c.soloed,
-      eq: c.eq ?? { ...DEFAULT_CHANNEL_EQ },
-      comp: c.comp ?? { ...DEFAULT_CHANNEL_COMP },
+      eq: { ...DEFAULT_CHANNEL_EQ, ...c.eq, bypassed: c.eq?.bypassed ?? false },
+      comp: { ...DEFAULT_CHANNEL_COMP, ...c.comp, bypassed: c.comp?.bypassed ?? false },
       compType: c.compType ?? DEFAULT_COMP_TYPE,
       outputBusId: c.outputBusId ?? MASTER_BUS_ID,
       sends: c.sends ?? {},
@@ -287,8 +287,15 @@ function applyCompToHost(
   stemId: string,
   threshold: number,
   ratio: number,
-  compType: CompType
+  compType: CompType,
+  bypassed = false
 ): void {
+  // Whole-insert bypass: park both flavours so neither colours the signal.
+  if (bypassed) {
+    host.setChannelCompBypassed(stemId, true);
+    host.setChannelCompColorBypassed(stemId, true);
+    return;
+  }
   if (compType === 'clean') {
     host.setChannelComp(
       stemId,
@@ -665,7 +672,15 @@ export function MixerShell({
         const { idx, type, freq, q } = EQ_BANDS[band];
         host.setChannelEqBand(stem.id, idx, type, freq, ch.eq[band], q);
       }
-      applyCompToHost(host, stem.id, ch.comp.threshold, ch.comp.ratio, ch.compType);
+      host.setChannelEqBypassed(stem.id, ch.eq.bypassed);
+      applyCompToHost(
+        host,
+        stem.id,
+        ch.comp.threshold,
+        ch.comp.ratio,
+        ch.compType,
+        ch.comp.bypassed
+      );
       host.setChannelTransient(stem.id, ch.transient.attack, ch.transient.sustain);
       host.setChannelTransientBypassed(stem.id, ch.transient.bypassed);
       host.setChannelDeEss(stem.id, ch.deess.freq, ch.deess.amount);
@@ -902,7 +917,15 @@ export function MixerShell({
       const current = prev[stemId] ?? DEFAULT_CHANNEL;
       const nextComp = { ...current.comp, [field]: value };
       const host = hostRef.current;
-      if (host) applyCompToHost(host, stemId, nextComp.threshold, nextComp.ratio, current.compType);
+      if (host)
+        applyCompToHost(
+          host,
+          stemId,
+          nextComp.threshold,
+          nextComp.ratio,
+          current.compType,
+          nextComp.bypassed
+        );
       return { ...prev, [stemId]: { ...current, comp: nextComp } };
     });
   }, []);
@@ -911,8 +934,43 @@ export function MixerShell({
     setChannelState((prev) => {
       const current = prev[stemId] ?? DEFAULT_CHANNEL;
       const host = hostRef.current;
-      if (host) applyCompToHost(host, stemId, current.comp.threshold, current.comp.ratio, compType);
+      if (host)
+        applyCompToHost(
+          host,
+          stemId,
+          current.comp.threshold,
+          current.comp.ratio,
+          compType,
+          current.comp.bypassed
+        );
       return { ...prev, [stemId]: { ...current, compType } };
+    });
+  }, []);
+
+  const toggleEqBypass = useCallback((stemId: string) => {
+    setChannelState((prev) => {
+      const current = prev[stemId] ?? DEFAULT_CHANNEL;
+      const bypassed = !current.eq.bypassed;
+      hostRef.current?.setChannelEqBypassed(stemId, bypassed);
+      return { ...prev, [stemId]: { ...current, eq: { ...current.eq, bypassed } } };
+    });
+  }, []);
+
+  const toggleCompBypass = useCallback((stemId: string) => {
+    setChannelState((prev) => {
+      const current = prev[stemId] ?? DEFAULT_CHANNEL;
+      const bypassed = !current.comp.bypassed;
+      const host = hostRef.current;
+      if (host)
+        applyCompToHost(
+          host,
+          stemId,
+          current.comp.threshold,
+          current.comp.ratio,
+          current.compType,
+          bypassed
+        );
+      return { ...prev, [stemId]: { ...current, comp: { ...current.comp, bypassed } } };
     });
   }, []);
 
@@ -1513,8 +1571,10 @@ export function MixerShell({
                           onMute={() => toggleMute(stem.id)}
                           onSolo={() => toggleSolo(stem.id)}
                           onEq={(band, db) => setEq(stem.id, band, db)}
+                          onEqBypass={() => toggleEqBypass(stem.id)}
                           onComp={(field, value) => setComp(stem.id, field, value)}
                           onCompType={(type) => setCompType(stem.id, type)}
+                          onCompBypass={() => toggleCompBypass(stem.id)}
                           onOpenPlugin={(type) => openPlugin(type, stem.id)}
                           buses={busState}
                           onOutput={(busId) => setChannelOutput(stem.id, busId)}

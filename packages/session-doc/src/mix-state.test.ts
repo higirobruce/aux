@@ -75,20 +75,22 @@ describe('ChannelStateSchema — clips', () => {
 });
 
 describe('MixStateSchema — version transition', () => {
-  it('emptyMixState() is the current version (16) and round-trips', () => {
+  it('emptyMixState() is the current version (17) and round-trips', () => {
     const doc = emptyMixState();
-    expect(doc.version).toBe(16);
-    expect(MIX_STATE_VERSION).toBe(16);
-    expect(MixStateSchema.parse(doc).version).toBe(16);
+    expect(doc.version).toBe(17);
+    expect(MIX_STATE_VERSION).toBe(17);
+    expect(MixStateSchema.parse(doc).version).toBe(17);
   });
 
-  it('accepts a v15 doc during the transition window', () => {
+  it('accepts v15 and v16 docs during the transition window', () => {
     const v15 = { ...emptyMixState(), version: 15 as const };
     expect(MixStateSchema.safeParse(v15).success).toBe(true);
+    const v16 = { ...emptyMixState(), version: 16 as const };
+    expect(MixStateSchema.safeParse(v16).success).toBe(true);
   });
 
   it('rejects versions outside the accepted set', () => {
     expect(MixStateSchema.safeParse({ ...emptyMixState(), version: 14 }).success).toBe(false);
-    expect(MixStateSchema.safeParse({ ...emptyMixState(), version: 17 }).success).toBe(false);
+    expect(MixStateSchema.safeParse({ ...emptyMixState(), version: 18 }).success).toBe(false);
   });
 });

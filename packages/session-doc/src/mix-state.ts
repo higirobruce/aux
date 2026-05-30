@@ -28,9 +28,11 @@ import { z } from 'zod';
  * v16 — adds per-channel `clips` (timeline regions: sample-accurate
  *       sourceIn/sourceOut + timelineStart). Absent/empty = whole buffer
  *       at t=0, so v1–v15 docs stay correct without a rewrite.
+ * v17 — adds `bypassed` to per-channel `eq` and `comp`. Optional with a
+ *       `false` default, so v1–v16 docs stay valid (missing = engaged).
  */
 
-export const MIX_STATE_VERSION = 16;
+export const MIX_STATE_VERSION = 17;
 
 /**
  * Versions the strict parse still accepts. During the v15→v16 rollout we
@@ -38,7 +40,7 @@ export const MIX_STATE_VERSION = 16;
  * API strict-parses with this same schema). Narrow back to a single
  * `z.literal(MIX_STATE_VERSION)` once every deployed surface is on v16.
  */
-const ACCEPTED_VERSIONS = [z.literal(15), z.literal(16)] as const;
+const ACCEPTED_VERSIONS = [z.literal(15), z.literal(16), z.literal(17)] as const;
 
 /** Stable id for the always-present Master bus. Sessions can omit it from
  *  their `buses` record; the client treats it as if explicitly present. */
@@ -88,6 +90,8 @@ export const ChannelEqSchema = z.object({
   mid: z.number().min(-24).max(24),
   /** High-shelf gain in dB (band 6, freq 8 kHz). */
   hi: z.number().min(-24).max(24),
+  /** Insert bypass (v17+). Optional/false on v1–v16 docs = engaged. */
+  bypassed: z.boolean().default(false),
 });
 
 export const ChannelCompSchema = z.object({
@@ -95,6 +99,8 @@ export const ChannelCompSchema = z.object({
   threshold: z.number().min(-80).max(12),
   /** Ratio 1..20; 1 = no compression. */
   ratio: z.number().min(1).max(20),
+  /** Insert bypass (v17+). Optional/false on v1–v16 docs = engaged. */
+  bypassed: z.boolean().default(false),
 });
 
 /** Post-fader aux sends keyed by destination bus id; value = linear gain. */
@@ -303,12 +309,12 @@ export const DEFAULT_MASTER_BUS: BusState = {
   muted: false,
 };
 
-export const DEFAULT_CHANNEL_EQ: ChannelEq = { lo: 0, mid: 0, hi: 0 };
+export const DEFAULT_CHANNEL_EQ: ChannelEq = { lo: 0, mid: 0, hi: 0, bypassed: false };
 /**
  * Default Comp-Clean state — ratio 1.0 means the DSP fast-paths to a
  * passthrough, so a fresh channel is acoustically transparent.
  */
-export const DEFAULT_CHANNEL_COMP: ChannelComp = { threshold: 0, ratio: 1 };
+export const DEFAULT_CHANNEL_COMP: ChannelComp = { threshold: 0, ratio: 1, bypassed: false };
 
 /** Default Transient state — both knobs at 0 = passthrough. */
 export const DEFAULT_CHANNEL_TRANSIENT = {

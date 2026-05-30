@@ -4,7 +4,7 @@ import type { Stem } from '@/lib/types';
 import type { AudioHost } from '@aux/audio-engine';
 import type { BusState, CompType } from '@aux/session-doc';
 import type { Accent } from '@aux/ui';
-import { type ReactNode, useState } from 'react';
+import type { ReactNode } from 'react';
 import { Fader } from './_fader';
 import { Knob } from './_knob';
 import { Meter } from './_meter';
@@ -22,8 +22,10 @@ interface Props {
   onMute: () => void;
   onSolo: () => void;
   onEq: (band: EqBand, gainDb: number) => void;
+  onEqBypass: () => void;
   onComp: (field: 'threshold' | 'ratio', value: number) => void;
   onCompType: (type: CompType) => void;
+  onCompBypass: () => void;
   /** Open a floating plugin window for this channel (EQ / Compressor). */
   onOpenPlugin?: (type: 'eq' | 'comp') => void;
   /** Bus directory — used to populate the strip's output picker. */
@@ -246,8 +248,10 @@ export function ChannelStrip({
   onMute,
   onSolo,
   onEq,
+  onEqBypass,
   onComp,
   onCompType,
+  onCompBypass,
   onOpenPlugin,
   buses,
   onOutput,
@@ -268,18 +272,6 @@ export function ChannelStrip({
 }: Props) {
   const effectivelyMuted = state.muted || (anySoloed && !state.soloed);
 
-  // EQ and Comp have no engine bypass, so their accordion dot is a UI-only
-  // collapse (show/hide the quick knobs); the ↗ still opens the full window.
-  const [collapsed, setCollapsed] = useState<Set<string>>(() => new Set());
-  const isOpen = (key: string) => !collapsed.has(key);
-  const toggleCollapse = (key: string) =>
-    setCollapsed((prev) => {
-      const next = new Set(prev);
-      if (next.has(key)) next.delete(key);
-      else next.add(key);
-      return next;
-    });
-
   return (
     <div className={`ch-strip ${effectivelyMuted ? 'muted' : ''}`}>
       <div className="ch-meta">
@@ -293,8 +285,8 @@ export function ChannelStrip({
         <StripModule
           label="EQ"
           accent="gold"
-          on={isOpen('eq')}
-          onToggle={() => toggleCollapse('eq')}
+          on={!state.eq.bypassed}
+          onToggle={onEqBypass}
           onOpen={() => onOpenPlugin?.('eq')}
         >
           <div className="knob-wrap">
@@ -341,8 +333,8 @@ export function ChannelStrip({
         <StripModule
           label="COMP"
           accent="sage"
-          on={isOpen('comp')}
-          onToggle={() => toggleCollapse('comp')}
+          on={!state.comp.bypassed}
+          onToggle={onCompBypass}
           onOpen={() => onOpenPlugin?.('comp')}
         >
           <div className="ch-comp-stack">
