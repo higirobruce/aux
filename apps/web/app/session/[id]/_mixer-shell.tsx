@@ -369,6 +369,37 @@ function applyEqFullToHost(host: AudioHost, stemId: string, eqFull: ChannelEqFul
   for (const band of eqFull.bands) applyEqBandToHost(host, stemId, band);
 }
 
+// Pitch — note name → root pitch-class (0..11) and scale name → id, matching
+// the dsp-pitch crate's `in_scale` (0 Major · 1 Minor · 2 Chromatic · 3 Pentatonic).
+const PITCH_KEY_ROOT: Record<string, number> = {
+  C: 0,
+  'C#': 1,
+  D: 2,
+  'D#': 3,
+  E: 4,
+  F: 5,
+  'F#': 6,
+  G: 7,
+  'G#': 8,
+  A: 9,
+  'A#': 10,
+  B: 11,
+};
+const PITCH_SCALE_ID: Record<string, number> = { Major: 0, Minor: 1, Chromatic: 2, Pentatonic: 3 };
+
+/** Push the pitch params (key/scale/speed/amount/humanize) to the engine.
+ *  `formant` is intentionally not sent — no DSP for it yet. */
+function applyPitchParamsToHost(host: AudioHost, stemId: string, p: ChannelState['pitch']): void {
+  host.setChannelPitch(
+    stemId,
+    PITCH_KEY_ROOT[p.key] ?? 9,
+    PITCH_SCALE_ID[p.scale] ?? 1,
+    p.speed,
+    p.amount,
+    p.human
+  );
+}
+
 type CompParams = ChannelState['comp'];
 
 function applyCompToHost(
@@ -651,6 +682,8 @@ export function MixerShell({
       hallWasmUrl: '/hall_bg.wasm',
       transientWorkletUrl: '/transient-worklet.js',
       transientWasmUrl: '/transient_bg.wasm',
+      pitchWorkletUrl: '/pitch-worklet.js',
+      pitchWasmUrl: '/pitch_bg.wasm',
       deessWorkletUrl: '/deess-worklet.js',
       deessWasmUrl: '/deess_bg.wasm',
       imagerWorkletUrl: '/imager-worklet.js',
@@ -760,6 +793,8 @@ export function MixerShell({
       applyCompToHost(host, stem.id, ch.comp, ch.compType);
       host.setChannelTransient(stem.id, ch.transient.attack, ch.transient.sustain);
       host.setChannelTransientBypassed(stem.id, ch.transient.bypassed);
+      applyPitchParamsToHost(host, stem.id, ch.pitch);
+      host.setChannelPitchBypassed(stem.id, ch.pitch.bypassed);
       host.setChannelDeEss(stem.id, ch.deess.freq, ch.deess.amount);
       host.setChannelDeEssBypassed(stem.id, ch.deess.bypassed);
       host.setChannelImager(stem.id, ch.imager.width);
@@ -1146,7 +1181,12 @@ export function MixerShell({
     (stemId: string, field: 'speed' | 'amount' | 'human' | 'formant', value: number) => {
       setChannelState((prev) => {
         const current = prev[stemId] ?? DEFAULT_CHANNEL;
-        return { ...prev, [stemId]: { ...current, pitch: { ...current.pitch, [field]: value } } };
+        const pitch = { ...current.pitch, [field]: value };
+        // formant has no DSP yet — only re-push when an engine-bound param moved.
+        if (field !== 'formant' && hostRef.current) {
+          applyPitchParamsToHost(hostRef.current, stemId, pitch);
+        }
+        return { ...prev, [stemId]: { ...current, pitch } };
       });
     },
     []
@@ -1155,14 +1195,18 @@ export function MixerShell({
   const setPitchKey = useCallback((stemId: string, key: PitchKey) => {
     setChannelState((prev) => {
       const current = prev[stemId] ?? DEFAULT_CHANNEL;
-      return { ...prev, [stemId]: { ...current, pitch: { ...current.pitch, key } } };
+      const pitch = { ...current.pitch, key };
+      if (hostRef.current) applyPitchParamsToHost(hostRef.current, stemId, pitch);
+      return { ...prev, [stemId]: { ...current, pitch } };
     });
   }, []);
 
   const setPitchScale = useCallback((stemId: string, scale: PitchScale) => {
     setChannelState((prev) => {
       const current = prev[stemId] ?? DEFAULT_CHANNEL;
-      return { ...prev, [stemId]: { ...current, pitch: { ...current.pitch, scale } } };
+      const pitch = { ...current.pitch, scale };
+      if (hostRef.current) applyPitchParamsToHost(hostRef.current, stemId, pitch);
+      return { ...prev, [stemId]: { ...current, pitch } };
     });
   }, []);
 
@@ -1170,6 +1214,13 @@ export function MixerShell({
     setChannelState((prev) => {
       const current = prev[stemId] ?? DEFAULT_CHANNEL;
       const bypassed = !current.pitch.bypassed;
+      // Engaging needs the latest params loaded first, then bypass flip (which
+      // also re-runs the host's plugin-delay-compensation).
+      const host = hostRef.current;
+      if (host) {
+        if (!bypassed) applyPitchParamsToHost(host, stemId, current.pitch);
+        host.setChannelPitchBypassed(stemId, bypassed);
+      }
       return { ...prev, [stemId]: { ...current, pitch: { ...current.pitch, bypassed } } };
     });
   }, []);

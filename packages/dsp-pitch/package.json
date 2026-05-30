@@ -1,0 +1,23 @@
+{
+  "name": "@aux/dsp-pitch",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Pitch corrector (YIN detection + overlap-add resynthesis) — Rust DSP compiled to WASM.",
+  "type": "module",
+  "main": "./wasm/pitch.js",
+  "types": "./wasm/pitch.d.ts",
+  "files": ["wasm"],
+  "exports": {
+    ".": {
+      "types": "./wasm/pitch.d.ts",
+      "default": "./wasm/pitch.js"
+    },
+    "./pitch_bg.wasm": "./wasm/pitch_bg.wasm",
+    "./package.json": "./package.json"
+  },
+  "scripts": {
+    "build": "wasm-pack build --release --target web --out-dir wasm --out-name pitch && rm -f wasm/.gitignore wasm/package.json",
+    "test:rust": "cargo test --release",
+    "clean": "rm -rf wasm target"
+  }
+}
