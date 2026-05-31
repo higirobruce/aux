@@ -90,6 +90,33 @@ fn snap_midi(midi: f32, key_root: i32, scale_id: i32) -> f32 {
     best as f32
 }
 
+/// Middle of three values — `med = a+b+c − max − min`. A 3-point median over
+/// successive detection hops rejects a single spurious estimate (a lone
+/// octave/harmonic glitch) without lagging steady pitch.
+fn median3(a: f32, b: f32, c: f32) -> f32 {
+    let mx = a.max(b).max(c);
+    let mn = a.min(b).min(c);
+    a + b + c - mx - mn
+}
+
+/// Fold an octave-error estimate back onto the running pitch. YIN occasionally
+/// latches a sub-/super-harmonic (½× or 2× the true period); when the new
+/// estimate sits within ~6 % of an exact octave of `prev` we read it as that
+/// error and fold it. Genuine melodic intervals (anything but an octave) pass
+/// untouched, so real leaps still track.
+fn octave_snap(f0: f32, prev: f32) -> f32 {
+    if f0 <= 0.0 || prev <= 0.0 {
+        return f0;
+    }
+    if (f0 / (prev * 2.0) - 1.0).abs() < 0.06 {
+        f0 * 0.5
+    } else if (f0 / (prev * 0.5) - 1.0).abs() < 0.06 {
+        f0 * 2.0
+    } else {
+        f0
+    }
+}
+
 #[wasm_bindgen]
 pub struct Pitch {
     sample_rate: f32,
@@ -105,7 +132,9 @@ pub struct Pitch {
     tau_min: usize,
     tau_max: usize,
     det_counter: usize,
-    detected_f0: f32, // Hz, 0 = unvoiced
+    detected_f0: f32,    // Hz, 0 = unvoiced (the stabilised value the UI plots)
+    f0_hist: [f32; 3],   // recent raw YIN estimates, for median outlier-reject
+    smoothed_f0: f32,    // running stabilised f0 (0 = unvoiced)
 
     // Ring buffers (L/R share write_pos + sweep so the ratio is identical).
     ring_l: Vec<f32>,
@@ -140,6 +169,8 @@ impl Pitch {
             tau_max,
             det_counter: 0,
             detected_f0: 0.0,
+            f0_hist: [0.0; 3],
+            smoothed_f0: 0.0,
             ring_l: vec![0.0; RING],
             ring_r: vec![0.0; RING],
             write_pos: 0,
@@ -180,6 +211,8 @@ impl Pitch {
         self.target_cents = 0.0;
         self.drift_cents = 0.0;
         self.detected_f0 = 0.0;
+        self.f0_hist = [0.0; 3];
+        self.smoothed_f0 = 0.0;
         self.det_counter = 0;
     }
 
@@ -277,7 +310,27 @@ impl Pitch {
 
     /// Re-detect f0 over the recent window and recompute the target cents.
     fn update_pitch(&mut self) {
-        let f0 = self.detect_f0();
+        // Raw per-hop YIN estimate → robustness chain: a 3-point median drops a
+        // single spurious hop, an octave guard folds half/double-period latches
+        // back onto the running pitch, and a light one-pole smooths the rest.
+        // This kills the brief octave-glitch spikes without lagging real notes.
+        let raw = self.detect_f0();
+        self.f0_hist[2] = self.f0_hist[1];
+        self.f0_hist[1] = self.f0_hist[0];
+        self.f0_hist[0] = raw;
+        let mut f0 = median3(self.f0_hist[0], self.f0_hist[1], self.f0_hist[2]);
+
+        if f0 > 0.0 {
+            f0 = octave_snap(f0, self.smoothed_f0);
+            self.smoothed_f0 = if self.smoothed_f0 > 0.0 {
+                0.6 * self.smoothed_f0 + 0.4 * f0
+            } else {
+                f0
+            };
+        } else {
+            self.smoothed_f0 = 0.0;
+        }
+        let f0 = self.smoothed_f0;
         self.detected_f0 = f0;
 
         // Slow random wander for humanize (updated once per hop).
@@ -514,5 +567,21 @@ mod tests {
         for x in &buf {
             assert!(x.is_finite() && x.abs() < 4.0, "output went unstable: {x}");
         }
+    }
+
+    #[test]
+    fn median3_rejects_a_single_spike() {
+        assert_eq!(median3(1.0, 3.0, 2.0), 2.0);
+        assert_eq!(median3(220.0, 9000.0, 219.0), 220.0); // octave/harmonic spike
+        assert_eq!(median3(0.0, 0.0, 440.0), 0.0); // lone voiced amid unvoiced
+        assert_eq!(median3(221.0, 220.0, 219.0), 220.0);
+    }
+
+    #[test]
+    fn octave_snap_folds_errors_but_keeps_intervals() {
+        assert!((octave_snap(440.0, 220.0) - 220.0).abs() < 1.0); // octave-high latch ↓
+        assert!((octave_snap(110.0, 220.0) - 220.0).abs() < 1.0); // octave-low latch ↑
+        assert!((octave_snap(330.0, 220.0) - 330.0).abs() < 1.0); // real fifth — untouched
+        assert_eq!(octave_snap(440.0, 0.0), 440.0); // no history ⇒ passthrough
     }
 }

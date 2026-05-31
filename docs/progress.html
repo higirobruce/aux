@@ -306,8 +306,11 @@
             cents glide (amount/humanize) → two-tap overlap-add shift; time-domain, monophonic, no FFT.
             Constant latency when engaged, zero-latency bypass. Engine gains plugin-delay-compensation
             (per-channel <code>compDelay</code> + <code>recomputePdc()</code>) so engaging Pitch keeps
-            every stem aligned. FORMANT persists but is inert (no DSP yet); the detected-pitch UI tap is
-            a follow-up. First-cut quality — monophonic, time-domain.
+            every stem aligned. The Pitch window now plots the <em>real</em> detected f0 (PR #15), and
+            detection is hardened against octave glitches — a 3-point median rejects spurious hops, an
+            octave guard folds half/double-period latches back onto the running pitch, and a light
+            one-pole smooths the trace (detection-robustness PR). FORMANT persists but is inert (no DSP
+            yet). First-cut quality — monophonic, time-domain.
           </td>
         </tr>
         <tr>
@@ -520,16 +523,18 @@
         </p>
       </div>
       <div>
-        <h3 style="margin-top: 0;">Option B — Pitch UI tap + tuning</h3>
+        <h3 style="margin-top: 0;">Option B — Pitch shifter tuning</h3>
         <p>
-          Follow-ups on the Pitch corrector (PR #12): drive the window's graph
-          from the real detected f0 (the crate already exposes
-          <code>detected_hz()</code>), and a quality pass on the time-domain
-          shifter. A real formant stage is a separate, larger DSP task.
+          Follow-ups on the Pitch corrector (PR #12): the window's graph is now
+          driven by the real detected f0 (PR #15, merged), and detection is
+          hardened against octave glitches (median + octave guard + smoothing —
+          in review). Remaining: a quality pass on the time-domain shifter
+          (formant artefacts on big shifts) and a real formant stage — a
+          separate, larger DSP task.
         </p>
         <p class="caption">
-          <strong>Status:</strong> the <code>/design-system</code> doc route
-          (the prior minor item) shipped — in review as PR #14.
+          <strong>Status:</strong> UI tap merged (PR #15); detection-robustness
+          in review.
         </p>
       </div>
       <div>
