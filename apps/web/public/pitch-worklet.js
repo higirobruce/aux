@@ -339,6 +339,8 @@ class PitchProcessor extends AudioWorkletProcessor {
     }
     initSync({ module: wasmInit });
     this.pitch = new Pitch(sampleRate);
+    this._bypassed = false;
+    this._f0Counter = 0;
     this.port.onmessage = (e) => this.onMessage(e.data);
   }
 
@@ -349,7 +351,8 @@ class PitchProcessor extends AudioWorkletProcessor {
         this.pitch.set_params(msg.keyRoot, msg.scaleId, msg.speed, msg.amount, msg.humanize);
         break;
       case 'set-bypassed':
-        this.pitch.set_bypassed(!!msg.bypassed);
+        this._bypassed = !!msg.bypassed;
+        this.pitch.set_bypassed(this._bypassed);
         break;
       case 'reset':
         this.pitch.reset();
@@ -376,6 +379,13 @@ class PitchProcessor extends AudioWorkletProcessor {
     }
 
     this.pitch.process_stereo(outL, outR ?? outL);
+
+    // Surface the detected fundamental for the UI (throttled to ~60/s, and
+    // forced to 0 when bypassed so the graph idles).
+    if (++this._f0Counter >= 6) {
+      this._f0Counter = 0;
+      this.port.postMessage({ type: 'f0', hz: this._bypassed ? 0 : this.pitch.detected_hz() });
+    }
     return true;
   }
 }

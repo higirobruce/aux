@@ -1468,18 +1468,34 @@ const PITCH_SELECT: React.CSSProperties = {
   fontWeight: 600,
 };
 
-function PitchGraph({
-  pkey,
-  scale,
-  speed,
-  amount,
-  getLevel,
-}: { pkey: string; scale: string; speed: number; amount: number; getLevel: () => number }) {
+/** Nearest integer MIDI note (to a continuous `midi`) in the key+scale. */
+function snapMidiToScale(midi: number, keyRoot: number, scaleNotes: number[]): number {
+  const base = Math.round(midi);
+  let best = base;
+  let bestD = Number.POSITIVE_INFINITY;
+  for (let c = base - 6; c <= base + 6; c++) {
+    const pc = (((c - keyRoot) % 12) + 12) % 12;
+    if (scaleNotes.includes(pc)) {
+      const d = Math.abs(c - midi);
+      if (d < bestD) {
+        bestD = d;
+        best = c;
+      }
+    }
+  }
+  return best;
+}
+
+/** Live pitch graph driven by the engine's detected f0. The mauve line is the
+ *  detected pitch; the glowing violet line is where the corrector snaps it
+ *  (nearest in-scale note). A scale-note grid auto-centres on the voice; gaps
+ *  appear when unvoiced/bypassed. */
+function PitchGraph({ pkey, scale, getHz }: { pkey: string; scale: string; getHz: () => number }) {
   const ref = useRef<HTMLCanvasElement>(null);
-  const v = useRef({ pkey, scale, speed, amount });
-  v.current = { pkey, scale, speed, amount };
-  const lvlFn = useRef(getLevel);
-  lvlFn.current = getLevel;
+  const v = useRef({ pkey, scale });
+  v.current = { pkey, scale };
+  const hzFn = useRef(getHz);
+  hzFn.current = getHz;
   useEffect(() => {
     const cv = ref.current;
     if (!cv) return;
@@ -1487,73 +1503,87 @@ function PitchGraph({
     const ctx = cv.getContext('2d');
     if (!ctx) return;
     const rows = 14;
-    const hist: { raw: number; corr: number }[] = [];
+    const hist: ({ raw: number; corr: number } | null)[] = [];
+    let center = 60; // C4 until the first voiced frame
+    let haveCenter = false;
     let raf = 0;
-    let t = 0;
     const draw = () => {
       const W = cv.clientWidth;
       const H = cv.clientHeight;
       cv.width = W * dpr;
       cv.height = H * dpr;
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-      // Trace only advances while the channel is sounding (no pitch DSP — the
-      // line itself is illustrative, but its motion is gated on the signal).
-      const live = lvlFn.current() > 0.002;
-      if (live) t += 0.03;
       ctx.clearRect(0, 0, W, H);
-      const { pkey: k, scale: sc, speed: sp, amount: am } = v.current;
-      const keyRoot = Math.max(0, PITCH_NOTES.indexOf(k));
-      const scaleNotes = PITCH_SCALES[sc] ?? PITCH_SCALES.Chromatic;
-      const inScale = (semi: number) => (scaleNotes ?? []).includes(((semi % 12) + 12) % 12);
+
+      const keyRoot = Math.max(0, PITCH_NOTES.indexOf(v.current.pkey));
+      const scaleNotes = PITCH_SCALES[v.current.scale] ?? PITCH_SCALES.Chromatic ?? [];
+      const inScale = (m: number) =>
+        scaleNotes.includes((((Math.round(m) - keyRoot) % 12) + 12) % 12);
+
+      const hz = hzFn.current();
+      const voiced = hz > 0;
+      const midi = voiced ? 69 + 12 * Math.log2(hz / 440) : Number.NaN;
+      if (voiced) {
+        if (haveCenter) center += 0.04 * (midi - center);
+        else {
+          center = midi;
+          haveCenter = true;
+        }
+      }
+
       const rowH = H / rows;
+      const winLo = center - rows / 2;
+      const yOf = (m: number) => H - ((m - winLo) / rows) * H;
+
+      // Scale-note grid (auto-centred on the voice).
       ctx.font = '9px IBM Plex Mono';
-      for (let r = 0; r < rows; r++) {
-        const semi = keyRoot + (rows - 1 - r);
-        const y = r * rowH;
-        if (inScale(semi)) {
+      for (let m = Math.ceil(winLo); m <= Math.floor(winLo + rows); m++) {
+        const y = yOf(m);
+        if (inScale(m)) {
           ctx.fillStyle = 'rgba(143,127,214,0.07)';
-          ctx.fillRect(0, y, W, rowH);
+          ctx.fillRect(0, y - rowH / 2, W, rowH);
         }
         ctx.strokeStyle = 'rgba(255,240,210,0.04)';
         ctx.beginPath();
         ctx.moveTo(0, y);
         ctx.lineTo(W, y);
         ctx.stroke();
-        ctx.fillStyle = inScale(semi) ? '#8f7fd6' : '#564b39';
-        ctx.fillText(PITCH_NOTES[((semi % 12) + 12) % 12] ?? '', 4, y + rowH / 2 + 3);
+        ctx.fillStyle = inScale(m) ? '#8f7fd6' : '#564b39';
+        ctx.fillText(PITCH_NOTES[((m % 12) + 12) % 12] ?? '', 4, y - 3);
       }
-      const targetSemi = rows / 2 + 2.5 * Math.sin(t * 0.5) + Math.floor((t * 0.7) % 3);
-      const raw = targetSemi + 0.6 * Math.sin(t * 9) + 0.3 * (Math.random() - 0.5);
-      let snapped = Math.round(raw);
-      for (let d = 0; d < 7; d++) {
-        if (inScale(keyRoot + Math.round(raw + d))) {
-          snapped = Math.round(raw + d);
-          break;
+
+      // Append the current frame (null = a gap while unvoiced/bypassed).
+      hist.push(voiced ? { raw: midi, corr: snapMidiToScale(midi, keyRoot, scaleNotes) } : null);
+      if (hist.length > W / 2) hist.shift();
+
+      const drawLine = (key: 'raw' | 'corr', style: string, lw: number, glow: boolean) => {
+        ctx.strokeStyle = style;
+        ctx.lineWidth = lw;
+        if (glow) {
+          ctx.shadowColor = style;
+          ctx.shadowBlur = 6;
         }
-        if (inScale(keyRoot + Math.round(raw - d))) {
-          snapped = Math.round(raw - d);
-          break;
-        }
-      }
-      const corrected = raw + (snapped - raw) * (0.15 + (sp / 100) * 0.85) * (am / 100);
-      if (live) {
-        hist.push({ raw, corr: corrected });
-        if (hist.length > W / 2) hist.shift();
-      }
-      const yOf = (semi: number) => H - (semi / rows) * H;
-      ctx.strokeStyle = 'rgba(178,133,172,0.5)';
-      ctx.lineWidth = 1.5;
-      ctx.beginPath();
-      hist.forEach((h, i) => (i ? ctx.lineTo(i * 2, yOf(h.raw)) : ctx.moveTo(i * 2, yOf(h.raw))));
-      ctx.stroke();
-      ctx.strokeStyle = '#8f7fd6';
-      ctx.lineWidth = 2.5;
-      ctx.shadowColor = '#8f7fd6';
-      ctx.shadowBlur = 6;
-      ctx.beginPath();
-      hist.forEach((h, i) => (i ? ctx.lineTo(i * 2, yOf(h.corr)) : ctx.moveTo(i * 2, yOf(h.corr))));
-      ctx.stroke();
-      ctx.shadowBlur = 0;
+        ctx.beginPath();
+        let pen = false;
+        hist.forEach((h, i) => {
+          if (!h) {
+            pen = false;
+            return;
+          }
+          const x = i * 2;
+          const y = yOf(h[key]);
+          if (pen) ctx.lineTo(x, y);
+          else {
+            ctx.moveTo(x, y);
+            pen = true;
+          }
+        });
+        ctx.stroke();
+        ctx.shadowBlur = 0;
+      };
+      drawLine('raw', 'rgba(178,133,172,0.55)', 1.5, false);
+      drawLine('corr', '#8f7fd6', 2.5, true);
+
       const last = hist[hist.length - 1];
       if (last) {
         ctx.fillStyle = '#8f7fd6';
@@ -1605,9 +1635,7 @@ function PitchWindow({
           <PitchGraph
             pkey={pt.key}
             scale={pt.scale}
-            speed={pt.speed}
-            amount={pt.amount}
-            getLevel={() => b.host?.getChannelLevel(p.stemId) ?? 0}
+            getHz={() => b.host?.getChannelPitchHz(p.stemId) ?? 0}
           />
         </div>
         <div style={{ display: 'flex', gap: 12, marginTop: 12, alignItems: 'center' }}>

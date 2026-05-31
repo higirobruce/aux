@@ -269,6 +269,9 @@ interface ChannelInternals {
   /** Whether this channel's Pitch insert is currently engaged (not bypassed).
    *  Drives the channel's latency in the PDC calculation. */
   pitchEngaged: boolean;
+  /** Latest detected fundamental (Hz, 0 = unvoiced/bypassed) posted by the
+   *  Pitch worklet — for the corrector window's pitch graph. */
+  pitchHz: number;
   /** Optional DeEss between Transient and Imager. */
   deess: AudioWorkletNode | null;
   /** Optional Imager (M/S width). */
@@ -764,6 +767,7 @@ export class AudioHost {
       transient,
       pitch,
       pitchEngaged: false,
+      pitchHz: 0,
       deess,
       imager,
       tape,
@@ -793,6 +797,11 @@ export class AudioHost {
     if (compColor) {
       compColor.port.onmessage = (e: MessageEvent<{ type: string; db: number }>) => {
         if (e.data?.type === 'gr') channelInternals.compColorGrDb = e.data.db;
+      };
+    }
+    if (pitch) {
+      pitch.port.onmessage = (e: MessageEvent<{ type: string; hz: number }>) => {
+        if (e.data?.type === 'f0') channelInternals.pitchHz = e.data.hz;
       };
     }
 
@@ -1004,10 +1013,15 @@ export class AudioHost {
     }
   }
 
-  /** Last detected fundamental (Hz, 0 = unvoiced) — for the Pitch UI. The
-   *  worklet posts it on `port`; callers read the cached value if wired. */
+  /** Constant Pitch-insert latency (samples) used for delay-compensation. */
   getChannelPitchLatencySamples(): number {
     return PITCH_LATENCY_SAMPLES;
+  }
+
+  /** Last detected fundamental for a channel (Hz, 0 = unvoiced/bypassed),
+   *  cached from the Pitch worklet's `f0` posts — drives the corrector UI. */
+  getChannelPitchHz(stemId: string): number {
+    return this.channels.get(stemId)?.pitchHz ?? 0;
   }
 
   // ────────────────────────────────────────────────────────────────────
