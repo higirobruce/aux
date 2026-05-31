@@ -526,15 +526,17 @@
         <h3 style="margin-top: 0;">Option B — Pitch shifter tuning</h3>
         <p>
           Follow-ups on the Pitch corrector (PR #12): the window's graph is now
-          driven by the real detected f0 (PR #15, merged), and detection is
-          hardened against octave glitches (median + octave guard + smoothing —
-          in review). Remaining: a quality pass on the time-domain shifter
-          (formant artefacts on big shifts) and a real formant stage — a
-          separate, larger DSP task.
+          driven by the real detected f0 (PR #15, merged). PR #16 then hardens
+          the pitch engine: detection against octave glitches (median + octave
+          guard + smoothing), and a shifter-quality pass that kills the
+          metallic comb — the two crossfade taps are now snapped to whole
+          detected periods (PSOLA-lite) so they read in-phase, and the shifter
+          only blends in as far as it's actually correcting (dry/transparent on
+          pitch). Remaining: a real formant stage — a separate, larger DSP task.
         </p>
         <p class="caption">
-          <strong>Status:</strong> UI tap merged (PR #15); detection-robustness
-          in review.
+          <strong>Status:</strong> UI tap merged (PR #15); detection + shifter
+          quality pass in review (PR #16).
         </p>
       </div>
       <div>
