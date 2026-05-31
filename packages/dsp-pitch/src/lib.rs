@@ -58,11 +58,6 @@ const MIN_HZ: f32 = 70.0;
 const MAX_HZ: f32 = 1000.0;
 const SILENCE_RMS: f32 = 1e-4;
 
-/// Tap-separation bounds (samples). The crossfade offset is snapped to a whole
-/// number of detected periods near HALF_GRAIN, but kept in this band so the
-/// reported latency (PITCH_LATENCY) stays close to the truth for PDC.
-const MIN_OFFSET: f32 = 256.0;
-const MAX_OFFSET: f32 = 768.0;
 /// Correction magnitude (cents) over which the shifted ("wet") path fully takes
 /// over from the clean delayed dry. Below DRY we pass dry (transparent on pitch
 /// / unvoiced — no shifter artefacts); above FULL we fully correct.
@@ -160,9 +155,7 @@ pub struct Pitch {
     ring_l: Vec<f32>,
     ring_r: Vec<f32>,
     write_pos: usize,
-    sweep: f32,      // ∈ [0, grain)
-    tap_offset: f32, // half-grain, snapped to a whole number of detected periods
-    grain: f32,      // 2 * tap_offset (the sweep wrap modulus)
+    sweep: f32, // ∈ [0, GRAIN)
 
     // Correction state, all in cents.
     applied_cents: f32,
@@ -197,8 +190,6 @@ impl Pitch {
             ring_r: vec![0.0; RING],
             write_pos: 0,
             sweep: 0.0,
-            tap_offset: HALF_GRAIN,
-            grain: GRAIN,
             applied_cents: 0.0,
             target_cents: 0.0,
             glide_coeff: 0.0,
@@ -231,8 +222,6 @@ impl Pitch {
         }
         self.write_pos = 0;
         self.sweep = 0.0;
-        self.tap_offset = HALF_GRAIN;
-        self.grain = GRAIN;
         self.applied_cents = 0.0;
         self.target_cents = 0.0;
         self.drift_cents = 0.0;
@@ -313,23 +302,20 @@ impl Pitch {
             self.glide_coeff * self.applied_cents + (1.0 - self.glide_coeff) * self.target_cents;
         let ratio = (self.applied_cents / 1200.0).exp2();
 
-        let g = self.grain;
-        let half = self.tap_offset;
-
-        // Advance the shared sweep; wrap into [0, g).
+        // Advance the shared sweep; wrap into [0, GRAIN). A fixed grain keeps
+        // both tap lags continuous — resizing it per hop made the read jump and
+        // clicked, so the grain stays constant and the wrap is masked by the
+        // two-tap crossfade (Hann taps half a grain apart, wa+wb ≡ 1).
         self.sweep += 1.0 - ratio;
-        if self.sweep >= g {
-            self.sweep -= g;
+        if self.sweep >= GRAIN {
+            self.sweep -= GRAIN;
         } else if self.sweep < 0.0 {
-            self.sweep += g;
+            self.sweep += GRAIN;
         }
-        // Two Hann taps half a grain apart. With the offset snapped to whole
-        // periods (see update_pitch) the taps read in-phase, so wa+wb ≈ 1 with
-        // no comb. da∈[0,g); db wraps the same window.
         let da = self.sweep;
-        let db = if da + half >= g { da - half } else { da + half };
-        let wa = 0.5 - 0.5 * (TWO_PI * da / g).cos();
-        let wb = 0.5 - 0.5 * (TWO_PI * db / g).cos();
+        let db = if da + HALF_GRAIN >= GRAIN { da - HALF_GRAIN } else { da + HALF_GRAIN };
+        let wa = 0.5 - 0.5 * (TWO_PI * da / GRAIN).cos();
+        let wb = 0.5 - 0.5 * (TWO_PI * db / GRAIN).cos();
 
         let sh_l = wa * read(&self.ring_l, self.write_pos, da)
             + wb * read(&self.ring_l, self.write_pos, db);
@@ -338,11 +324,11 @@ impl Pitch {
 
         // Blend toward the shifted signal only as far as we're actually
         // correcting; otherwise pass the clean dry, delayed by the same group
-        // delay (`half`) so the crossfade stays phase-aligned and click-free.
+        // delay (HALF_GRAIN) so the crossfade stays phase-aligned and click-free.
         let wet = wet_mix(self.applied_cents.abs());
         let dry = 1.0 - wet;
-        let out_l = dry * read(&self.ring_l, self.write_pos, half) + wet * sh_l;
-        let out_r = dry * read(&self.ring_r, self.write_pos, half) + wet * sh_r;
+        let out_l = dry * read(&self.ring_l, self.write_pos, HALF_GRAIN) + wet * sh_l;
+        let out_r = dry * read(&self.ring_r, self.write_pos, HALF_GRAIN) + wet * sh_r;
 
         self.write_pos = (self.write_pos + 1) & RING_MASK;
         (out_l, out_r)
@@ -372,25 +358,6 @@ impl Pitch {
         }
         let f0 = self.smoothed_f0;
         self.detected_f0 = f0;
-
-        // Snap the shifter's tap offset to a whole number of detected periods so
-        // the two crossfading taps read phase-aligned audio (PSOLA-lite). This
-        // collapses the fixed-half-grain comb that otherwise colours the voice
-        // even at unity. Falls back to HALF_GRAIN when unvoiced.
-        let new_offset = if f0 > 0.0 {
-            let period = self.sample_rate / f0;
-            let mult = (HALF_GRAIN / period).round().max(1.0);
-            (mult * period).clamp(MIN_OFFSET, MAX_OFFSET)
-        } else {
-            HALF_GRAIN
-        };
-        let new_grain = 2.0 * new_offset;
-        if (new_grain - self.grain).abs() > 0.5 {
-            // keep the sweep phase fraction continuous across the size change
-            self.sweep *= new_grain / self.grain;
-            self.tap_offset = new_offset;
-            self.grain = new_grain;
-        }
 
         // Slow random wander for humanize (updated once per hop).
         let max_drift = (self.humanize / 100.0) * 18.0; // cents
@@ -642,6 +609,46 @@ mod tests {
         assert!((octave_snap(110.0, 220.0) - 220.0).abs() < 1.0); // octave-low latch ↑
         assert!((octave_snap(330.0, 220.0) - 330.0).abs() < 1.0); // real fifth — untouched
         assert_eq!(octave_snap(440.0, 0.0), 440.0); // no history ⇒ passthrough
+    }
+
+    /// Realistic singing: a 220 Hz tone with 5 Hz, ±35-cent vibrato so f0
+    /// wanders continuously (the case that exposes click sources).
+    fn vibrato(sr: f32, n: usize) -> Vec<f32> {
+        (0..n)
+            .map(|i| {
+                let t = i as f32 / sr;
+                let cents = 35.0 * (2.0 * PI * 5.0 * t).sin();
+                let f = 220.0 * (cents / 1200.0).exp2();
+                // integrate frequency for phase continuity
+                0.6 * (2.0 * PI * f * t).sin()
+            })
+            .collect()
+    }
+
+    #[test]
+    fn no_click_discontinuities_on_wandering_pitch() {
+        // Correcting a continuously-wandering voice must not introduce sample
+        // jumps far beyond the signal's own slope. (Resizing the grain per hop
+        // regressed this to ~33× with dozens of audible clicks; this guards it.)
+        let sr = 48000.0;
+        let input = vibrato(sr, 48000);
+        let mut buf = input.clone();
+        let mut p = Pitch::new(sr);
+        p.set_params(9, 1, 60.0, 100.0, 0.0); // A-minor, full correct
+        p.process_mono(&mut buf);
+        let max_d = |b: &[f32]| {
+            b[8192..].windows(2).map(|w| (w[1] - w[0]).abs()).fold(0.0f32, f32::max)
+        };
+        let in_jump = max_d(&input);
+        let out_jump = max_d(&buf);
+        let big = buf[8192..]
+            .windows(2)
+            .filter(|w| (w[1] - w[0]).abs() > 5.0 * in_jump)
+            .count();
+        assert!(
+            out_jump < 2.0 * in_jump && big == 0,
+            "shifter introduced discontinuities: in={in_jump:.5} out={out_jump:.5} big={big}"
+        );
     }
 
     #[test]
