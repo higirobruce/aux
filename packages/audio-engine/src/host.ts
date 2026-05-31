@@ -88,6 +88,15 @@ export interface AudioHostOptions {
   /** URL to transient_bg.wasm. */
   transientWasmUrl?: string | URL;
   /**
+   * URL to the Pitch worklet (monophonic corrector). When loaded, every
+   * channel gets a Pitch node spliced between Transient and DeEss. Unlike
+   * the other inserts it carries a constant latency when engaged (see
+   * `getChannelPitchLatency`), which the host compensates across channels.
+   */
+  pitchWorkletUrl?: string | URL;
+  /** URL to pitch_bg.wasm. */
+  pitchWasmUrl?: string | URL;
+  /**
    * URL to the DeEss worklet (split-band sibilance tamer). With its wasm,
    * every channel gets a DeEss insert between Transient and Imager.
    */
@@ -254,6 +263,12 @@ interface ChannelInternals {
   compColor: AudioWorkletNode | null;
   /** Optional Transient designer between Comp-Color and gain. */
   transient: AudioWorkletNode | null;
+  /** Optional Pitch corrector between Transient and DeEss. Carries a constant
+   *  latency when engaged — tracked by `pitchEngaged` for delay-compensation. */
+  pitch: AudioWorkletNode | null;
+  /** Whether this channel's Pitch insert is currently engaged (not bypassed).
+   *  Drives the channel's latency in the PDC calculation. */
+  pitchEngaged: boolean;
   /** Optional DeEss between Transient and Imager. */
   deess: AudioWorkletNode | null;
   /** Optional Imager (M/S width). */
@@ -271,6 +286,10 @@ interface ChannelInternals {
   gain: GainNode;
   panner: StereoPannerNode;
   analyser: AnalyserNode;
+  /** Plugin-delay-compensation: a delay between `analyser` and the output bus
+   *  set to (maxChannelLatency − thisChannelLatency) so every channel's
+   *  contribution arrives aligned regardless of the Pitch insert's latency. */
+  compDelay: DelayNode;
   meterBuffer: Float32Array<ArrayBuffer>;
   volume: number;
   pan: number;
@@ -291,6 +310,11 @@ interface ChannelInternals {
   /** Timeline clips for this stem, in samples. Empty = whole buffer at t=0. */
   clips: ClipRegion[];
 }
+
+/** Constant group delay (samples) the Pitch insert imposes while engaged.
+ *  Must match `Pitch::latency_samples()` in `@aux/dsp-pitch` (GRAIN/2 = 512).
+ *  Used for plugin-delay-compensation across channels. */
+const PITCH_LATENCY_SAMPLES = 512;
 
 export class AudioHost {
   private ctx: AudioContext | null = null;
@@ -315,6 +339,8 @@ export class AudioHost {
   private reverbWasmModules: Partial<Record<ReverbKind, WebAssembly.Module>> = {};
   /** Transient designer — per-channel insert. */
   private transientWasmModule: WebAssembly.Module | null = null;
+  /** Pitch corrector — per-channel insert. */
+  private pitchWasmModule: WebAssembly.Module | null = null;
   /** DeEss — per-channel insert. */
   private deessWasmModule: WebAssembly.Module | null = null;
   /** Imager — per-channel insert. */
@@ -432,6 +458,17 @@ export class AudioHost {
       );
     }
 
+    if (this.options.pitchWorkletUrl && this.options.pitchWasmUrl) {
+      await this.ctx.audioWorklet.addModule(this.options.pitchWorkletUrl);
+      const res = await fetch(this.options.pitchWasmUrl);
+      if (!res.ok) throw new Error(`pitch wasm fetch failed (${res.status})`);
+      this.pitchWasmModule = await WebAssembly.compileStreaming(
+        new Response(await res.arrayBuffer(), {
+          headers: { 'Content-Type': 'application/wasm' },
+        })
+      );
+    }
+
     if (this.options.deessWorkletUrl && this.options.deessWasmUrl) {
       await this.ctx.audioWorklet.addModule(this.options.deessWorkletUrl);
       const res = await fetch(this.options.deessWasmUrl);
@@ -518,6 +555,7 @@ export class AudioHost {
       if (channel.comp) channel.comp.disconnect();
       if (channel.compColor) channel.compColor.disconnect();
       if (channel.transient) channel.transient.disconnect();
+      if (channel.pitch) channel.pitch.disconnect();
       if (channel.deess) channel.deess.disconnect();
       if (channel.imager) channel.imager.disconnect();
       if (channel.tape) channel.tape.disconnect();
@@ -527,6 +565,7 @@ export class AudioHost {
       channel.gain.disconnect();
       channel.panner.disconnect();
       channel.analyser.disconnect();
+      channel.compDelay.disconnect();
     }
     this.channels.clear();
     for (const bus of this.buses.values()) {
@@ -578,6 +617,8 @@ export class AudioHost {
     const analyser = this.ctx.createAnalyser();
     analyser.fftSize = 256;
     analyser.smoothingTimeConstant = 0.5;
+    // Plugin-delay-compensation node — delayTime set by recomputePdc().
+    const compDelay = new DelayNode(this.ctx, { maxDelayTime: 0.25, delayTime: 0 });
 
     const volume = init.volume ?? 1;
     const pan = init.pan ?? 0;
@@ -637,6 +678,17 @@ export class AudioHost {
       deess.connect(imager ?? tape ?? consoleNode ?? gain);
     }
 
+    let pitch: AudioWorkletNode | null = null;
+    if (this.pitchWasmModule) {
+      pitch = new AudioWorkletNode(this.ctx, 'aux-pitch-processor', {
+        numberOfInputs: 1,
+        numberOfOutputs: 1,
+        outputChannelCount: [2],
+        processorOptions: { wasmModule: this.pitchWasmModule },
+      });
+      pitch.connect(deess ?? imager ?? tape ?? consoleNode ?? gain);
+    }
+
     let transient: AudioWorkletNode | null = null;
     if (this.transientWasmModule) {
       transient = new AudioWorkletNode(this.ctx, 'aux-transient-processor', {
@@ -645,7 +697,7 @@ export class AudioHost {
         outputChannelCount: [2],
         processorOptions: { wasmModule: this.transientWasmModule },
       });
-      transient.connect(deess ?? imager ?? tape ?? consoleNode ?? gain);
+      transient.connect(pitch ?? deess ?? imager ?? tape ?? consoleNode ?? gain);
     }
 
     let compColor: AudioWorkletNode | null = null;
@@ -696,10 +748,11 @@ export class AudioHost {
       );
     }
 
-    // gain → panner → analyser → outputBus.input
+    // gain → panner → analyser → compDelay (PDC) → outputBus.input
     gain.connect(panner);
     panner.connect(analyser);
-    analyser.connect(outputBus.input);
+    analyser.connect(compDelay);
+    compDelay.connect(outputBus.input);
 
     const channelInternals: ChannelInternals = {
       stemId: init.stemId,
@@ -709,6 +762,8 @@ export class AudioHost {
       comp,
       compColor,
       transient,
+      pitch,
+      pitchEngaged: false,
       deess,
       imager,
       tape,
@@ -718,6 +773,7 @@ export class AudioHost {
       gain,
       panner,
       analyser,
+      compDelay,
       meterBuffer: new Float32Array(analyser.fftSize),
       volume,
       pan,
@@ -741,6 +797,31 @@ export class AudioHost {
     }
 
     this.channels.set(init.stemId, channelInternals);
+    this.recomputePdc();
+  }
+
+  /**
+   * Plugin-delay-compensation. Each channel's latency is the Pitch insert's
+   * constant delay when engaged, else 0. Every channel's `compDelay` is set
+   * to (max latency across channels − its own), so all contributions arrive
+   * aligned at their buses regardless of who's running Pitch.
+   *
+   * v1 scope: compensates the main channel→bus path. Post-fader aux sends tap
+   * pre-compDelay, so a pitched channel's *sends* aren't delay-matched yet —
+   * rare in practice; deferred.
+   */
+  private recomputePdc(): void {
+    if (!this.ctx) return;
+    let maxLatency = 0;
+    for (const ch of this.channels.values()) {
+      const lat = ch.pitchEngaged ? PITCH_LATENCY_SAMPLES : 0;
+      if (lat > maxLatency) maxLatency = lat;
+    }
+    for (const ch of this.channels.values()) {
+      const lat = ch.pitchEngaged ? PITCH_LATENCY_SAMPLES : 0;
+      const seconds = (maxLatency - lat) / this.ctx.sampleRate;
+      ch.compDelay.delayTime.setValueAtTime(seconds, this.ctx.currentTime);
+    }
   }
 
   /** Decode and attach an audio buffer to its channel. Auto-creates the channel. */
@@ -860,6 +941,7 @@ export class AudioHost {
     if (channel.comp) channel.comp.disconnect();
     if (channel.compColor) channel.compColor.disconnect();
     if (channel.transient) channel.transient.disconnect();
+    if (channel.pitch) channel.pitch.disconnect();
     if (channel.deess) channel.deess.disconnect();
     if (channel.imager) channel.imager.disconnect();
     if (channel.tape) channel.tape.disconnect();
@@ -869,7 +951,9 @@ export class AudioHost {
     channel.gain.disconnect();
     channel.panner.disconnect();
     channel.analyser.disconnect();
+    channel.compDelay.disconnect();
     this.channels.delete(stemId);
+    this.recomputePdc();
   }
 
   // ────────────────────────────────────────────────────────────────────
@@ -887,6 +971,43 @@ export class AudioHost {
     const transient = this.channels.get(stemId)?.transient;
     if (!transient) return;
     transient.port.postMessage({ type: 'set-bypassed', bypassed });
+  }
+
+  // ────────────────────────────────────────────────────────────────────
+  // Per-channel Pitch corrector
+  // ────────────────────────────────────────────────────────────────────
+
+  /** keyRoot 0..11, scaleId 0..3, speed/amount/humanize 0..100. */
+  setChannelPitch(
+    stemId: string,
+    keyRoot: number,
+    scaleId: number,
+    speed: number,
+    amount: number,
+    humanize: number
+  ): void {
+    const pitch = this.channels.get(stemId)?.pitch;
+    if (!pitch) return;
+    pitch.port.postMessage({ type: 'set-params', keyRoot, scaleId, speed, amount, humanize });
+  }
+
+  /** Engaging/bypassing Pitch changes the channel's latency, so this also
+   *  re-runs plugin-delay-compensation to keep every stem aligned. */
+  setChannelPitchBypassed(stemId: string, bypassed: boolean): void {
+    const channel = this.channels.get(stemId);
+    if (!channel?.pitch) return;
+    channel.pitch.port.postMessage({ type: 'set-bypassed', bypassed });
+    const engaged = !bypassed;
+    if (engaged !== channel.pitchEngaged) {
+      channel.pitchEngaged = engaged;
+      this.recomputePdc();
+    }
+  }
+
+  /** Last detected fundamental (Hz, 0 = unvoiced) — for the Pitch UI. The
+   *  worklet posts it on `port`; callers read the cached value if wired. */
+  getChannelPitchLatencySamples(): number {
+    return PITCH_LATENCY_SAMPLES;
   }
 
   // ────────────────────────────────────────────────────────────────────
@@ -1416,12 +1537,13 @@ export class AudioHost {
     const previous = this.buses.get(channel.outputBusId);
     if (previous) {
       try {
-        channel.analyser.disconnect(previous.input);
+        // compDelay is the channel's tail node into the bus (PDC stage).
+        channel.compDelay.disconnect(previous.input);
       } catch {
         // Edge case: the connection wasn't there (e.g. first wire-up).
       }
     }
-    channel.analyser.connect(target.input);
+    channel.compDelay.connect(target.input);
     channel.outputBusId = busId;
   }
 
