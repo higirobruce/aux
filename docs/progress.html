@@ -300,17 +300,19 @@
             <div class="lbl">Pitch corrector — real DSP + delay-compensation</div>
             <div class="why">Make the Pitch insert real (it shipped as a UI placeholder) + add plugin-delay-compensation so its latency doesn't drift the stem against the mix.</div>
           </td>
-          <td class="status"><span class="pill-st pill-flight">In review</span></td>
+          <td class="status"><span class="pill-st pill-shipped">Shipped</span></td>
           <td>
             New <code>@aux/dsp-pitch</code> Rust crate (PR #12): YIN f0 detection → key/scale snap →
             cents glide (amount/humanize) → two-tap overlap-add shift; time-domain, monophonic, no FFT.
             Constant latency when engaged, zero-latency bypass. Engine gains plugin-delay-compensation
             (per-channel <code>compDelay</code> + <code>recomputePdc()</code>) so engaging Pitch keeps
-            every stem aligned. The Pitch window now plots the <em>real</em> detected f0 (PR #15), and
-            detection is hardened against octave glitches — a 3-point median rejects spurious hops, an
-            octave guard folds half/double-period latches back onto the running pitch, and a light
-            one-pole smooths the trace (detection-robustness PR). FORMANT persists but is inert (no DSP
-            yet). First-cut quality — monophonic, time-domain.
+            every stem aligned. The Pitch window plots the <em>real</em> detected f0 (PR #15). A quality
+            pass (PR #16) then made it gig-ready: detection hardened against octave spikes (median +
+            octave guard + smoothing); a dry/wet blend so it's transparent on-pitch and only shifts as
+            far as it's correcting; onset hold-off + note hysteresis to stop warbling at note changes /
+            phrase edges; and a 4×-decimated YIN (~16× cheaper) so several tracks can run Pitch at once
+            without the audio thread overrunning. FORMANT persists but is inert (no DSP yet). Remaining
+            polish (a comb-free shifter, real formants) is tracked as a follow-up.
           </td>
         </tr>
         <tr>
@@ -495,10 +497,11 @@
         The plugin marathon and the whole warm-analog UI are done — the
         channel DSP suite, the seven floating plugin windows (incl. the Smart
         EQ panel), live signal-driven meters, and the reskin all merged to
-        <code>staging</code>; the <strong>real Pitch corrector + plugin-delay-
-        compensation</strong> (PR #12) and the <strong>/design-system doc
-        route</strong> (PR #14) are in review. That leaves a single big v0.3
-        lane: <strong>Clip editing v1</strong> — cut / move / trim per stem on
+        <code>staging</code>. The <strong>real Pitch corrector + plugin-delay-
+        compensation</strong> (PR #12), its <strong>real-f0 graph + quality
+        pass</strong> (PRs #15/#16), and the <strong>/design-system doc
+        route</strong> (PR #14) are all merged too. That leaves a single big
+        v0.3 lane: <strong>Clip editing v1</strong> — cut / move / trim per stem on
         the timeline, now reachable on top of the read-only stem timeline.
       </p>
     </div>
@@ -523,20 +526,19 @@
         </p>
       </div>
       <div>
-        <h3 style="margin-top: 0;">Option B — Pitch shifter tuning</h3>
+        <h3 style="margin-top: 0;">Option B — Pitch shifter polish</h3>
         <p>
-          Follow-ups on the Pitch corrector (PR #12): the window's graph is now
-          driven by the real detected f0 (PR #15, merged). PR #16 then hardens
-          the pitch engine: detection against octave glitches (median + octave
-          guard + smoothing), and a shifter-quality pass that kills the
-          metallic comb — the two crossfade taps are now snapped to whole
-          detected periods (PSOLA-lite) so they read in-phase, and the shifter
-          only blends in as far as it's actually correcting (dry/transparent on
-          pitch). Remaining: a real formant stage — a separate, larger DSP task.
+          The real-f0 graph (PR #15) and the quality pass (PR #16) are both
+          merged: detection hardening, dry/wet blend, onset hold-off + note
+          hysteresis, and a decimated YIN that lets several tracks run Pitch at
+          once. What's left is the shifter <em>core</em>: the fixed two-tap
+          overlap-add still colours a sustained corrected note (inherent to the
+          method) — a comb-free shifter (true PSOLA with pitch marks) and a real
+          formant stage are the remaining, larger DSP tasks.
         </p>
         <p class="caption">
-          <strong>Status:</strong> UI tap merged (PR #15); detection + shifter
-          quality pass in review (PR #16).
+          <strong>Status:</strong> PR #15 + PR #16 merged; comb-free shifter +
+          formants deferred.
         </p>
       </div>
       <div>
