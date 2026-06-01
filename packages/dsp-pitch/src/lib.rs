@@ -54,6 +54,13 @@ const DET_HOP: usize = 384;
 const YIN_THRESH: f32 = 0.15;
 /// If even the best τ is this aperiodic, treat the frame as unvoiced.
 const VOICED_LIMIT: f32 = 0.45;
+/// Detection hops a freshly-voiced note must persist before we start
+/// correcting it — attacks/onsets give garbage f0, so we hold off (~32 ms).
+const ONSET_HOLD: u32 = 4;
+/// Hops a *new* snapped note must be seen consecutively before we re-aim at it.
+/// Keeps the corrector locked to the held note across a transient mis-detection
+/// instead of lurching note-to-note at boundaries (~16 ms).
+const NOTE_HOLD: u32 = 2;
 const MIN_HZ: f32 = 70.0;
 const MAX_HZ: f32 = 1000.0;
 const SILENCE_RMS: f32 = 1e-4;
@@ -150,6 +157,10 @@ pub struct Pitch {
     detected_f0: f32,    // Hz, 0 = unvoiced (the stabilised value the UI plots)
     f0_hist: [f32; 3],   // recent raw YIN estimates, for median outlier-reject
     smoothed_f0: f32,    // running stabilised f0 (0 = unvoiced)
+    voiced_run: u32,     // consecutive voiced hops (onset hold-off)
+    held_note: i32,      // committed snap target (MIDI); i32::MIN = none
+    cand_note: i32,      // pending snap target awaiting confirmation
+    cand_run: u32,       // consecutive hops cand_note has been seen
 
     // Ring buffers (L/R share write_pos + sweep so the ratio is identical).
     ring_l: Vec<f32>,
@@ -186,6 +197,10 @@ impl Pitch {
             detected_f0: 0.0,
             f0_hist: [0.0; 3],
             smoothed_f0: 0.0,
+            voiced_run: 0,
+            held_note: i32::MIN,
+            cand_note: i32::MIN,
+            cand_run: 0,
             ring_l: vec![0.0; RING],
             ring_r: vec![0.0; RING],
             write_pos: 0,
@@ -228,6 +243,10 @@ impl Pitch {
         self.detected_f0 = 0.0;
         self.f0_hist = [0.0; 3];
         self.smoothed_f0 = 0.0;
+        self.voiced_run = 0;
+        self.held_note = i32::MIN;
+        self.cand_note = i32::MIN;
+        self.cand_run = 0;
         self.det_counter = 0;
     }
 
@@ -365,13 +384,42 @@ impl Pitch {
         self.drift_cents += 0.12 * (want - self.drift_cents);
 
         if f0 > 0.0 {
+            self.voiced_run += 1;
             let midi = 69.0 + 12.0 * (f0 / 440.0).log2();
-            let snapped = snap_midi(midi, self.key_root, self.scale_id);
-            let err_cents = (snapped - midi) * 100.0;
-            // humanize also relaxes how hard we pull to pitch.
-            let strength = (self.amount / 100.0) * (1.0 - 0.4 * (self.humanize / 100.0));
-            self.target_cents = err_cents * strength + self.drift_cents;
+            let snapped = snap_midi(midi, self.key_root, self.scale_id) as i32;
+
+            // Note hysteresis: a new snapped note must hold for NOTE_HOLD hops
+            // before we re-aim at it, so a transient mis-detection (or the brief
+            // glide between two notes) doesn't make the corrector lurch.
+            if snapped == self.cand_note {
+                self.cand_run += 1;
+            } else {
+                self.cand_note = snapped;
+                self.cand_run = 1;
+            }
+            if self.held_note == i32::MIN {
+                self.held_note = snapped; // first lock of the phrase
+            } else if snapped != self.held_note && self.cand_run >= NOTE_HOLD {
+                self.held_note = snapped;
+            }
+
+            if self.voiced_run < ONSET_HOLD {
+                // Attack/onset: f0 is unreliable — relax to no correction so the
+                // phrase start doesn't "whoop".
+                self.target_cents = self.drift_cents;
+            } else {
+                // Pull the continuous detected pitch toward the *held* note.
+                let err_cents = (self.held_note as f32 - midi) * 100.0;
+                // humanize also relaxes how hard we pull to pitch.
+                let strength = (self.amount / 100.0) * (1.0 - 0.4 * (self.humanize / 100.0));
+                self.target_cents = err_cents * strength + self.drift_cents;
+            }
         } else {
+            // Unvoiced/silence: reset so the next phrase re-locks fresh.
+            self.voiced_run = 0;
+            self.cand_run = 0;
+            self.held_note = i32::MIN;
+            self.cand_note = i32::MIN;
             self.target_cents = 0.0;
         }
     }
