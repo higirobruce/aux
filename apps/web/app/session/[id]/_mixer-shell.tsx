@@ -694,6 +694,8 @@ export function MixerShell({
       consoleWasmUrl: '/console_bg.wasm',
       mbcompWorkletUrl: '/mbcomp-worklet.js',
       mbcompWasmUrl: '/mbcomp_bg.wasm',
+      meterWorkletUrl: '/meter-worklet.js',
+      meterWasmUrl: '/meter_bg.wasm',
     });
     await host.start();
     hostRef.current = host;

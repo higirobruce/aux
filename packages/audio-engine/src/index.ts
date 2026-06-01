@@ -3,6 +3,7 @@ export {
   type AudioHostOptions,
   type BusInit,
   Eq8BandType,
+  type Loudness,
   MASTER_BUS_ID,
   type ReferenceRoomPreset,
   type ReverbKind,

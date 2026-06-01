@@ -8,7 +8,7 @@
  * gain-reduction meter. More modules follow the same pattern.
  */
 
-import type { AudioHost } from '@aux/audio-engine';
+import type { AudioHost, Loudness } from '@aux/audio-engine';
 import type { EqFullBand, LimiterState, PitchKey, PitchScale } from '@aux/session-doc';
 import { Knob, Readout, Segmented, Spectrum, Toggle, WindowFrame, clamp } from '@aux/ui';
 import { useEffect, useRef, useState } from 'react';
@@ -1163,16 +1163,15 @@ function TapeWindow({
    ============================================================ */
 const GONIO = 160;
 
+// Plots the real L/R signal: each sample is a dot, rotated 45° so a mono
+// signal (L=R) traces the vertical (mid) axis and out-of-phase content spreads
+// horizontally. `getStereo` fills the L/R buffers from the engine each frame.
 function Goniometer({
-  width,
-  balance,
-  getLevel,
-}: { width: number; balance: number; getLevel: () => number }) {
+  getStereo,
+}: { getStereo: (l: Float32Array<ArrayBuffer>, r: Float32Array<ArrayBuffer>) => boolean }) {
   const ref = useRef<HTMLCanvasElement>(null);
-  const v = useRef({ width, balance });
-  v.current = { width, balance };
-  const lvlFn = useRef(getLevel);
-  lvlFn.current = getLevel;
+  const fn = useRef(getStereo);
+  fn.current = getStereo;
   useEffect(() => {
     const cv = ref.current;
     if (!cv) return;
@@ -1182,11 +1181,12 @@ function Goniometer({
     const S = GONIO;
     cv.width = S * dpr;
     cv.height = S * dpr;
+    const N = 1024;
+    const l = new Float32Array(N);
+    const r = new Float32Array(N);
+    const scale = (S / 2 - 8) * 0.95; // full-scale sample → near the rim
     let raf = 0;
-    let t = 0;
-    let smooth = 0;
     const draw = () => {
-      t += 0.04;
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
       ctx.clearRect(0, 0, S, S);
       ctx.save();
@@ -1201,20 +1201,16 @@ function Goniometer({
       ctx.moveTo(-S / 2, 0);
       ctx.lineTo(S / 2, 0);
       ctx.stroke();
-      const w = v.current.width;
-      const bal = v.current.balance;
-      // Real signal energy drives the scatter radius; width sets the spread.
-      const lvl = clamp(lvlFn.current(), 0, 1);
-      smooth += (lvl - smooth) * 0.3;
-      const energy = 0.05 + 1.25 * smooth;
-      for (let i = 0; i < 90; i++) {
-        const a = t + i * 0.4;
-        const r = (S / 2 - 12) * energy * (0.3 + 0.6 * Math.abs(Math.sin(a * 1.3 + i)));
-        const spread = w * (0.4 + 0.6 * Math.sin(a));
-        const x = r * spread * Math.cos(a) + bal * 30;
-        const y = -r * Math.abs(Math.cos(a * 0.7));
-        ctx.fillStyle = `rgba(178,133,172,${0.5 - i / 200})`;
-        ctx.fillRect(x - 1, y - 1, 2, 2);
+      if (fn.current(l, r)) {
+        ctx.fillStyle = 'rgba(178,133,172,0.7)';
+        for (let i = 0; i < N; i++) {
+          const li = l[i] ?? 0;
+          const ri = r[i] ?? 0;
+          // 45° rotation: mid = (L+R) up, side = (L−R) across.
+          const x = (li - ri) * Math.SQRT1_2 * scale;
+          const y = -(li + ri) * Math.SQRT1_2 * scale;
+          ctx.fillRect(x, y, 1.3, 1.3);
+        }
       }
       ctx.restore();
       raf = requestAnimationFrame(draw);
@@ -1223,6 +1219,77 @@ function Goniometer({
     return () => cancelAnimationFrame(raf);
   }, []);
   return <canvas ref={ref} style={{ width: GONIO, height: GONIO }} />;
+}
+
+// Live phase-correlation readout + bar (−1 out-of-phase … +1 mono).
+function CorrelationMeter({ getCorrelation }: { getCorrelation: () => number }) {
+  const numRef = useRef<HTMLSpanElement>(null);
+  const markRef = useRef<HTMLDivElement>(null);
+  const fn = useRef(getCorrelation);
+  fn.current = getCorrelation;
+  useEffect(() => {
+    let raf = 0;
+    let smooth = 1;
+    const tick = () => {
+      smooth += (clamp(fn.current(), -1, 1) - smooth) * 0.2;
+      const col = smooth < 0 ? 'var(--red)' : 'var(--mauve)';
+      if (numRef.current) {
+        numRef.current.textContent = smooth.toFixed(2);
+        numRef.current.style.color = col;
+      }
+      if (markRef.current) {
+        markRef.current.style.left = `${50 + smooth * 50}%`;
+        markRef.current.style.background = col;
+      }
+      raf = requestAnimationFrame(tick);
+    };
+    raf = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(raf);
+  }, []);
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+        <span className="lbl" style={{ fontSize: 8 }}>
+          CORRELATION
+        </span>
+        <span ref={numRef} className="val" style={{ fontSize: 10, color: 'var(--mauve)' }}>
+          +1.00
+        </span>
+      </div>
+      <div
+        style={{
+          position: 'relative',
+          height: 10,
+          background: 'var(--inset)',
+          borderRadius: 3,
+          boxShadow: 'inset 0 0 0 1px var(--line)',
+        }}
+      >
+        <div
+          style={{
+            position: 'absolute',
+            left: '50%',
+            top: 0,
+            bottom: 0,
+            width: 1,
+            background: 'var(--line-2)',
+          }}
+        />
+        <div
+          ref={markRef}
+          style={{
+            position: 'absolute',
+            left: '100%',
+            top: -2,
+            width: 3,
+            height: 14,
+            background: 'var(--mauve)',
+            borderRadius: 2,
+          }}
+        />
+      </div>
+    </div>
+  );
 }
 
 function ImagerWindow({
@@ -1235,8 +1302,6 @@ function ImagerWindow({
   const ch = b.channelState[p.stemId];
   if (!ch) return null;
   const im = ch.imager;
-  const corr = (im.width - 1) * 0.6;
-  const corrCol = corr < 0 ? 'var(--red)' : 'var(--mauve)';
   return (
     <WindowFrame
       title="STEREO IMAGER"
@@ -1262,11 +1327,7 @@ function ImagerWindow({
             overflow: 'hidden',
           }}
         >
-          <Goniometer
-            width={im.width}
-            balance={im.balance}
-            getLevel={() => b.host?.getChannelLevel(p.stemId) ?? 0}
-          />
+          <Goniometer getStereo={(l, r) => b.host?.getChannelStereo(p.stemId, l, r) ?? false} />
         </div>
         <div
           style={{ display: 'flex', flexDirection: 'column', gap: 16, justifyContent: 'center' }}
@@ -1302,47 +1363,7 @@ function ImagerWindow({
               onChange={(val) => b.onImagerBalance(p.stemId, val)}
             />
           </div>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-              <span className="lbl" style={{ fontSize: 8 }}>
-                CORRELATION
-              </span>
-              <span className="val" style={{ fontSize: 10, color: corrCol }}>
-                {corr.toFixed(2)}
-              </span>
-            </div>
-            <div
-              style={{
-                position: 'relative',
-                height: 10,
-                background: 'var(--inset)',
-                borderRadius: 3,
-                boxShadow: 'inset 0 0 0 1px var(--line)',
-              }}
-            >
-              <div
-                style={{
-                  position: 'absolute',
-                  left: '50%',
-                  top: 0,
-                  bottom: 0,
-                  width: 1,
-                  background: 'var(--line-2)',
-                }}
-              />
-              <div
-                style={{
-                  position: 'absolute',
-                  left: `${50 + clamp(corr, -1, 1) * 50}%`,
-                  top: -2,
-                  width: 3,
-                  height: 14,
-                  background: corrCol,
-                  borderRadius: 2,
-                }}
-              />
-            </div>
-          </div>
+          <CorrelationMeter getCorrelation={() => b.host?.getChannelCorrelation(p.stemId) ?? 1} />
           <Segmented
             options={[
               { value: 'STEREO', label: 'STEREO' },
@@ -1361,6 +1382,37 @@ function ImagerWindow({
 /* ============================================================
    Master Limiter — ceiling / gain / release + voicing + GR
    ============================================================ */
+// Live LUFS / true-peak / overs from the master BS.1770 meter, polled ~10 Hz.
+function MasterLoudnessReadouts({ getLoudness }: { getLoudness: () => Loudness | null }) {
+  const [m, setM] = useState({ lufs: '—', tp: '—', overs: '0' });
+  const fn = useRef(getLoudness);
+  fn.current = getLoudness;
+  useEffect(() => {
+    const id = setInterval(() => {
+      const ld = fn.current();
+      if (!ld) {
+        setM({ lufs: '—', tp: '—', overs: '0' });
+        return;
+      }
+      // Show integrated once it's gated past silence; fall back to momentary.
+      const lufs = ld.integrated > -70 ? ld.integrated : ld.momentary;
+      setM({
+        lufs: lufs <= -120 ? '—' : lufs.toFixed(1),
+        tp: ld.truePeakDb <= -120 ? '—' : ld.truePeakDb.toFixed(1),
+        overs: String(ld.overs),
+      });
+    }, 100);
+    return () => clearInterval(id);
+  }, []);
+  return (
+    <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+      <Readout label="TRUE PK" value={m.tp} unit="dB" accent="red" />
+      <Readout label="LUFS" value={m.lufs} accent="gold" />
+      <Readout label="OVERS" value={m.overs} accent={m.overs === '0' ? 'green' : 'red'} />
+    </div>
+  );
+}
+
 function LimiterWindow({
   b,
   z,
@@ -1436,11 +1488,7 @@ function LimiterWindow({
           onChange={(v) => b.onLimiterStyle(v as 'CLEAR' | 'PUNCH' | 'GLUE' | 'SAFE')}
         />
         <GrMeterH getGr={getGr} max={12} width={376} />
-        <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-          <Readout label="PEAK" value={lim.thresholdDb.toFixed(1)} unit="dB" accent="red" />
-          <Readout label="LUFS" value={(-14).toFixed(1)} accent="gold" />
-          <Readout label="OVERS" value="0" accent="green" />
-        </div>
+        <MasterLoudnessReadouts getLoudness={() => b.host?.getMasterLoudness() ?? null} />
       </div>
     </WindowFrame>
   );

@@ -554,15 +554,20 @@
         </p>
       </div>
       <div>
-        <h3 style="margin-top: 0;">Option D — Engine taps for the meters</h3>
+        <h3 style="margin-top: 0;">Option D — Real metering (LUFS + goniometer)</h3>
         <p>
-          Two visualisers run on the mono peak level for want of an engine
-          tap: a true L/R goniometer needs a stereo time-domain feed, and
-          per-channel LUFS/true-peak readouts need their own meters.
+          Both meters are real now. The Imager goniometer plots an actual L/R
+          scatter from a stereo time-domain tap (<code>ChannelSplitter</code> +
+          two analysers) with a live phase-correlation readout, and a new
+          <code>@aux/dsp-meter</code> Rust→WASM worklet (ITU-R BS.1770:
+          K-weighted momentary/short/integrated LUFS, gated, + 4× true-peak and
+          an over count) feeds the Master window's live LUFS / dBTP / OVERS. The
+          meter is a 0-output sink tapped off each channel + the post-limiter
+          master; integrated resets on transport start.
         </p>
         <p class="caption">
-          <strong>Cost:</strong> Small-to-medium engine work; the windows
-          already read whatever the host exposes.
+          <strong>Status:</strong> in review (PR). New crate + worklet + engine
+          taps + UI.
         </p>
       </div>
     </div>
