@@ -48,6 +48,14 @@ const PITCH_LATENCY: u32 = 512; // GRAIN / 2
 /// Samples of recent history fed to YIN. Must exceed the longest period
 /// (≈ sr / MIN_HZ) by a comfortable margin.
 const DET_WINDOW: usize = 2048;
+/// YIN runs on a boxcar-decimated copy of the window — the difference function
+/// is O(len · lag-range), so decimating by 4 cuts detection cost ~16×. That
+/// headroom is what lets several channels run Pitch at once without the audio
+/// thread overrunning its deadline (the multi-track glitch). Parabolic
+/// interpolation recovers sub-sample period resolution, so f0 accuracy holds.
+const DECIM: usize = 4;
+/// Decimated window length actually fed to the difference function.
+const DET_LEN: usize = DET_WINDOW / DECIM;
 /// How often (in samples) detection re-runs. ~8 ms at 48k.
 const DET_HOP: usize = 384;
 /// Aperiodicity threshold — below this τ counts as a confident period.
@@ -182,8 +190,10 @@ impl Pitch {
     #[wasm_bindgen(constructor)]
     pub fn new(sample_rate: f32) -> Self {
         let sr = if sample_rate > 0.0 { sample_rate } else { 48000.0 };
-        let tau_min = (sr / MAX_HZ).floor().max(2.0) as usize;
-        let tau_max = ((sr / MIN_HZ).ceil() as usize).min(DET_WINDOW - 1);
+        // Lag bounds in *decimated* samples (YIN runs at sr / DECIM).
+        let dsr = sr / DECIM as f32;
+        let tau_min = (dsr / MAX_HZ).floor().max(2.0) as usize;
+        let tau_max = ((dsr / MIN_HZ).ceil() as usize).min(DET_LEN - 2);
         let mut p = Self {
             sample_rate: sr,
             bypassed: false,
@@ -424,27 +434,34 @@ impl Pitch {
         }
     }
 
-    /// YIN over the most recent DET_WINDOW samples of `ring_l`. Returns f0 in
-    /// Hz, or 0.0 when silent / unvoiced.
+    /// YIN over the most recent DET_WINDOW samples of `ring_l`, decimated by
+    /// DECIM (boxcar-averaged, which also anti-aliases). Returns f0 in Hz, or
+    /// 0.0 when silent / unvoiced.
     fn detect_f0(&self) -> f32 {
-        // Gather window oldest→newest into a contiguous scratch buffer.
-        let mut w = [0.0f32; DET_WINDOW];
+        // Gather oldest→newest, averaging DECIM samples per decimated slot.
+        let mut w = [0.0f32; DET_LEN];
         let start = (self.write_pos + RING - DET_WINDOW) & RING_MASK;
         let mut energy = 0.0f32;
+        let inv = 1.0 / DECIM as f32;
         for (k, slot) in w.iter_mut().enumerate() {
-            let s = self.ring_l[(start + k) & RING_MASK];
+            let base = start + k * DECIM;
+            let mut acc = 0.0f32;
+            for d in 0..DECIM {
+                acc += self.ring_l[(base + d) & RING_MASK];
+            }
+            let s = acc * inv;
             *slot = s;
             energy += s * s;
         }
-        if (energy / DET_WINDOW as f32).sqrt() < SILENCE_RMS {
+        if (energy / DET_LEN as f32).sqrt() < SILENCE_RMS {
             return 0.0;
         }
 
-        let tau_max = self.tau_max.min(DET_WINDOW - 2);
+        let tau_max = self.tau_max.min(DET_LEN - 2);
         let mut cmnd = vec![1.0f32; tau_max + 1];
         let mut running = 0.0f32;
         for tau in 1..=tau_max {
-            let len = DET_WINDOW - tau;
+            let len = DET_LEN - tau;
             let mut d = 0.0f32;
             for j in 0..len {
                 let diff = w[j] - w[j + tau];
@@ -497,7 +514,8 @@ impl Pitch {
         };
 
         if tau_f > 0.0 {
-            self.sample_rate / tau_f
+            // tau_f is in decimated samples → back to Hz at the full rate.
+            self.sample_rate / (DECIM as f32 * tau_f)
         } else {
             0.0
         }
@@ -602,6 +620,20 @@ mod tests {
         p.process_mono(&mut buf);
         let f0 = p.detected_hz();
         assert!((f0 - 220.0).abs() / 220.0 < 0.05, "expected ~220 Hz, got {f0}");
+    }
+
+    #[test]
+    fn decimated_detection_stays_accurate() {
+        // Guard the decimated YIN across the vocal range — parabolic interp must
+        // keep sub-sample accuracy despite the 4× coarser lag grid.
+        for f in [98.0f32, 147.0, 220.0, 330.0, 440.0] {
+            let mut p = Pitch::new(48000.0);
+            p.set_params(9, 2, 50.0, 0.0, 0.0); // chromatic, amount 0
+            let mut buf = sine(f, 48000.0, 12000);
+            p.process_mono(&mut buf);
+            let f0 = p.detected_hz();
+            assert!((f0 - f).abs() / f < 0.04, "f={f} detected={f0}");
+        }
     }
 
     #[test]
