@@ -48,15 +48,36 @@ const PITCH_LATENCY: u32 = 512; // GRAIN / 2
 /// Samples of recent history fed to YIN. Must exceed the longest period
 /// (≈ sr / MIN_HZ) by a comfortable margin.
 const DET_WINDOW: usize = 2048;
+/// YIN runs on a boxcar-decimated copy of the window — the difference function
+/// is O(len · lag-range), so decimating by 4 cuts detection cost ~16×. That
+/// headroom is what lets several channels run Pitch at once without the audio
+/// thread overrunning its deadline (the multi-track glitch). Parabolic
+/// interpolation recovers sub-sample period resolution, so f0 accuracy holds.
+const DECIM: usize = 4;
+/// Decimated window length actually fed to the difference function.
+const DET_LEN: usize = DET_WINDOW / DECIM;
 /// How often (in samples) detection re-runs. ~8 ms at 48k.
 const DET_HOP: usize = 384;
 /// Aperiodicity threshold — below this τ counts as a confident period.
 const YIN_THRESH: f32 = 0.15;
 /// If even the best τ is this aperiodic, treat the frame as unvoiced.
 const VOICED_LIMIT: f32 = 0.45;
+/// Detection hops a freshly-voiced note must persist before we start
+/// correcting it — attacks/onsets give garbage f0, so we hold off (~32 ms).
+const ONSET_HOLD: u32 = 4;
+/// Hops a *new* snapped note must be seen consecutively before we re-aim at it.
+/// Keeps the corrector locked to the held note across a transient mis-detection
+/// instead of lurching note-to-note at boundaries (~16 ms).
+const NOTE_HOLD: u32 = 2;
 const MIN_HZ: f32 = 70.0;
 const MAX_HZ: f32 = 1000.0;
 const SILENCE_RMS: f32 = 1e-4;
+
+/// Correction magnitude (cents) over which the shifted ("wet") path fully takes
+/// over from the clean delayed dry. Below DRY we pass dry (transparent on pitch
+/// / unvoiced — no shifter artefacts); above FULL we fully correct.
+const WET_DRY_CENTS: f32 = 2.0;
+const WET_FULL_CENTS: f32 = 14.0;
 
 const TWO_PI: f32 = 2.0 * PI;
 
@@ -90,6 +111,42 @@ fn snap_midi(midi: f32, key_root: i32, scale_id: i32) -> f32 {
     best as f32
 }
 
+/// Middle of three values — `med = a+b+c − max − min`. A 3-point median over
+/// successive detection hops rejects a single spurious estimate (a lone
+/// octave/harmonic glitch) without lagging steady pitch.
+fn median3(a: f32, b: f32, c: f32) -> f32 {
+    let mx = a.max(b).max(c);
+    let mn = a.min(b).min(c);
+    a + b + c - mx - mn
+}
+
+/// Fold an octave-error estimate back onto the running pitch. YIN occasionally
+/// latches a sub-/super-harmonic (½× or 2× the true period); when the new
+/// estimate sits within ~6 % of an exact octave of `prev` we read it as that
+/// error and fold it. Genuine melodic intervals (anything but an octave) pass
+/// untouched, so real leaps still track.
+fn octave_snap(f0: f32, prev: f32) -> f32 {
+    if f0 <= 0.0 || prev <= 0.0 {
+        return f0;
+    }
+    if (f0 / (prev * 2.0) - 1.0).abs() < 0.06 {
+        f0 * 0.5
+    } else if (f0 / (prev * 0.5) - 1.0).abs() < 0.06 {
+        f0 * 2.0
+    } else {
+        f0
+    }
+}
+
+/// Wet (shifted) proportion for a correction magnitude in cents — a smoothstep
+/// from fully dry below WET_DRY_CENTS to fully wet above WET_FULL_CENTS, so the
+/// shifter only engages once the note is meaningfully off pitch and stays
+/// transparent when it's already in tune.
+fn wet_mix(cents: f32) -> f32 {
+    let t = ((cents - WET_DRY_CENTS) / (WET_FULL_CENTS - WET_DRY_CENTS)).clamp(0.0, 1.0);
+    t * t * (3.0 - 2.0 * t)
+}
+
 #[wasm_bindgen]
 pub struct Pitch {
     sample_rate: f32,
@@ -105,7 +162,13 @@ pub struct Pitch {
     tau_min: usize,
     tau_max: usize,
     det_counter: usize,
-    detected_f0: f32, // Hz, 0 = unvoiced
+    detected_f0: f32,    // Hz, 0 = unvoiced (the stabilised value the UI plots)
+    f0_hist: [f32; 3],   // recent raw YIN estimates, for median outlier-reject
+    smoothed_f0: f32,    // running stabilised f0 (0 = unvoiced)
+    voiced_run: u32,     // consecutive voiced hops (onset hold-off)
+    held_note: i32,      // committed snap target (MIDI); i32::MIN = none
+    cand_note: i32,      // pending snap target awaiting confirmation
+    cand_run: u32,       // consecutive hops cand_note has been seen
 
     // Ring buffers (L/R share write_pos + sweep so the ratio is identical).
     ring_l: Vec<f32>,
@@ -127,8 +190,10 @@ impl Pitch {
     #[wasm_bindgen(constructor)]
     pub fn new(sample_rate: f32) -> Self {
         let sr = if sample_rate > 0.0 { sample_rate } else { 48000.0 };
-        let tau_min = (sr / MAX_HZ).floor().max(2.0) as usize;
-        let tau_max = ((sr / MIN_HZ).ceil() as usize).min(DET_WINDOW - 1);
+        // Lag bounds in *decimated* samples (YIN runs at sr / DECIM).
+        let dsr = sr / DECIM as f32;
+        let tau_min = (dsr / MAX_HZ).floor().max(2.0) as usize;
+        let tau_max = ((dsr / MIN_HZ).ceil() as usize).min(DET_LEN - 2);
         let mut p = Self {
             sample_rate: sr,
             bypassed: false,
@@ -140,6 +205,12 @@ impl Pitch {
             tau_max,
             det_counter: 0,
             detected_f0: 0.0,
+            f0_hist: [0.0; 3],
+            smoothed_f0: 0.0,
+            voiced_run: 0,
+            held_note: i32::MIN,
+            cand_note: i32::MIN,
+            cand_run: 0,
             ring_l: vec![0.0; RING],
             ring_r: vec![0.0; RING],
             write_pos: 0,
@@ -180,6 +251,12 @@ impl Pitch {
         self.target_cents = 0.0;
         self.drift_cents = 0.0;
         self.detected_f0 = 0.0;
+        self.f0_hist = [0.0; 3];
+        self.smoothed_f0 = 0.0;
+        self.voiced_run = 0;
+        self.held_note = i32::MIN;
+        self.cand_note = i32::MIN;
+        self.cand_run = 0;
         self.det_counter = 0;
     }
 
@@ -254,7 +331,10 @@ impl Pitch {
             self.glide_coeff * self.applied_cents + (1.0 - self.glide_coeff) * self.target_cents;
         let ratio = (self.applied_cents / 1200.0).exp2();
 
-        // Advance the shared sweep; wrap into [0, GRAIN).
+        // Advance the shared sweep; wrap into [0, GRAIN). A fixed grain keeps
+        // both tap lags continuous — resizing it per hop made the read jump and
+        // clicked, so the grain stays constant and the wrap is masked by the
+        // two-tap crossfade (Hann taps half a grain apart, wa+wb ≡ 1).
         self.sweep += 1.0 - ratio;
         if self.sweep >= GRAIN {
             self.sweep -= GRAIN;
@@ -266,10 +346,18 @@ impl Pitch {
         let wa = 0.5 - 0.5 * (TWO_PI * da / GRAIN).cos();
         let wb = 0.5 - 0.5 * (TWO_PI * db / GRAIN).cos();
 
-        let out_l = wa * read(&self.ring_l, self.write_pos, da)
+        let sh_l = wa * read(&self.ring_l, self.write_pos, da)
             + wb * read(&self.ring_l, self.write_pos, db);
-        let out_r = wa * read(&self.ring_r, self.write_pos, da)
+        let sh_r = wa * read(&self.ring_r, self.write_pos, da)
             + wb * read(&self.ring_r, self.write_pos, db);
+
+        // Blend toward the shifted signal only as far as we're actually
+        // correcting; otherwise pass the clean dry, delayed by the same group
+        // delay (HALF_GRAIN) so the crossfade stays phase-aligned and click-free.
+        let wet = wet_mix(self.applied_cents.abs());
+        let dry = 1.0 - wet;
+        let out_l = dry * read(&self.ring_l, self.write_pos, HALF_GRAIN) + wet * sh_l;
+        let out_r = dry * read(&self.ring_r, self.write_pos, HALF_GRAIN) + wet * sh_r;
 
         self.write_pos = (self.write_pos + 1) & RING_MASK;
         (out_l, out_r)
@@ -277,7 +365,27 @@ impl Pitch {
 
     /// Re-detect f0 over the recent window and recompute the target cents.
     fn update_pitch(&mut self) {
-        let f0 = self.detect_f0();
+        // Raw per-hop YIN estimate → robustness chain: a 3-point median drops a
+        // single spurious hop, an octave guard folds half/double-period latches
+        // back onto the running pitch, and a light one-pole smooths the rest.
+        // This kills the brief octave-glitch spikes without lagging real notes.
+        let raw = self.detect_f0();
+        self.f0_hist[2] = self.f0_hist[1];
+        self.f0_hist[1] = self.f0_hist[0];
+        self.f0_hist[0] = raw;
+        let mut f0 = median3(self.f0_hist[0], self.f0_hist[1], self.f0_hist[2]);
+
+        if f0 > 0.0 {
+            f0 = octave_snap(f0, self.smoothed_f0);
+            self.smoothed_f0 = if self.smoothed_f0 > 0.0 {
+                0.6 * self.smoothed_f0 + 0.4 * f0
+            } else {
+                f0
+            };
+        } else {
+            self.smoothed_f0 = 0.0;
+        }
+        let f0 = self.smoothed_f0;
         self.detected_f0 = f0;
 
         // Slow random wander for humanize (updated once per hop).
@@ -286,38 +394,74 @@ impl Pitch {
         self.drift_cents += 0.12 * (want - self.drift_cents);
 
         if f0 > 0.0 {
+            self.voiced_run += 1;
             let midi = 69.0 + 12.0 * (f0 / 440.0).log2();
-            let snapped = snap_midi(midi, self.key_root, self.scale_id);
-            let err_cents = (snapped - midi) * 100.0;
-            // humanize also relaxes how hard we pull to pitch.
-            let strength = (self.amount / 100.0) * (1.0 - 0.4 * (self.humanize / 100.0));
-            self.target_cents = err_cents * strength + self.drift_cents;
+            let snapped = snap_midi(midi, self.key_root, self.scale_id) as i32;
+
+            // Note hysteresis: a new snapped note must hold for NOTE_HOLD hops
+            // before we re-aim at it, so a transient mis-detection (or the brief
+            // glide between two notes) doesn't make the corrector lurch.
+            if snapped == self.cand_note {
+                self.cand_run += 1;
+            } else {
+                self.cand_note = snapped;
+                self.cand_run = 1;
+            }
+            if self.held_note == i32::MIN {
+                self.held_note = snapped; // first lock of the phrase
+            } else if snapped != self.held_note && self.cand_run >= NOTE_HOLD {
+                self.held_note = snapped;
+            }
+
+            if self.voiced_run < ONSET_HOLD {
+                // Attack/onset: f0 is unreliable — relax to no correction so the
+                // phrase start doesn't "whoop".
+                self.target_cents = self.drift_cents;
+            } else {
+                // Pull the continuous detected pitch toward the *held* note.
+                let err_cents = (self.held_note as f32 - midi) * 100.0;
+                // humanize also relaxes how hard we pull to pitch.
+                let strength = (self.amount / 100.0) * (1.0 - 0.4 * (self.humanize / 100.0));
+                self.target_cents = err_cents * strength + self.drift_cents;
+            }
         } else {
+            // Unvoiced/silence: reset so the next phrase re-locks fresh.
+            self.voiced_run = 0;
+            self.cand_run = 0;
+            self.held_note = i32::MIN;
+            self.cand_note = i32::MIN;
             self.target_cents = 0.0;
         }
     }
 
-    /// YIN over the most recent DET_WINDOW samples of `ring_l`. Returns f0 in
-    /// Hz, or 0.0 when silent / unvoiced.
+    /// YIN over the most recent DET_WINDOW samples of `ring_l`, decimated by
+    /// DECIM (boxcar-averaged, which also anti-aliases). Returns f0 in Hz, or
+    /// 0.0 when silent / unvoiced.
     fn detect_f0(&self) -> f32 {
-        // Gather window oldest→newest into a contiguous scratch buffer.
-        let mut w = [0.0f32; DET_WINDOW];
+        // Gather oldest→newest, averaging DECIM samples per decimated slot.
+        let mut w = [0.0f32; DET_LEN];
         let start = (self.write_pos + RING - DET_WINDOW) & RING_MASK;
         let mut energy = 0.0f32;
+        let inv = 1.0 / DECIM as f32;
         for (k, slot) in w.iter_mut().enumerate() {
-            let s = self.ring_l[(start + k) & RING_MASK];
+            let base = start + k * DECIM;
+            let mut acc = 0.0f32;
+            for d in 0..DECIM {
+                acc += self.ring_l[(base + d) & RING_MASK];
+            }
+            let s = acc * inv;
             *slot = s;
             energy += s * s;
         }
-        if (energy / DET_WINDOW as f32).sqrt() < SILENCE_RMS {
+        if (energy / DET_LEN as f32).sqrt() < SILENCE_RMS {
             return 0.0;
         }
 
-        let tau_max = self.tau_max.min(DET_WINDOW - 2);
+        let tau_max = self.tau_max.min(DET_LEN - 2);
         let mut cmnd = vec![1.0f32; tau_max + 1];
         let mut running = 0.0f32;
         for tau in 1..=tau_max {
-            let len = DET_WINDOW - tau;
+            let len = DET_LEN - tau;
             let mut d = 0.0f32;
             for j in 0..len {
                 let diff = w[j] - w[j + tau];
@@ -370,7 +514,8 @@ impl Pitch {
         };
 
         if tau_f > 0.0 {
-            self.sample_rate / tau_f
+            // tau_f is in decimated samples → back to Hz at the full rate.
+            self.sample_rate / (DECIM as f32 * tau_f)
         } else {
             0.0
         }
@@ -478,6 +623,20 @@ mod tests {
     }
 
     #[test]
+    fn decimated_detection_stays_accurate() {
+        // Guard the decimated YIN across the vocal range — parabolic interp must
+        // keep sub-sample accuracy despite the 4× coarser lag grid.
+        for f in [98.0f32, 147.0, 220.0, 330.0, 440.0] {
+            let mut p = Pitch::new(48000.0);
+            p.set_params(9, 2, 50.0, 0.0, 0.0); // chromatic, amount 0
+            let mut buf = sine(f, 48000.0, 12000);
+            p.process_mono(&mut buf);
+            let f0 = p.detected_hz();
+            assert!((f0 - f).abs() / f < 0.04, "f={f} detected={f0}");
+        }
+    }
+
+    #[test]
     fn corrects_sharp_note_downward() {
         // 226 Hz is ~A4 (+47 cents). In A-minor (root 9), A is in scale, so
         // full correction should pull the pitch DOWN toward 220 Hz.
@@ -514,5 +673,69 @@ mod tests {
         for x in &buf {
             assert!(x.is_finite() && x.abs() < 4.0, "output went unstable: {x}");
         }
+    }
+
+    #[test]
+    fn median3_rejects_a_single_spike() {
+        assert_eq!(median3(1.0, 3.0, 2.0), 2.0);
+        assert_eq!(median3(220.0, 9000.0, 219.0), 220.0); // octave/harmonic spike
+        assert_eq!(median3(0.0, 0.0, 440.0), 0.0); // lone voiced amid unvoiced
+        assert_eq!(median3(221.0, 220.0, 219.0), 220.0);
+    }
+
+    #[test]
+    fn octave_snap_folds_errors_but_keeps_intervals() {
+        assert!((octave_snap(440.0, 220.0) - 220.0).abs() < 1.0); // octave-high latch ↓
+        assert!((octave_snap(110.0, 220.0) - 220.0).abs() < 1.0); // octave-low latch ↑
+        assert!((octave_snap(330.0, 220.0) - 330.0).abs() < 1.0); // real fifth — untouched
+        assert_eq!(octave_snap(440.0, 0.0), 440.0); // no history ⇒ passthrough
+    }
+
+    /// Realistic singing: a 220 Hz tone with 5 Hz, ±35-cent vibrato so f0
+    /// wanders continuously (the case that exposes click sources).
+    fn vibrato(sr: f32, n: usize) -> Vec<f32> {
+        (0..n)
+            .map(|i| {
+                let t = i as f32 / sr;
+                let cents = 35.0 * (2.0 * PI * 5.0 * t).sin();
+                let f = 220.0 * (cents / 1200.0).exp2();
+                // integrate frequency for phase continuity
+                0.6 * (2.0 * PI * f * t).sin()
+            })
+            .collect()
+    }
+
+    #[test]
+    fn no_click_discontinuities_on_wandering_pitch() {
+        // Correcting a continuously-wandering voice must not introduce sample
+        // jumps far beyond the signal's own slope. (Resizing the grain per hop
+        // regressed this to ~33× with dozens of audible clicks; this guards it.)
+        let sr = 48000.0;
+        let input = vibrato(sr, 48000);
+        let mut buf = input.clone();
+        let mut p = Pitch::new(sr);
+        p.set_params(9, 1, 60.0, 100.0, 0.0); // A-minor, full correct
+        p.process_mono(&mut buf);
+        let max_d = |b: &[f32]| {
+            b[8192..].windows(2).map(|w| (w[1] - w[0]).abs()).fold(0.0f32, f32::max)
+        };
+        let in_jump = max_d(&input);
+        let out_jump = max_d(&buf);
+        let big = buf[8192..]
+            .windows(2)
+            .filter(|w| (w[1] - w[0]).abs() > 5.0 * in_jump)
+            .count();
+        assert!(
+            out_jump < 2.0 * in_jump && big == 0,
+            "shifter introduced discontinuities: in={in_jump:.5} out={out_jump:.5} big={big}"
+        );
+    }
+
+    #[test]
+    fn wet_mix_ramps_dry_to_wet() {
+        assert_eq!(wet_mix(0.0), 0.0); // on pitch ⇒ pass dry
+        assert_eq!(wet_mix(WET_FULL_CENTS + 10.0), 1.0); // well off ⇒ full shift
+        let mid = wet_mix((WET_DRY_CENTS + WET_FULL_CENTS) * 0.5);
+        assert!(mid > 0.2 && mid < 0.8, "midpoint should be partial: {mid}");
     }
 }
