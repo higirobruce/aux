@@ -387,8 +387,7 @@ const PITCH_KEY_ROOT: Record<string, number> = {
 };
 const PITCH_SCALE_ID: Record<string, number> = { Major: 0, Minor: 1, Chromatic: 2, Pentatonic: 3 };
 
-/** Push the pitch params (key/scale/speed/amount/humanize) to the engine.
- *  `formant` is intentionally not sent — no DSP for it yet. */
+/** Push the pitch params (key/scale/speed/amount/humanize/formant) to the engine. */
 function applyPitchParamsToHost(host: AudioHost, stemId: string, p: ChannelState['pitch']): void {
   host.setChannelPitch(
     stemId,
@@ -396,7 +395,8 @@ function applyPitchParamsToHost(host: AudioHost, stemId: string, p: ChannelState
     PITCH_SCALE_ID[p.scale] ?? 1,
     p.speed,
     p.amount,
-    p.human
+    p.human,
+    p.formant
   );
 }
 
@@ -1178,14 +1178,13 @@ export function MixerShell({
     });
   }, []);
 
-  // Pitch is a placeholder (no DSP) — these only update + persist UI state.
+  // Pitch params (incl. formant) drive the real engine.
   const setPitch = useCallback(
     (stemId: string, field: 'speed' | 'amount' | 'human' | 'formant', value: number) => {
       setChannelState((prev) => {
         const current = prev[stemId] ?? DEFAULT_CHANNEL;
         const pitch = { ...current.pitch, [field]: value };
-        // formant has no DSP yet — only re-push when an engine-bound param moved.
-        if (field !== 'formant' && hostRef.current) {
+        if (hostRef.current) {
           applyPitchParamsToHost(hostRef.current, stemId, pitch);
         }
         return { ...prev, [stemId]: { ...current, pitch } };

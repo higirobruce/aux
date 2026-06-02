@@ -526,19 +526,22 @@
         </p>
       </div>
       <div>
-        <h3 style="margin-top: 0;">Option B — Pitch shifter polish</h3>
+        <h3 style="margin-top: 0;">Option B — Comb-free shifter + real formants</h3>
         <p>
-          The real-f0 graph (PR #15) and the quality pass (PR #16) are both
-          merged: detection hardening, dry/wet blend, onset hold-off + note
-          hysteresis, and a decimated YIN that lets several tracks run Pitch at
-          once. What's left is the shifter <em>core</em>: the fixed two-tap
-          overlap-add still colours a sustained corrected note (inherent to the
-          method) — a comb-free shifter (true PSOLA with pitch marks) and a real
-          formant stage are the remaining, larger DSP tasks.
+          The shifter core is rewritten: the fixed two-tap overlap-add (which
+          comb-coloured a sustained corrected note) is replaced by
+          <strong>period-synchronous overlap-add</strong> — 2-period Hann grains
+          laid at marks spaced by the corrected period, with a drifting analysis
+          pointer selecting successive epochs. Period-aligned grains overlap-add
+          coherently, so corrected notes are clean. The <strong>FORMANT</strong>
+          knob is now real: resampling each grain shifts the spectral envelope
+          ±4 semitones independent of pitch (it was persisted-but-inert before).
+          Constant latency keeps PDC exact; click + clean-shift + formant metrics
+          guard it.
         </p>
         <p class="caption">
-          <strong>Status:</strong> PR #15 + PR #16 merged; comb-free shifter +
-          formants deferred.
+          <strong>Status:</strong> in review (PR). Closes the last v0.3 pitch
+          follow-up.
         </p>
       </div>
       <div>

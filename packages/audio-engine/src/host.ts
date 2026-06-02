@@ -359,9 +359,9 @@ export interface Loudness {
 }
 
 /** Constant group delay (samples) the Pitch insert imposes while engaged.
- *  Must match `Pitch::latency_samples()` in `@aux/dsp-pitch` (GRAIN/2 = 512).
- *  Used for plugin-delay-compensation across channels. */
-const PITCH_LATENCY_SAMPLES = 512;
+ *  Must match `Pitch::latency_samples()` in `@aux/dsp-pitch` (PSOLA synthesis:
+ *  ANALYSIS_LAG + SYN_AHEAD = 1664). Used for plugin-delay-compensation. */
+const PITCH_LATENCY_SAMPLES = 1664;
 
 /** Half the master-dip duration (s) used to mask the audible delay step when a
  *  PDC change lands during playback (engaging/disengaging Pitch). */
@@ -1142,11 +1142,20 @@ export class AudioHost {
     scaleId: number,
     speed: number,
     amount: number,
-    humanize: number
+    humanize: number,
+    formant: number
   ): void {
     const pitch = this.channels.get(stemId)?.pitch;
     if (!pitch) return;
-    pitch.port.postMessage({ type: 'set-params', keyRoot, scaleId, speed, amount, humanize });
+    pitch.port.postMessage({
+      type: 'set-params',
+      keyRoot,
+      scaleId,
+      speed,
+      amount,
+      humanize,
+      formant,
+    });
   }
 
   /** Engaging/bypassing Pitch changes the channel's latency, so this also

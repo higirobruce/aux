@@ -20,9 +20,11 @@ export class Pitch {
     reset(): void;
     set_bypassed(bypassed: boolean): void;
     /**
-     * key_root 0..11, scale_id 0..3, speed/amount/humanize 0..100.
+     * key_root 0..11, scale_id 0..3, speed/amount/humanize 0..100,
+     * formant −100..100 (0 = preserve; ± shifts the spectral envelope by up to
+     * FORMANT_SEMITONES, independent of pitch).
      */
-    set_params(key_root: number, scale_id: number, speed: number, amount: number, humanize: number): void;
+    set_params(key_root: number, scale_id: number, speed: number, amount: number, humanize: number, formant: number): void;
 }
 
 export type InitInput = RequestInfo | URL | Response | BufferSource | WebAssembly.Module;
@@ -37,7 +39,7 @@ export interface InitOutput {
     readonly pitch_process_stereo: (a: number, b: number, c: number, d: number, e: number, f: number, g: number) => void;
     readonly pitch_reset: (a: number) => void;
     readonly pitch_set_bypassed: (a: number, b: number) => void;
-    readonly pitch_set_params: (a: number, b: number, c: number, d: number, e: number, f: number) => void;
+    readonly pitch_set_params: (a: number, b: number, c: number, d: number, e: number, f: number, g: number) => void;
     readonly __wbindgen_export: (a: number, b: number) => number;
 }
 

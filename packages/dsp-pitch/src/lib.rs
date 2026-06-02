@@ -12,22 +12,24 @@
 //! 2. **Correction + shift** — f0 → MIDI → nearest in-scale note → a pitch
 //!    ratio. `amount` scales how far toward the target (in cents); `speed`
 //!    sets the glide time; `humanize` relaxes the strength and adds a slow
-//!    random drift so it isn't robotic. The ratio drives a classic two-tap
-//!    cross-fading delay-line pitch shifter (Hann-windowed grains, half a
-//!    grain apart → constant-power overlap). Duration is preserved.
+//!    random drift so it isn't robotic. The ratio drives **period-synchronous
+//!    overlap-add**: 2-period Hann grains of recent input are laid at marks
+//!    spaced by the *corrected* period. Period-aligned grains overlap-add
+//!    coherently (no comb), each grain keeps the original waveform so formants
+//!    are preserved, and resampling each grain by `formant` shifts the spectral
+//!    envelope independently of pitch. Duration is preserved.
 //!
-//! Latency: the shifter reads from a window of recent history, so its group
-//! delay is a constant `GRAIN/2` samples **when engaged**, and exactly zero
-//! when bypassed (straight passthrough). The host uses `latency_samples()`
-//! for plugin-delay-compensation across the mixer.
+//! Latency: synthesis reads from a fixed look-back so its group delay is a
+//! constant `PITCH_LATENCY` samples **when engaged**, and exactly zero when
+//! bypassed (straight passthrough). The host uses `latency_samples()` for
+//! plugin-delay-compensation across the mixer.
 //!
-//! Monophonic by design (vocals/leads). Detection runs on L; the same ratio
-//! is applied to L and R independently, preserving stereo width. `formant`
-//! is accepted by the UI but not yet processed (no-op this version).
+//! Monophonic by design (vocals/leads). Detection runs on L; the same period
+//! marks drive L and R, preserving stereo width.
 //!
 //! ABI (wasm-bindgen):
 //!   new(sample_rate)
-//!   set_params(key_root, scale_id, speed, amount, humanize)
+//!   set_params(key_root, scale_id, speed, amount, humanize, formant)
 //!   set_bypassed(bool)
 //!   process_stereo(&mut [f32], &mut [f32])
 //!   process_mono(&mut [f32])
@@ -40,10 +42,29 @@ use wasm_bindgen::prelude::*;
 
 const RING: usize = 4096;
 const RING_MASK: usize = RING - 1;
-/// Grain length for the two-tap shifter. Reported latency is GRAIN/2.
-const GRAIN: f32 = 1024.0;
-const HALF_GRAIN: f32 = GRAIN * 0.5;
-const PITCH_LATENCY: u32 = 512; // GRAIN / 2
+
+// ── Period-synchronous overlap-add synthesis ──────────────────────────────
+// Output OLA accumulator ring (power of two; must exceed SYN_LATENCY + GMAX).
+const OUT_RING: usize = 4096;
+const OUT_MASK: usize = OUT_RING - 1;
+/// Grain length bounds (samples). A grain spans ~2 detected periods; capped so
+/// latency stays bounded for very low notes (a sub-100 Hz note just gets a
+/// slightly-under-2-period grain).
+const GMIN: usize = 128;
+const GMAX: usize = 1024;
+/// Output placement: grain centres sit this far ahead of the read head, so a
+/// freshly-laid grain writes strictly ahead of where we're reading.
+const SYN_AHEAD: usize = 640;
+/// Nominal analysis-centre lag (samples behind newest input). The analysis
+/// pointer drifts ±period/2 around this to pick successive epochs, so this must
+/// leave room for a formant-expanded half-grain read to stay causal.
+const ANALYSIS_LAG: f32 = 1024.0;
+/// Constant synthesis latency = ANALYSIS_LAG + SYN_AHEAD. Reported by
+/// `latency_samples()`; the host's PDC constant matches.
+const PITCH_LATENCY: u32 = 1664;
+/// Max formant shift the knob maps to, in semitones (±). Kept modest so the
+/// formant-expanded grain read stays within the analysis-lag headroom.
+const FORMANT_SEMITONES: f32 = 4.0;
 
 /// Samples of recent history fed to YIN. Must exceed the longest period
 /// (≈ sr / MIN_HZ) by a comfortable margin.
@@ -157,6 +178,8 @@ pub struct Pitch {
     scale_id: i32,  // 0..3
     amount: f32,    // 0..100
     humanize: f32,  // 0..100
+    formant: f32,   // -100..100 (0 = preserve)
+    formant_factor: f32, // derived spectral-envelope scale (2^(semitones/12))
 
     // Detection.
     tau_min: usize,
@@ -170,11 +193,20 @@ pub struct Pitch {
     cand_note: i32,      // pending snap target awaiting confirmation
     cand_run: u32,       // consecutive hops cand_note has been seen
 
-    // Ring buffers (L/R share write_pos + sweep so the ratio is identical).
+    // Input ring buffers.
     ring_l: Vec<f32>,
     ring_r: Vec<f32>,
     write_pos: usize,
-    sweep: f32, // ∈ [0, GRAIN)
+
+    // Period-synchronous OLA synthesis. Grains (2-period Hann windows of recent
+    // input) are laid into the output accumulator at marks spaced by the
+    // *corrected* period; out_w holds the running window-sum for flat gain.
+    out_l: Vec<f32>,
+    out_r: Vec<f32>,
+    out_w: Vec<f32>,
+    out_pos: usize,
+    syn_phase: f32, // samples until the next grain mark
+    a_lag: f32,     // analysis-centre lag behind newest input (drifts to shift pitch)
 
     // Correction state, all in cents.
     applied_cents: f32,
@@ -201,6 +233,8 @@ impl Pitch {
             scale_id: 1, // Minor
             amount: 100.0,
             humanize: 20.0,
+            formant: 0.0,
+            formant_factor: 1.0,
             tau_min,
             tau_max,
             det_counter: 0,
@@ -214,7 +248,12 @@ impl Pitch {
             ring_l: vec![0.0; RING],
             ring_r: vec![0.0; RING],
             write_pos: 0,
-            sweep: 0.0,
+            out_l: vec![0.0; OUT_RING],
+            out_r: vec![0.0; OUT_RING],
+            out_w: vec![0.0; OUT_RING],
+            out_pos: 0,
+            syn_phase: 0.0,
+            a_lag: ANALYSIS_LAG,
             applied_cents: 0.0,
             target_cents: 0.0,
             glide_coeff: 0.0,
@@ -225,12 +264,24 @@ impl Pitch {
         p
     }
 
-    /// key_root 0..11, scale_id 0..3, speed/amount/humanize 0..100.
-    pub fn set_params(&mut self, key_root: i32, scale_id: i32, speed: f32, amount: f32, humanize: f32) {
+    /// key_root 0..11, scale_id 0..3, speed/amount/humanize 0..100,
+    /// formant −100..100 (0 = preserve; ± shifts the spectral envelope by up to
+    /// FORMANT_SEMITONES, independent of pitch).
+    pub fn set_params(
+        &mut self,
+        key_root: i32,
+        scale_id: i32,
+        speed: f32,
+        amount: f32,
+        humanize: f32,
+        formant: f32,
+    ) {
         self.key_root = ((key_root % 12) + 12) % 12;
         self.scale_id = scale_id.clamp(0, 3);
         self.amount = amount.clamp(0.0, 100.0);
         self.humanize = humanize.clamp(0.0, 100.0);
+        self.formant = formant.clamp(-100.0, 100.0);
+        self.formant_factor = ((self.formant / 100.0) * FORMANT_SEMITONES / 12.0).exp2();
         self.recompute_glide(speed.clamp(0.0, 100.0));
     }
 
@@ -246,7 +297,18 @@ impl Pitch {
             *v = 0.0;
         }
         self.write_pos = 0;
-        self.sweep = 0.0;
+        for v in self.out_l.iter_mut() {
+            *v = 0.0;
+        }
+        for v in self.out_r.iter_mut() {
+            *v = 0.0;
+        }
+        for v in self.out_w.iter_mut() {
+            *v = 0.0;
+        }
+        self.out_pos = 0;
+        self.syn_phase = 0.0;
+        self.a_lag = ANALYSIS_LAG;
         self.applied_cents = 0.0;
         self.target_cents = 0.0;
         self.drift_cents = 0.0;
@@ -331,35 +393,76 @@ impl Pitch {
             self.glide_coeff * self.applied_cents + (1.0 - self.glide_coeff) * self.target_cents;
         let ratio = (self.applied_cents / 1200.0).exp2();
 
-        // Advance the shared sweep; wrap into [0, GRAIN). A fixed grain keeps
-        // both tap lags continuous — resizing it per hop made the read jump and
-        // clicked, so the grain stays constant and the wrap is masked by the
-        // two-tap crossfade (Hann taps half a grain apart, wa+wb ≡ 1).
-        self.sweep += 1.0 - ratio;
-        if self.sweep >= GRAIN {
-            self.sweep -= GRAIN;
-        } else if self.sweep < 0.0 {
-            self.sweep += GRAIN;
+        // ── Period-synchronous overlap-add ──────────────────────────────
+        // Emit the normalised accumulator sample at the read head, then clear
+        // it (grains were laid SYN_LATENCY ahead, so this slot is complete).
+        let oi = self.out_pos & OUT_MASK;
+        let wsum = self.out_w[oi];
+        let (sh_l, sh_r) = if wsum > 1e-6 {
+            (self.out_l[oi] / wsum, self.out_r[oi] / wsum)
+        } else {
+            (0.0, 0.0)
+        };
+        self.out_l[oi] = 0.0;
+        self.out_r[oi] = 0.0;
+        self.out_w[oi] = 0.0;
+
+        // Lay a 2-period Hann grain whenever the synthesis mark arrives. Marks
+        // are spaced by the *corrected* period (period / ratio): closer ⇒
+        // higher pitch, while each grain still carries the original waveform, so
+        // formants are preserved (period-aligned grains overlap-add coherently —
+        // no comb). The newest grain sample anchors to the newest input, so the
+        // read lag is always ≥ 0 (causal) for any formant factor.
+        let period = if self.smoothed_f0 > 0.0 {
+            self.sample_rate / self.smoothed_f0
+        } else {
+            256.0
+        };
+        let g = (2.0 * period).round().clamp(GMIN as f32, GMAX as f32) as usize;
+        let g2 = g / 2;
+        self.syn_phase -= 1.0;
+        while self.syn_phase <= 0.0 {
+            let ff = self.formant_factor;
+            let gf = g as f32;
+            for j in 0..g {
+                let w = 0.5 - 0.5 * (TWO_PI * j as f32 / gf).cos();
+                // Read the grain centred at the analysis lag; formant resampling
+                // (`ff`) scales the spectral envelope independent of pitch.
+                let off = j as f32 - g2 as f32;
+                let lag = self.a_lag - off * ff;
+                // Place centred SYN_AHEAD beyond the read head (always unread).
+                let oidx = (self.out_pos + SYN_AHEAD + j - g2) & OUT_MASK;
+                self.out_l[oidx] += w * read(&self.ring_l, self.write_pos, lag);
+                self.out_r[oidx] += w * read(&self.ring_r, self.write_pos, lag);
+                self.out_w[oidx] += w;
+            }
+            // Synthesis marks advance by the corrected period; the analysis
+            // pointer advances by the input period. Their difference drifts
+            // `a_lag` (selecting successive epochs → the pitch shift); wrap it by
+            // whole periods to stay near ANALYSIS_LAG (bounded, phase-continuous).
+            let po = (period / ratio).max(1.0);
+            self.a_lag += po - period;
+            while self.a_lag > ANALYSIS_LAG + period * 0.5 {
+                self.a_lag -= period;
+            }
+            while self.a_lag < ANALYSIS_LAG - period * 0.5 {
+                self.a_lag += period;
+            }
+            self.syn_phase += po;
         }
-        let da = self.sweep;
-        let db = if da + HALF_GRAIN >= GRAIN { da - HALF_GRAIN } else { da + HALF_GRAIN };
-        let wa = 0.5 - 0.5 * (TWO_PI * da / GRAIN).cos();
-        let wb = 0.5 - 0.5 * (TWO_PI * db / GRAIN).cos();
 
-        let sh_l = wa * read(&self.ring_l, self.write_pos, da)
-            + wb * read(&self.ring_l, self.write_pos, db);
-        let sh_r = wa * read(&self.ring_r, self.write_pos, da)
-            + wb * read(&self.ring_r, self.write_pos, db);
-
-        // Blend toward the shifted signal only as far as we're actually
-        // correcting; otherwise pass the clean dry, delayed by the same group
-        // delay (HALF_GRAIN) so the crossfade stays phase-aligned and click-free.
-        let wet = wet_mix(self.applied_cents.abs());
+        // Blend toward the shifted (wet) path as far as we're correcting — or
+        // fully when FORMANT is engaged (it processes independent of pitch).
+        // Otherwise the clean dry, delayed by the same SYN_LATENCY so the
+        // crossfade stays phase-aligned and click-free.
+        let wet = wet_mix(self.applied_cents.abs()).max(if self.formant != 0.0 { 1.0 } else { 0.0 });
         let dry = 1.0 - wet;
-        let out_l = dry * read(&self.ring_l, self.write_pos, HALF_GRAIN) + wet * sh_l;
-        let out_r = dry * read(&self.ring_r, self.write_pos, HALF_GRAIN) + wet * sh_r;
+        let lat = PITCH_LATENCY as f32;
+        let out_l = dry * read(&self.ring_l, self.write_pos, lat) + wet * sh_l;
+        let out_r = dry * read(&self.ring_r, self.write_pos, lat) + wet * sh_r;
 
         self.write_pos = (self.write_pos + 1) & RING_MASK;
+        self.out_pos += 1;
         (out_l, out_r)
     }
 
@@ -584,7 +687,7 @@ mod tests {
     #[test]
     fn bypass_is_passthrough() {
         let mut p = Pitch::new(48000.0);
-        p.set_params(0, 0, 50.0, 100.0, 0.0);
+        p.set_params(0, 0, 50.0, 100.0, 0.0, 0.0);
         p.set_bypassed(true);
         let original = sine(233.0, 48000.0, 4096);
         let mut buf = original.clone();
@@ -598,7 +701,7 @@ mod tests {
     fn engaged_amount_zero_preserves_energy() {
         // amount 0 ⇒ ratio 1 ⇒ a clean delayed copy; RMS should be preserved.
         let mut p = Pitch::new(48000.0);
-        p.set_params(9, 1, 50.0, 0.0, 0.0);
+        p.set_params(9, 1, 50.0, 0.0, 0.0, 0.0);
         let input = sine(220.0, 48000.0, 16384);
         let mut buf = input.clone();
         p.process_mono(&mut buf);
@@ -615,7 +718,7 @@ mod tests {
     #[test]
     fn detects_220hz() {
         let mut p = Pitch::new(48000.0);
-        p.set_params(9, 1, 50.0, 0.0, 0.0); // amount 0 — just want detection
+        p.set_params(9, 1, 50.0, 0.0, 0.0, 0.0); // amount 0 — just want detection
         let mut buf = sine(220.0, 48000.0, 8192);
         p.process_mono(&mut buf);
         let f0 = p.detected_hz();
@@ -628,7 +731,7 @@ mod tests {
         // keep sub-sample accuracy despite the 4× coarser lag grid.
         for f in [98.0f32, 147.0, 220.0, 330.0, 440.0] {
             let mut p = Pitch::new(48000.0);
-            p.set_params(9, 2, 50.0, 0.0, 0.0); // chromatic, amount 0
+            p.set_params(9, 2, 50.0, 0.0, 0.0, 0.0); // chromatic, amount 0
             let mut buf = sine(f, 48000.0, 12000);
             p.process_mono(&mut buf);
             let f0 = p.detected_hz();
@@ -644,7 +747,7 @@ mod tests {
         let input = sine(226.0, sr, 32768);
         let mut buf = input.clone();
         let mut p = Pitch::new(sr);
-        p.set_params(9, 1, 80.0, 100.0, 0.0);
+        p.set_params(9, 1, 80.0, 100.0, 0.0, 0.0);
         p.process_mono(&mut buf);
         // Compare zero-crossing rate over a settled tail.
         let in_zcr = zcr(&input[8192..], sr);
@@ -655,11 +758,71 @@ mod tests {
         );
     }
 
+    /// Goertzel power at `f` over `buf` (single-bin DFT magnitude²).
+    fn goertzel(buf: &[f32], sr: f32, f: f32) -> f32 {
+        let w = TWO_PI * f / sr;
+        let coeff = 2.0 * w.cos();
+        let (mut s1, mut s2) = (0.0f32, 0.0f32);
+        for &x in buf {
+            let s0 = x + coeff * s1 - s2;
+            s2 = s1;
+            s1 = s0;
+        }
+        s1 * s1 + s2 * s2 - coeff * s1 * s2
+    }
+
+    #[test]
+    fn psola_shift_is_clean_at_corrected_pitch() {
+        // A 225 Hz sine corrects to A=220. A clean shift concentrates energy at
+        // 220, not 225 — a garbled/comb-y output wouldn't.
+        let sr = 48000.0;
+        let mut buf = sine(225.0, sr, 32768);
+        let mut p = Pitch::new(sr);
+        p.set_params(9, 1, 80.0, 100.0, 0.0, 0.0);
+        p.process_mono(&mut buf);
+        let tail = &buf[12000..];
+        let at220 = goertzel(tail, sr, 220.0);
+        let at225 = goertzel(tail, sr, 225.0);
+        assert!(at220 > 6.0 * at225, "expected energy at 220 ≫ 225: {at220} vs {at225}");
+    }
+
+    #[test]
+    fn formant_shifts_timbre_independent_of_pitch() {
+        // amount 0 ⇒ no pitch change; formant up resamples each grain → the
+        // spectral envelope moves up (brighter) while the fundamental (set by
+        // the OLA mark spacing) stays put. Probe a harmonic-rich tone with a
+        // high-frequency ("brightness") measure and the fundamental's pitch.
+        let sr = 48000.0;
+        let f0 = 200.0;
+        let saw: Vec<f32> = (0..32768)
+            .map(|i| {
+                let t = i as f32 / sr;
+                (1..=8).map(|h| (1.0 / h as f32) * (TWO_PI * f0 * h as f32 * t).sin()).sum::<f32>()
+                    * 0.4
+            })
+            .collect();
+        // Brightness = mean squared first-difference (a cheap high-pass).
+        let bright = |b: &[f32]| b.windows(2).map(|w| (w[1] - w[0]).powi(2)).sum::<f32>();
+        let run = |formant: f32| -> (f32, f32) {
+            let mut b = saw.clone();
+            let mut p = Pitch::new(sr);
+            p.set_params(9, 1, 80.0, 0.0, 0.0, formant); // amount 0 → pitch unchanged
+            p.process_mono(&mut b);
+            let tail = &b[12000..];
+            (bright(tail), goertzel(tail, sr, f0))
+        };
+        let (b0, fund0) = run(0.0);
+        let (bup, fundup) = run(100.0);
+        assert!(bup > b0 * 1.15, "formant-up should brighten: up={bup} neutral={b0}");
+        // Fundamental energy still present (pitch preserved, not silenced).
+        assert!(fundup > 0.25 * fund0, "fundamental should survive formant shift");
+    }
+
     #[test]
     fn noise_passes_without_blowing_up() {
         // Unvoiced/noise input shouldn't produce NaNs or runaway gain.
         let mut p = Pitch::new(48000.0);
-        p.set_params(0, 0, 50.0, 100.0, 50.0);
+        p.set_params(0, 0, 50.0, 100.0, 50.0, 0.0);
         let mut rng = 0x1234567u32;
         let mut buf: Vec<f32> = (0..8192)
             .map(|_| {
@@ -714,7 +877,7 @@ mod tests {
         let input = vibrato(sr, 48000);
         let mut buf = input.clone();
         let mut p = Pitch::new(sr);
-        p.set_params(9, 1, 60.0, 100.0, 0.0); // A-minor, full correct
+        p.set_params(9, 1, 60.0, 100.0, 0.0, 0.0); // A-minor, full correct
         p.process_mono(&mut buf);
         let max_d = |b: &[f32]| {
             b[8192..].windows(2).map(|w| (w[1] - w[0]).abs()).fold(0.0f32, f32::max)

@@ -67,15 +67,18 @@ export class Pitch {
         wasm.pitch_set_bypassed(this.__wbg_ptr, bypassed);
     }
     /**
-     * key_root 0..11, scale_id 0..3, speed/amount/humanize 0..100.
+     * key_root 0..11, scale_id 0..3, speed/amount/humanize 0..100,
+     * formant −100..100 (0 = preserve; ± shifts the spectral envelope by up to
+     * FORMANT_SEMITONES, independent of pitch).
      * @param {number} key_root
      * @param {number} scale_id
      * @param {number} speed
      * @param {number} amount
      * @param {number} humanize
+     * @param {number} formant
      */
-    set_params(key_root, scale_id, speed, amount, humanize) {
-        wasm.pitch_set_params(this.__wbg_ptr, key_root, scale_id, speed, amount, humanize);
+    set_params(key_root, scale_id, speed, amount, humanize, formant) {
+        wasm.pitch_set_params(this.__wbg_ptr, key_root, scale_id, speed, amount, humanize, formant);
     }
 }
 if (Symbol.dispose) Pitch.prototype[Symbol.dispose] = Pitch.prototype.free;
