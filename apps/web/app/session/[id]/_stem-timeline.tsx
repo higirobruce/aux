@@ -28,7 +28,16 @@
 import type { Stem } from '@/lib/types';
 import type { StemClip } from '@aux/session-doc';
 import { useEffect, useRef, useState } from 'react';
-import { moveClip, snapTargets, splitClipsAt, trimIn, trimOut } from './_clip-editing';
+import {
+  moveClip,
+  setClipGain,
+  setFadeIn,
+  setFadeOut,
+  snapTargets,
+  splitClipsAt,
+  trimIn,
+  trimOut,
+} from './_clip-editing';
 
 export interface StemPeaks {
   /** Interleaved min/max pairs — length = 2 * bins. */
@@ -249,7 +258,7 @@ interface LaneProps {
   onSelectClip: (clipId: string | null) => void;
 }
 
-type DragMode = 'move' | 'in' | 'out';
+type DragMode = 'move' | 'in' | 'out' | 'fadeIn' | 'fadeOut' | 'gain';
 
 function StemLane({
   stem,
@@ -287,19 +296,37 @@ function StemLane({
     const widthPx = clipsRef.current?.getBoundingClientRect().width || 1;
     onSelectClip(clip.id);
     const startX = e.clientX;
+    const startY = e.clientY;
     const orig = clip;
     let moved = false;
 
     const onMove = (ev: PointerEvent) => {
       const dPx = ev.clientX - startX;
-      if (Math.abs(dPx) > 1) moved = true;
+      if (Math.abs(dPx) > 1 || Math.abs(ev.clientY - startY) > 1) moved = true;
       const dSample = (dPx / widthPx) * timelineSamples;
       const threshold = (6 / widthPx) * timelineSamples; // ~6px snap window
       const targets = snapTargets(clips, orig.id, position * sr);
       let updated: StemClip;
-      if (mode === 'move') updated = moveClip(orig, dSample, targets, threshold);
-      else if (mode === 'in') updated = trimIn(orig, dSample, targets, threshold);
-      else updated = trimOut(orig, dSample, total, targets, threshold);
+      switch (mode) {
+        case 'move':
+          updated = moveClip(orig, dSample, targets, threshold);
+          break;
+        case 'in':
+          updated = trimIn(orig, dSample, targets, threshold);
+          break;
+        case 'out':
+          updated = trimOut(orig, dSample, total, targets, threshold);
+          break;
+        case 'fadeIn':
+          updated = setFadeIn(orig, dSample);
+          break;
+        case 'fadeOut':
+          updated = setFadeOut(orig, -dSample);
+          break;
+        default: // 'gain' — vertical drag, up = louder (~0.1 dB/px)
+          updated = setClipGain(orig, (startY - ev.clientY) * 0.1);
+          break;
+      }
       const next = clips.map((c) => (c.id === orig.id ? updated : c));
       draftRef.current = next;
       setDraft(next);
@@ -406,6 +433,8 @@ function StemLane({
                     ? ((clip.sourceOut - clip.sourceIn) / sr / globalDuration) * 100
                     : 0;
                 const selected = clip.id === selectedClipId;
+                // Gain line vertical position: +12 dB → top, −24 dB → bottom.
+                const gainTopPct = 75 - ((clip.gainDb + 24) / 36) * 70;
                 return (
                   <div
                     key={clip.id}
@@ -413,7 +442,15 @@ function StemLane({
                     style={{ left: `${leftPct}%`, width: `${widthPct}%` }}
                     onPointerDown={(e) => beginDrag(e, 'move', clip)}
                   >
-                    <ClipCanvas peaks={peaks} inSample={clip.sourceIn} outSample={clip.sourceOut} />
+                    <ClipCanvas
+                      peaks={peaks}
+                      inSample={clip.sourceIn}
+                      outSample={clip.sourceOut}
+                      fadeInSamples={clip.fadeInSamples}
+                      fadeOutSamples={clip.fadeOutSamples}
+                      gainDb={clip.gainDb}
+                    />
+                    {/* Trim edges (full height). */}
                     <div
                       className="stem-clip-handle left"
                       onPointerDown={(e) => beginDrag(e, 'in', clip)}
@@ -421,6 +458,52 @@ function StemLane({
                     <div
                       className="stem-clip-handle right"
                       onPointerDown={(e) => beginDrag(e, 'out', clip)}
+                    />
+                    {/* Fade handles — small squares at the top corners. */}
+                    <div
+                      title="Fade in"
+                      onPointerDown={(e) => beginDrag(e, 'fadeIn', clip)}
+                      style={{
+                        position: 'absolute',
+                        left: 2,
+                        top: 2,
+                        width: 9,
+                        height: 9,
+                        borderRadius: 2,
+                        background: 'rgba(124,192,255,0.85)',
+                        cursor: 'ew-resize',
+                        zIndex: 3,
+                      }}
+                    />
+                    <div
+                      title="Fade out"
+                      onPointerDown={(e) => beginDrag(e, 'fadeOut', clip)}
+                      style={{
+                        position: 'absolute',
+                        right: 2,
+                        top: 2,
+                        width: 9,
+                        height: 9,
+                        borderRadius: 2,
+                        background: 'rgba(124,192,255,0.85)',
+                        cursor: 'ew-resize',
+                        zIndex: 3,
+                      }}
+                    />
+                    {/* Gain line — full-width thin bar; drag vertically for dB. */}
+                    <div
+                      title={`Gain ${clip.gainDb >= 0 ? '+' : ''}${clip.gainDb.toFixed(1)} dB`}
+                      onPointerDown={(e) => beginDrag(e, 'gain', clip)}
+                      style={{
+                        position: 'absolute',
+                        left: 0,
+                        right: 0,
+                        top: `${gainTopPct}%`,
+                        height: 5,
+                        transform: 'translateY(-50%)',
+                        cursor: 'ns-resize',
+                        zIndex: 2,
+                      }}
                     />
                   </div>
                 );
@@ -450,10 +533,16 @@ function ClipCanvas({
   peaks,
   inSample,
   outSample,
+  fadeInSamples,
+  fadeOutSamples,
+  gainDb,
 }: {
   peaks: StemPeaks;
   inSample: number;
   outSample: number;
+  fadeInSamples: number;
+  fadeOutSamples: number;
+  gainDb: number;
 }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const wrapRef = useRef<HTMLDivElement>(null);
@@ -513,13 +602,54 @@ function ClipCanvas({
         ctx.lineTo(x + 0.5, Math.max(y2, y1 + 1));
       }
       ctx.stroke();
+
+      // Fade ramps — shaded triangles + edge lines over head/tail.
+      const clipLen = Math.max(1, outSample - inSample);
+      const fiPx = Math.round((fadeInSamples / clipLen) * w);
+      const foPx = Math.round((fadeOutSamples / clipLen) * w);
+      ctx.fillStyle = 'rgba(0,0,0,0.34)';
+      ctx.strokeStyle = 'rgba(255,255,255,0.55)';
+      ctx.lineWidth = 1;
+      if (fiPx > 1) {
+        ctx.beginPath();
+        ctx.moveTo(0, 0);
+        ctx.lineTo(fiPx, 0);
+        ctx.lineTo(0, h);
+        ctx.closePath();
+        ctx.fill();
+        ctx.beginPath();
+        ctx.moveTo(0, h);
+        ctx.lineTo(fiPx, 0);
+        ctx.stroke();
+      }
+      if (foPx > 1) {
+        ctx.beginPath();
+        ctx.moveTo(w, 0);
+        ctx.lineTo(w - foPx, 0);
+        ctx.lineTo(w, h);
+        ctx.closePath();
+        ctx.fill();
+        ctx.beginPath();
+        ctx.moveTo(w - foPx, 0);
+        ctx.lineTo(w, h);
+        ctx.stroke();
+      }
+
+      // Gain line — horizontal, +12 dB → top, −24 dB → bottom.
+      const gy = (0.75 - ((gainDb + 24) / 36) * 0.7) * h;
+      ctx.strokeStyle = gainDb === 0 ? 'rgba(255,255,255,0.28)' : 'rgba(255,214,120,0.85)';
+      ctx.lineWidth = gainDb === 0 ? 1 : 1.5;
+      ctx.beginPath();
+      ctx.moveTo(0, gy);
+      ctx.lineTo(w, gy);
+      ctx.stroke();
     }
 
     draw();
     const ro = new ResizeObserver(draw);
     ro.observe(wrap);
     return () => ro.disconnect();
-  }, [peaks, inSample, outSample]);
+  }, [peaks, inSample, outSample, fadeInSamples, fadeOutSamples, gainDb]);
 
   return (
     <div ref={wrapRef} className="stem-clip-canvas-wrap">

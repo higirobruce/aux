@@ -317,11 +317,16 @@
         </tr>
         <tr>
           <td>
-            <div class="lbl">Clip editing v1</div>
+            <div class="lbl">Clip editing</div>
             <div class="why">Cut / move / trim per stem on the timeline. Stays inside one stem — no inserts, no MIDI.</div>
           </td>
-          <td class="status"><span class="pill-st pill-next">Next (unblocked)</span></td>
-          <td>Stem timeline is in, so the surface to edit on exists. Still the heaviest unlanded v0.3 item.</td>
+          <td class="status"><span class="pill-st pill-shipped">Shipped</span></td>
+          <td>
+            v1 shipped (PR #7): split / move / trim / delete on the timeline, per-clip scheduling in the
+            engine, undo/redo. v2 (in review) adds per-clip <strong>fades</strong> (corner handles,
+            de-clicks splits) and <strong>clip gain</strong> — per-clip GainNode envelopes (MixState v25),
+            with copy/paste/duplicate + ripple to follow.
+          </td>
         </tr>
         <tr>
           <td>
@@ -492,17 +497,16 @@
     <h2 style="margin-top: 0;">Recommended next move</h2>
 
     <div class="callout callout-tip">
-      <span class="mark">One lane left</span>
+      <span class="mark">v0.3 essentially landed</span>
       <p>
-        The plugin marathon and the whole warm-analog UI are done — the
-        channel DSP suite, the seven floating plugin windows (incl. the Smart
-        EQ panel), live signal-driven meters, and the reskin all merged to
-        <code>staging</code>. The <strong>real Pitch corrector + plugin-delay-
-        compensation</strong> (PR #12), its <strong>real-f0 graph + quality
-        pass</strong> (PRs #15/#16), and the <strong>/design-system doc
-        route</strong> (PR #14) are all merged too. That leaves a single big
-        v0.3 lane: <strong>Clip editing v1</strong> — cut / move / trim per stem on
-        the timeline, now reachable on top of the read-only stem timeline.
+        The plugin marathon, the warm-analog UI + plugin windows, live
+        signal-driven meters (incl. the real goniometer + BS.1770 LUFS), the
+        Pitch corrector (real DSP + PDC, comb-free PSOLA shifter + formants),
+        and <strong>Clip editing v1</strong> (split / move / trim / delete +
+        undo, PR #7) are all merged to <code>staging</code>. Current work is
+        <strong>Clip editing v2</strong> — per-clip fades + gain (in review),
+        then copy/paste/duplicate + ripple. After that the open lane is the
+        <strong>v1.1 plugins</strong>: Spring reverb, Exciter, Tuner.
       </p>
     </div>
 

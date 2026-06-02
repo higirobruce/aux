@@ -23,7 +23,12 @@
  *     AudioContext.destination
  */
 
-import { type ClipRegion, clipsEndSample, planClipSchedule } from './clip-schedule';
+import {
+  type ClipRegion,
+  type ScheduledClip,
+  clipsEndSample,
+  planClipSchedule,
+} from './clip-schedule';
 import type { AudioGraph, WorkletEvent, WorkletMessage } from './types';
 
 export interface AudioHostOptions {
@@ -416,6 +421,8 @@ export class AudioHost {
 
   private channels = new Map<string, ChannelInternals>();
   private buses = new Map<string, BusInternals>();
+  /** Per-clip gain node for each live source (clip gain + fade envelope). */
+  private clipGains = new WeakMap<AudioBufferSourceNode, GainNode>();
 
   constructor(private readonly options: AudioHostOptions) {}
 
@@ -1986,6 +1993,11 @@ export class AudioHost {
         // already stopped / ended
       }
       src.disconnect();
+      const gain = this.clipGains.get(src);
+      if (gain) {
+        gain.disconnect();
+        this.clipGains.delete(src);
+      }
     }
     channel.sources = [];
   }
@@ -2004,13 +2016,43 @@ export class AudioHost {
     for (const p of plan) {
       const src = this.ctx.createBufferSource();
       src.buffer = buffer;
-      src.connect(front);
+      // Per-clip gain node carries the clip's gain + fade envelope.
+      const clipGain = this.ctx.createGain();
+      src.connect(clipGain);
+      clipGain.connect(front);
+      this.scheduleClipEnvelope(clipGain, t0 + p.whenOffsetSec, p);
+      this.clipGains.set(src, clipGain);
       src.onended = () => {
         const i = channel.sources.indexOf(src);
         if (i !== -1) channel.sources.splice(i, 1);
+        const g = this.clipGains.get(src);
+        if (g) {
+          g.disconnect();
+          this.clipGains.delete(src);
+        }
       };
       src.start(t0 + p.whenOffsetSec, p.offsetSec, p.durationSec);
       channel.sources.push(src);
+    }
+  }
+
+  /** Schedule a clip's gain + fade-in/out envelope on its dedicated GainNode. */
+  private scheduleClipEnvelope(gain: GainNode, startAt: number, p: ScheduledClip): void {
+    const base = 10 ** (p.gainDb / 20);
+    const g = gain.gain;
+    g.cancelScheduledValues(startAt);
+    g.setValueAtTime(base * p.fadeStartScale, startAt);
+    if (p.fadeInSec > 0) {
+      g.linearRampToValueAtTime(base, startAt + p.fadeInSec);
+    } else {
+      g.setValueAtTime(base, startAt);
+    }
+    if (p.fadeOutSec > 0) {
+      // Hold the steady level until the fade-out begins (never before the
+      // fade-in completes), then ramp to silence at the clip end.
+      const foStart = Math.max(startAt + p.fadeInSec, startAt + p.durationSec - p.fadeOutSec);
+      g.setValueAtTime(base, foStart);
+      g.linearRampToValueAtTime(0, startAt + p.durationSec);
     }
   }
 

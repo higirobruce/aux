@@ -36,7 +36,26 @@ export function clipEnd(clip: StemClip): number {
  */
 export function materialise(clips: readonly StemClip[], totalSamples: number): StemClip[] {
   if (clips.length > 0) return clips.map((c) => ({ ...c }));
-  return [{ id: newClipId(), sourceIn: 0, sourceOut: totalSamples, timelineStart: 0 }];
+  return [
+    {
+      id: newClipId(),
+      sourceIn: 0,
+      sourceOut: totalSamples,
+      timelineStart: 0,
+      gainDb: 0,
+      fadeInSamples: 0,
+      fadeOutSamples: 0,
+    },
+  ];
+}
+
+/** Clamp a clip's fades so neither exceeds the clip length and they don't
+ *  overlap (fadeIn + fadeOut ≤ length). Used after any length change. */
+export function clampFades(clip: StemClip): StemClip {
+  const len = clipLength(clip);
+  const fadeInSamples = Math.max(0, Math.min(clip.fadeInSamples, len));
+  const fadeOutSamples = Math.max(0, Math.min(clip.fadeOutSamples, len - fadeInSamples));
+  return { ...clip, fadeInSamples, fadeOutSamples };
 }
 
 /**
@@ -57,18 +76,30 @@ export function splitClipsAt(
     const end = clipEnd(c);
     if (!didSplit && atSample > start && atSample < end) {
       const offset = atSample - start; // samples into the clip
-      out.push({
-        id: newClipId(),
-        sourceIn: c.sourceIn,
-        sourceOut: c.sourceIn + offset,
-        timelineStart: start,
-      });
-      out.push({
-        id: newClipId(),
-        sourceIn: c.sourceIn + offset,
-        sourceOut: c.sourceOut,
-        timelineStart: atSample,
-      });
+      // Left half keeps the fade-in + gain; the new inner edges get no fade.
+      out.push(
+        clampFades({
+          id: newClipId(),
+          sourceIn: c.sourceIn,
+          sourceOut: c.sourceIn + offset,
+          timelineStart: start,
+          gainDb: c.gainDb,
+          fadeInSamples: c.fadeInSamples,
+          fadeOutSamples: 0,
+        })
+      );
+      // Right half keeps the fade-out + gain.
+      out.push(
+        clampFades({
+          id: newClipId(),
+          sourceIn: c.sourceIn + offset,
+          sourceOut: c.sourceOut,
+          timelineStart: atSample,
+          gainDb: c.gainDb,
+          fadeInSamples: 0,
+          fadeOutSamples: c.fadeOutSamples,
+        })
+      );
       didSplit = true;
     } else {
       out.push(c);
@@ -136,11 +167,11 @@ export function trimIn(
   const minDelta = -clip.sourceIn;
   const maxDelta = clip.sourceOut - 1 - clip.sourceIn;
   applied = Math.max(minDelta, Math.min(maxDelta, applied));
-  return {
+  return clampFades({
     ...clip,
     sourceIn: clip.sourceIn + applied,
     timelineStart: clip.timelineStart + applied,
-  };
+  });
 }
 
 /**
@@ -159,5 +190,29 @@ export function trimOut(
   end = snap(end, snapTo, snapThreshold);
   let sourceOut = clip.sourceIn + (end - clip.timelineStart);
   sourceOut = Math.max(clip.sourceIn + 1, Math.min(totalSamples, sourceOut));
-  return { ...clip, sourceOut };
+  return clampFades({ ...clip, sourceOut });
+}
+
+/** Clip gain bounds (dB), matching StemClipSchema. */
+export const MIN_CLIP_GAIN_DB = -24;
+export const MAX_CLIP_GAIN_DB = 12;
+
+/** Drag the fade-in length by `deltaSamples`; clamped so fades don't overlap. */
+export function setFadeIn(clip: StemClip, deltaSamples: number): StemClip {
+  const max = Math.max(0, clipLength(clip) - clip.fadeOutSamples);
+  const fadeInSamples = Math.max(0, Math.min(max, Math.round(clip.fadeInSamples + deltaSamples)));
+  return { ...clip, fadeInSamples };
+}
+
+/** Drag the fade-out length by `deltaSamples`; clamped so fades don't overlap. */
+export function setFadeOut(clip: StemClip, deltaSamples: number): StemClip {
+  const max = Math.max(0, clipLength(clip) - clip.fadeInSamples);
+  const fadeOutSamples = Math.max(0, Math.min(max, Math.round(clip.fadeOutSamples + deltaSamples)));
+  return { ...clip, fadeOutSamples };
+}
+
+/** Nudge the clip gain by `deltaDb`, clamped to the schema range. */
+export function setClipGain(clip: StemClip, deltaDb: number): StemClip {
+  const gainDb = Math.max(MIN_CLIP_GAIN_DB, Math.min(MAX_CLIP_GAIN_DB, clip.gainDb + deltaDb));
+  return { ...clip, gainDb };
 }

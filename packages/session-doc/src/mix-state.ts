@@ -52,7 +52,7 @@ import { z } from 'zod';
  *       Optional, so v1–v23 docs stay valid.
  */
 
-export const MIX_STATE_VERSION = 24;
+export const MIX_STATE_VERSION = 25;
 
 /**
  * Versions the strict parse still accepts. During the v15→v16 rollout we
@@ -60,7 +60,13 @@ export const MIX_STATE_VERSION = 24;
  * API strict-parses with this same schema). Narrow back to a single
  * `z.literal(MIX_STATE_VERSION)` once every deployed surface is on v16.
  */
-const ACCEPTED_VERSIONS = [z.literal(21), z.literal(22), z.literal(23), z.literal(24)] as const;
+const ACCEPTED_VERSIONS = [
+  z.literal(21),
+  z.literal(22),
+  z.literal(23),
+  z.literal(24),
+  z.literal(25),
+] as const;
 
 /** Stable id for the always-present Master bus. Sessions can omit it from
  *  their `buses` record; the client treats it as if explicitly present. */
@@ -285,6 +291,12 @@ export const StemClipSchema = z
     sourceOut: z.number().int().min(1),
     /** Global-timeline sample where `sourceIn` lands (move). */
     timelineStart: z.number().int().min(0),
+    /** Clip gain in dB (v25). Default 0 keeps pre-v25 docs at unity. */
+    gainDb: z.number().min(-24).max(12).default(0),
+    /** Fade-in length in samples (v25). Clamped to the clip length on edit. */
+    fadeInSamples: z.number().int().min(0).default(0),
+    /** Fade-out length in samples (v25). */
+    fadeOutSamples: z.number().int().min(0).default(0),
   })
   .refine((c) => c.sourceOut > c.sourceIn, {
     message: 'clip sourceOut must be greater than sourceIn',
