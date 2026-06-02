@@ -65,6 +65,14 @@ export interface AudioHostOptions {
   /** URL to limiter_bg.wasm. */
   limiterWasmUrl?: string | URL;
   /**
+   * URL to the Meter worklet (BS.1770 LUFS + true-peak, read-only sink). When
+   * provided with `meterWasmUrl`, every channel and the Master bus get a
+   * metering tap feeding `getChannelLoudness` / `getMasterLoudness`.
+   */
+  meterWorkletUrl?: string | URL;
+  /** URL to meter_bg.wasm. */
+  meterWasmUrl?: string | URL;
+  /**
    * URL to the Plate-reverb worklet (Dattorro-style). When both URLs are
    * present, any user bus can host one optional reverb insert via
    * addBusReverb(busId, 'plate'). The Master bus never hosts a reverb.
@@ -305,6 +313,16 @@ interface ChannelInternals {
    *  contribution arrives aligned regardless of the Pitch insert's latency. */
   compDelay: DelayNode;
   meterBuffer: Float32Array<ArrayBuffer>;
+  /** Real stereo time-domain tap for the goniometer: panner → splitter →
+   *  analyserL/R. Null when no metering worklet/feed was configured. */
+  gonioSplit: ChannelSplitterNode | null;
+  analyserL: AnalyserNode | null;
+  analyserR: AnalyserNode | null;
+  stereoBufL: Float32Array<ArrayBuffer>;
+  stereoBufR: Float32Array<ArrayBuffer>;
+  /** BS.1770 metering sink (0 outputs); posts loudness which we cache here. */
+  meterNode: AudioWorkletNode | null;
+  loudness: Loudness | null;
   volume: number;
   pan: number;
   muted: boolean;
@@ -326,6 +344,20 @@ interface ChannelInternals {
   clips: ClipRegion[];
 }
 
+/** Latest ITU-R BS.1770 readout posted by a Meter sink (LUFS + dBTP). */
+export interface Loudness {
+  /** Momentary (400 ms) loudness, LUFS. */
+  momentary: number;
+  /** Short-term (3 s) loudness, LUFS. */
+  short: number;
+  /** Integrated (gated) loudness since the last reset, LUFS. */
+  integrated: number;
+  /** Maximum true-peak since reset, dBTP. */
+  truePeakDb: number;
+  /** Count of samples over 0 dBTP since reset. */
+  overs: number;
+}
+
 /** Constant group delay (samples) the Pitch insert imposes while engaged.
  *  Must match `Pitch::latency_samples()` in `@aux/dsp-pitch` (GRAIN/2 = 512).
  *  Used for plugin-delay-compensation across channels. */
@@ -339,6 +371,9 @@ export class AudioHost {
   private ctx: AudioContext | null = null;
   private masterGain: GainNode | null = null;
   private workletNode: AudioWorkletNode | null = null;
+  /** BS.1770 metering sink on the Master bus (post-limiter) + its cached readout. */
+  private masterMeterNode: AudioWorkletNode | null = null;
+  private masterLoudness: Loudness | null = null;
   private listeners = new Set<(e: WorkletEvent) => void>();
   /** Transport tracking so a single channel can be re-scheduled mid-playback
    *  (e.g. after a clip edit) from the correct playhead position. */
@@ -370,6 +405,8 @@ export class AudioHost {
   private consoleWasmModule: WebAssembly.Module | null = null;
   /** MB-Comp — per-channel insert. */
   private mbcompWasmModule: WebAssembly.Module | null = null;
+  /** Same pattern as eq8WasmModule, but for the BS.1770 Meter sink. */
+  private meterWasmModule: WebAssembly.Module | null = null;
 
   /** Reference Room monitoring filter — between masterGain and the final
    *  worklet output. A list of BiquadFilterNodes wired in series; empty
@@ -543,6 +580,17 @@ export class AudioHost {
       );
     }
 
+    if (this.options.meterWorkletUrl && this.options.meterWasmUrl) {
+      await this.ctx.audioWorklet.addModule(this.options.meterWorkletUrl);
+      const res = await fetch(this.options.meterWasmUrl);
+      if (!res.ok) throw new Error(`meter wasm fetch failed (${res.status})`);
+      this.meterWasmModule = await WebAssembly.compileStreaming(
+        new Response(await res.arrayBuffer(), {
+          headers: { 'Content-Type': 'application/wasm' },
+        })
+      );
+    }
+
     this.workletNode = new AudioWorkletNode(this.ctx, 'aux-processor', {
       numberOfInputs: 1,
       numberOfOutputs: 1,
@@ -588,6 +636,10 @@ export class AudioHost {
       channel.panner.disconnect();
       channel.analyser.disconnect();
       channel.compDelay.disconnect();
+      channel.gonioSplit?.disconnect();
+      channel.analyserL?.disconnect();
+      channel.analyserR?.disconnect();
+      channel.meterNode?.disconnect();
     }
     this.channels.clear();
     for (const bus of this.buses.values()) {
@@ -641,6 +693,27 @@ export class AudioHost {
     analyser.smoothingTimeConstant = 0.5;
     // Plugin-delay-compensation node — delayTime set by recomputePdc().
     const compDelay = new DelayNode(this.ctx, { maxDelayTime: 0.25, delayTime: 0 });
+
+    // Real stereo time-domain tap for the goniometer (pure Web Audio, no
+    // worklet): panner → splitter → analyserL/R (no smoothing — we want raw
+    // samples). The main `analyser` stays mono for level/spectrum.
+    const gonioSplit = this.ctx.createChannelSplitter(2);
+    const analyserL = this.ctx.createAnalyser();
+    const analyserR = this.ctx.createAnalyser();
+    analyserL.fftSize = 1024;
+    analyserR.fftSize = 1024;
+    analyserL.smoothingTimeConstant = 0;
+    analyserR.smoothingTimeConstant = 0;
+
+    // BS.1770 metering sink (0 outputs) — only when the worklet was loaded.
+    let meterNode: AudioWorkletNode | null = null;
+    if (this.meterWasmModule) {
+      meterNode = new AudioWorkletNode(this.ctx, 'aux-meter-processor', {
+        numberOfInputs: 1,
+        numberOfOutputs: 0,
+        processorOptions: { wasmModule: this.meterWasmModule },
+      });
+    }
 
     const volume = init.volume ?? 1;
     const pan = init.pan ?? 0;
@@ -774,6 +847,11 @@ export class AudioHost {
     gain.connect(panner);
     panner.connect(analyser);
     analyser.connect(compDelay);
+    // Metering taps off the panner (post-pan, pre-PDC), parallel dead-ends.
+    panner.connect(gonioSplit);
+    gonioSplit.connect(analyserL, 0);
+    gonioSplit.connect(analyserR, 1);
+    if (meterNode) panner.connect(meterNode);
     compDelay.connect(outputBus.input);
 
     const channelInternals: ChannelInternals = {
@@ -798,6 +876,13 @@ export class AudioHost {
       analyser,
       compDelay,
       meterBuffer: new Float32Array(analyser.fftSize),
+      gonioSplit,
+      analyserL,
+      analyserR,
+      stereoBufL: new Float32Array(analyserL.fftSize),
+      stereoBufR: new Float32Array(analyserR.fftSize),
+      meterNode,
+      loudness: null,
       volume,
       pan,
       muted: false,
@@ -821,6 +906,19 @@ export class AudioHost {
     if (pitch) {
       pitch.port.onmessage = (e: MessageEvent<{ type: string; hz: number }>) => {
         if (e.data?.type === 'f0') channelInternals.pitchHz = e.data.hz;
+      };
+    }
+    if (meterNode) {
+      meterNode.port.onmessage = (e: MessageEvent<{ type: string } & Loudness>) => {
+        if (e.data?.type === 'loudness') {
+          channelInternals.loudness = {
+            momentary: e.data.momentary,
+            short: e.data.short,
+            integrated: e.data.integrated,
+            truePeakDb: e.data.truePeakDb,
+            overs: e.data.overs,
+          };
+        }
       };
     }
 
@@ -1008,6 +1106,10 @@ export class AudioHost {
     channel.panner.disconnect();
     channel.analyser.disconnect();
     channel.compDelay.disconnect();
+    channel.gonioSplit?.disconnect();
+    channel.analyserL?.disconnect();
+    channel.analyserR?.disconnect();
+    channel.meterNode?.disconnect();
     this.channels.delete(stemId);
     this.recomputePdc();
   }
@@ -1339,6 +1441,27 @@ export class AudioHost {
 
     if (isMaster) {
       analyser.connect(this.masterGain);
+      // BS.1770 metering sink on the post-limiter master signal.
+      if (this.meterWasmModule) {
+        const meterNode = new AudioWorkletNode(this.ctx, 'aux-meter-processor', {
+          numberOfInputs: 1,
+          numberOfOutputs: 0,
+          processorOptions: { wasmModule: this.meterWasmModule },
+        });
+        analyser.connect(meterNode);
+        meterNode.port.onmessage = (e: MessageEvent<{ type: string } & Loudness>) => {
+          if (e.data?.type === 'loudness') {
+            this.masterLoudness = {
+              momentary: e.data.momentary,
+              short: e.data.short,
+              integrated: e.data.integrated,
+              truePeakDb: e.data.truePeakDb,
+              overs: e.data.overs,
+            };
+          }
+        };
+        this.masterMeterNode = meterNode;
+      }
     } else {
       const master = this.buses.get(MASTER_BUS_ID);
       if (!master) throw new Error('master bus must exist before child buses');
@@ -1682,6 +1805,76 @@ export class AudioHost {
   }
 
   /**
+   * Fill `outL`/`outR` with the channel's current L/R time-domain samples (for
+   * a real goniometer). Returns false (and leaves the buffers untouched) if the
+   * channel or its stereo tap doesn't exist. Caller sizes the arrays; the tap
+   * uses fftSize=1024.
+   */
+  getChannelStereo(
+    stemId: string,
+    outL: Float32Array<ArrayBuffer>,
+    outR: Float32Array<ArrayBuffer>
+  ): boolean {
+    const channel = this.channels.get(stemId);
+    if (!channel?.analyserL || !channel.analyserR) return false;
+    channel.analyserL.getFloatTimeDomainData(outL);
+    channel.analyserR.getFloatTimeDomainData(outR);
+    return true;
+  }
+
+  /**
+   * Inter-channel correlation (Pearson r, −1..+1) over the current L/R window:
+   * +1 = mono, 0 = uncorrelated/wide, <0 = out-of-phase. Returns 1 when there's
+   * no stereo tap or the signal is silent.
+   */
+  getChannelCorrelation(stemId: string): number {
+    const channel = this.channels.get(stemId);
+    if (!channel?.analyserL || !channel.analyserR) return 1;
+    channel.analyserL.getFloatTimeDomainData(channel.stereoBufL);
+    channel.analyserR.getFloatTimeDomainData(channel.stereoBufR);
+    const l = channel.stereoBufL;
+    const r = channel.stereoBufR;
+    const n = Math.min(l.length, r.length);
+    let sll = 0;
+    let srr = 0;
+    let slr = 0;
+    for (let i = 0; i < n; i++) {
+      const a = l[i] ?? 0;
+      const b = r[i] ?? 0;
+      sll += a * a;
+      srr += b * b;
+      slr += a * b;
+    }
+    const denom = Math.sqrt(sll * srr);
+    if (denom < 1e-9) return 1; // silence reads as mono/centered
+    return Math.max(-1, Math.min(1, slr / denom));
+  }
+
+  /** Latest BS.1770 loudness for a channel, or null if no Meter tap. */
+  getChannelLoudness(stemId: string): Loudness | null {
+    return this.channels.get(stemId)?.loudness ?? null;
+  }
+
+  /** Latest BS.1770 loudness for the Master bus, or null if no Meter tap. */
+  getMasterLoudness(): Loudness | null {
+    return this.masterLoudness;
+  }
+
+  /**
+   * Reset integrated-loudness + true-peak accumulation on every Meter (channels
+   * and Master). Call when transport (re)starts so the integrated reading
+   * reflects the current pass, not the whole session.
+   */
+  resetLoudness(): void {
+    for (const ch of this.channels.values()) {
+      ch.meterNode?.port.postMessage({ type: 'reset' });
+      ch.loudness = null;
+    }
+    this.masterMeterNode?.port.postMessage({ type: 'reset' });
+    this.masterLoudness = null;
+  }
+
+  /**
    * Fill `out` (length = number of bins wanted) with the channel's current
    * frequency magnitudes mapped to 0..1, for the EQ-window spectrum backdrop.
    * Resamples the analyser's 128 frequency bins (fftSize 256) onto `out.length`
@@ -1818,6 +2011,7 @@ export class AudioHost {
     if (this.ctx.state === 'suspended') void this.ctx.resume();
 
     this.stopAll();
+    this.resetLoudness(); // integrated LUFS reflects this pass, not the session
     this.playing = true;
     this.playOffsetSec = offsetSeconds;
     this.playStartCtxTime = this.ctx.currentTime;

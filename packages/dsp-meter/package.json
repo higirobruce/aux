@@ -1,0 +1,23 @@
+{
+  "name": "@aux/dsp-meter",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Loudness meter — ITU-R BS.1770 LUFS (momentary/short/integrated) + 4x true-peak + stereo correlation — Rust DSP compiled to WASM.",
+  "type": "module",
+  "main": "./wasm/meter.js",
+  "types": "./wasm/meter.d.ts",
+  "files": ["wasm"],
+  "exports": {
+    ".": {
+      "types": "./wasm/meter.d.ts",
+      "default": "./wasm/meter.js"
+    },
+    "./meter_bg.wasm": "./wasm/meter_bg.wasm",
+    "./package.json": "./package.json"
+  },
+  "scripts": {
+    "build": "wasm-pack build --release --target web --out-dir wasm --out-name meter && rm -f wasm/.gitignore wasm/package.json",
+    "test:rust": "cargo test --release",
+    "clean": "rm -rf wasm target"
+  }
+}

@@ -66,6 +66,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "aux-dsp-meter"
+version = "0.1.0"
+dependencies = [
+ "wasm-bindgen",
+]
+
+[[package]]
 name = "aux-dsp-pitch"
 version = "0.1.0"
 dependencies = [
