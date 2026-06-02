@@ -2,8 +2,11 @@ import type { StemClip } from '@aux/session-doc';
 import { describe, expect, it } from 'vitest';
 import {
   clipEnd,
+  duplicateClip,
   materialise,
   moveClip,
+  pasteClips,
+  rippleDelete,
   setClipGain,
   setFadeIn,
   setFadeOut,
@@ -174,5 +177,60 @@ describe('setClipGain', () => {
     expect(setClipGain(clip(), -6).gainDb).toBe(-6);
     expect(setClipGain(clip(), 99).gainDb).toBe(12); // clamp max
     expect(setClipGain(clip(), -99).gainDb).toBe(-24); // clamp min
+  });
+});
+
+describe('duplicateClip', () => {
+  it('copies with a fresh id at the target sample, preserving the source window', () => {
+    const c = clip({
+      sourceIn: 100,
+      sourceOut: 900,
+      timelineStart: 0,
+      gainDb: -2,
+      fadeInSamples: 50,
+    });
+    const d = duplicateClip(c, clipEnd(c));
+    expect(d.id).not.toBe(c.id);
+    expect(d.timelineStart).toBe(clipEnd(c));
+    expect(d.sourceIn).toBe(100);
+    expect(d.sourceOut).toBe(900);
+    expect(d.gainDb).toBe(-2);
+    expect(d.fadeInSamples).toBe(50);
+  });
+});
+
+describe('pasteClips', () => {
+  it('re-anchors the earliest clip to the playhead, keeps relative spacing + fresh ids', () => {
+    const board = [
+      clip({ id: 'a', sourceIn: 0, sourceOut: 1000, timelineStart: 2000 }),
+      clip({ id: 'b', sourceIn: 0, sourceOut: 1000, timelineStart: 2500 }),
+    ];
+    const out = pasteClips(board, 10_000);
+    expect(out).toHaveLength(2);
+    expect(out[0]?.timelineStart).toBe(10_000);
+    expect(out[1]?.timelineStart).toBe(10_500); // 500-sample gap preserved
+    expect(out[0]?.id).not.toBe('a');
+    expect(out[1]?.id).not.toBe('b');
+  });
+  it('empty clipboard ⇒ nothing', () => {
+    expect(pasteClips([], 0)).toEqual([]);
+  });
+});
+
+describe('rippleDelete', () => {
+  it('removes the clip and closes the gap for later clips', () => {
+    const clips = [
+      clip({ id: 'a', sourceIn: 0, sourceOut: 1000, timelineStart: 0 }), // len 1000 @ 0
+      clip({ id: 'b', sourceIn: 0, sourceOut: 1000, timelineStart: 1000 }), // @ 1000
+      clip({ id: 'c', sourceIn: 0, sourceOut: 1000, timelineStart: 2000 }), // @ 2000
+    ];
+    const out = rippleDelete(clips, 'b'); // removes b (len 1000), shifts c left by 1000
+    expect(out.map((x) => x.id)).toEqual(['a', 'c']);
+    expect(out.find((x) => x.id === 'a')?.timelineStart).toBe(0); // before — unchanged
+    expect(out.find((x) => x.id === 'c')?.timelineStart).toBe(1000); // closed the gap
+  });
+  it('unknown id ⇒ unchanged copy', () => {
+    const clips = [clip({ id: 'a' })];
+    expect(rippleDelete(clips, 'zzz').map((c) => c.id)).toEqual(['a']);
   });
 });

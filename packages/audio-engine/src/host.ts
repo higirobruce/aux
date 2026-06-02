@@ -2113,6 +2113,13 @@ export class AudioHost {
     return max;
   }
 
+  /** AudioContext sample rate. decodeAudioData resamples every stem to it, so
+   *  clip sample positions share this rate — used to convert the playhead
+   *  (seconds) to clip samples for paste/duplicate. */
+  get sampleRate(): number {
+    return this.ctx?.sampleRate ?? 48000;
+  }
+
   /** Master volume, 0..4; 1 = 0 dB. */
   setMasterGain(value: number, rampSec = 0.01): void {
     if (!this.masterGain || !this.ctx) return;
