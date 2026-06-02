@@ -1184,7 +1184,9 @@ function Goniometer({
     const N = 1024;
     const l = new Float32Array(N);
     const r = new Float32Array(N);
-    const scale = (S / 2 - 8) * 0.95; // full-scale sample → near the rim
+    // Scale so a full-scale mono signal — which projects to (L+R)/√2 = √2 on
+    // the mid axis — lands on the rim instead of clipping off-canvas.
+    const scale = (S / 2 - 8) * Math.SQRT1_2;
     let raf = 0;
     const draw = () => {
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
