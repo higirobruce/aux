@@ -40,9 +40,14 @@ function makeChannel(extra: Record<string, unknown> = {}) {
 }
 
 describe('StemClipSchema', () => {
-  it('accepts a well-formed sample-accurate clip', () => {
+  it('accepts a well-formed sample-accurate clip (fade/gain default to 0)', () => {
     const clip = { id: 'clip_1', sourceIn: 0, sourceOut: 48_000, timelineStart: 0 };
-    expect(StemClipSchema.parse(clip)).toEqual(clip);
+    expect(StemClipSchema.parse(clip)).toEqual({
+      ...clip,
+      gainDb: 0,
+      fadeInSamples: 0,
+      fadeOutSamples: 0,
+    });
   });
 
   it('rejects sourceOut <= sourceIn', () => {
@@ -67,19 +72,19 @@ describe('ChannelStateSchema — clips', () => {
     expect(parsed.clips).toBeUndefined();
   });
 
-  it('parses a channel carrying clips', () => {
+  it('parses a channel carrying clips (v2 fade/gain default to 0)', () => {
     const clips = [{ id: 'clip_1', sourceIn: 0, sourceOut: 1000, timelineStart: 500 }];
     const parsed = ChannelStateSchema.parse(makeChannel({ clips }));
-    expect(parsed.clips).toEqual(clips);
+    expect(parsed.clips).toEqual([{ ...clips[0], gainDb: 0, fadeInSamples: 0, fadeOutSamples: 0 }]);
   });
 });
 
 describe('MixStateSchema — version transition', () => {
-  it('emptyMixState() is the current version (24) and round-trips', () => {
+  it('emptyMixState() is the current version (25) and round-trips', () => {
     const doc = emptyMixState();
-    expect(doc.version).toBe(24);
-    expect(MIX_STATE_VERSION).toBe(24);
-    expect(MixStateSchema.parse(doc).version).toBe(24);
+    expect(doc.version).toBe(25);
+    expect(MIX_STATE_VERSION).toBe(25);
+    expect(MixStateSchema.parse(doc).version).toBe(25);
   });
 
   it('accepts v21–v23 docs during the transition window', () => {
@@ -90,6 +95,6 @@ describe('MixStateSchema — version transition', () => {
 
   it('rejects versions outside the accepted set', () => {
     expect(MixStateSchema.safeParse({ ...emptyMixState(), version: 20 }).success).toBe(false);
-    expect(MixStateSchema.safeParse({ ...emptyMixState(), version: 25 }).success).toBe(false);
+    expect(MixStateSchema.safeParse({ ...emptyMixState(), version: 26 }).success).toBe(false);
   });
 });

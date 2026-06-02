@@ -4,6 +4,9 @@ import {
   clipEnd,
   materialise,
   moveClip,
+  setClipGain,
+  setFadeIn,
+  setFadeOut,
   snap,
   snapTargets,
   splitClipsAt,
@@ -15,7 +18,16 @@ const TOTAL = 480_000; // 10 s @ 48k
 const NO_SNAP = { targets: [] as number[], threshold: 0 };
 
 function clip(over: Partial<StemClip> = {}): StemClip {
-  return { id: 'c1', sourceIn: 0, sourceOut: TOTAL, timelineStart: 0, ...over };
+  return {
+    id: 'c1',
+    sourceIn: 0,
+    sourceOut: TOTAL,
+    timelineStart: 0,
+    gainDb: 0,
+    fadeInSamples: 0,
+    fadeOutSamples: 0,
+    ...over,
+  };
 }
 
 describe('materialise', () => {
@@ -117,5 +129,50 @@ describe('trimOut', () => {
     const c = clip({ sourceIn: 0, sourceOut: 1000, timelineStart: 0 });
     const t = trimOut(c, 9_999_999, TOTAL, [], 0);
     expect(t.sourceOut).toBe(TOTAL);
+  });
+  it('re-clamps a fade longer than the trimmed length', () => {
+    const c = clip({ sourceIn: 0, sourceOut: 1000, timelineStart: 0, fadeOutSamples: 800 });
+    const t = trimOut(c, -600, TOTAL, [], 0); // length 1000 → 400
+    expect(t.sourceOut).toBe(400);
+    expect(t.fadeOutSamples).toBeLessThanOrEqual(400);
+  });
+});
+
+describe('fades', () => {
+  it('setFadeIn grows the fade, clamped against the fade-out', () => {
+    const c = clip({ sourceIn: 0, sourceOut: 1000, timelineStart: 0, fadeOutSamples: 300 });
+    expect(setFadeIn(c, 200).fadeInSamples).toBe(200);
+    expect(setFadeIn(c, -50).fadeInSamples).toBe(0); // can't go negative
+    expect(setFadeIn(c, 5000).fadeInSamples).toBe(700); // capped at length − fadeOut
+  });
+  it('setFadeOut is symmetric', () => {
+    const c = clip({ sourceIn: 0, sourceOut: 1000, timelineStart: 0, fadeInSamples: 400 });
+    expect(setFadeOut(c, 250).fadeOutSamples).toBe(250);
+    expect(setFadeOut(c, 5000).fadeOutSamples).toBe(600); // length − fadeIn
+  });
+  it('split clears the inner-edge fades, keeps the outer + gain', () => {
+    const c = clip({
+      sourceIn: 0,
+      sourceOut: 1000,
+      timelineStart: 0,
+      gainDb: -3,
+      fadeInSamples: 100,
+      fadeOutSamples: 120,
+    });
+    const [left, right] = splitClipsAt([c], TOTAL, 400);
+    expect(left?.fadeInSamples).toBe(100);
+    expect(left?.fadeOutSamples).toBe(0);
+    expect(right?.fadeInSamples).toBe(0);
+    expect(right?.fadeOutSamples).toBe(120);
+    expect(left?.gainDb).toBe(-3);
+    expect(right?.gainDb).toBe(-3);
+  });
+});
+
+describe('setClipGain', () => {
+  it('nudges within the schema range', () => {
+    expect(setClipGain(clip(), -6).gainDb).toBe(-6);
+    expect(setClipGain(clip(), 99).gainDb).toBe(12); // clamp max
+    expect(setClipGain(clip(), -99).gainDb).toBe(-24); // clamp min
   });
 });

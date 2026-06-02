@@ -16,9 +16,16 @@ export interface ClipRegion {
   sourceOut: number;
   /** Global-timeline sample where `sourceIn` lands. */
   timelineStart: number;
+  /** Clip gain in dB (v2). Absent ⇒ 0 (unity). */
+  gainDb?: number;
+  /** Fade-in length in samples (v2). Absent ⇒ 0. */
+  fadeInSamples?: number;
+  /** Fade-out length in samples (v2). Absent ⇒ 0. */
+  fadeOutSamples?: number;
 }
 
-/** Arguments for one scheduled `source.start(ctx.currentTime + whenOffsetSec, offsetSec, durationSec)`. */
+/** Arguments for one scheduled `source.start(ctx.currentTime + whenOffsetSec, offsetSec, durationSec)`,
+ *  plus the per-clip gain envelope the caller schedules on a dedicated GainNode. */
 export interface ScheduledClip {
   /** Seconds from now to begin playback (0 = immediately). */
   whenOffsetSec: number;
@@ -26,6 +33,15 @@ export interface ScheduledClip {
   offsetSec: number;
   /** How long to play, in seconds (auto-stops at the clip edge). */
   durationSec: number;
+  /** Clip gain in dB (steady-state level the fades ramp to/from). */
+  gainDb: number;
+  /** Remaining fade-in duration from playback start, in seconds (0 = none). */
+  fadeInSec: number;
+  /** Fade-out duration, in seconds, ending at playback end (0 = none). */
+  fadeOutSec: number;
+  /** Gain scale (0..1 of the steady level) at the instant playback begins —
+   *  <1 only when seeking into a fade-in, so the envelope resumes mid-ramp. */
+  fadeStartScale: number;
 }
 
 /**
@@ -60,20 +76,37 @@ export function planClipSchedule(
 
     if (clipEnd <= head) continue; // entirely behind the playhead — skip
 
+    const gainDb = clip.gainDb ?? 0;
+    // Fades clamped to the clip length (each), independent of the other.
+    const fIn = Math.max(0, Math.min(clip.fadeInSamples ?? 0, len));
+    const fOut = Math.max(0, Math.min(clip.fadeOutSamples ?? 0, len));
+
     if (clipStart >= head) {
       // Fully ahead: schedule to begin when the playhead reaches it.
       out.push({
         whenOffsetSec: (clipStart - head) / sampleRate,
         offsetSec: sIn / sampleRate,
         durationSec: len / sampleRate,
+        gainDb,
+        fadeInSec: fIn / sampleRate,
+        fadeOutSec: fOut / sampleRate,
+        fadeStartScale: fIn > 0 ? 0 : 1,
       });
     } else {
-      // Straddles the playhead: begin now, mid-clip.
+      // Straddles the playhead: begin now, mid-clip. Resume the fade-in mid-ramp
+      // if the playhead is inside it; cap the fade-out to the remaining tail.
       const into = head - clipStart; // samples already elapsed within the clip
+      const remaining = len - into;
+      const fadeInLeft = Math.max(0, fIn - into);
+      const startScale = fIn > 0 ? Math.min(1, into / fIn) : 1;
       out.push({
         whenOffsetSec: 0,
         offsetSec: (sIn + into) / sampleRate,
-        durationSec: (len - into) / sampleRate,
+        durationSec: remaining / sampleRate,
+        gainDb,
+        fadeInSec: fadeInLeft / sampleRate,
+        fadeOutSec: Math.min(fOut, remaining) / sampleRate,
+        fadeStartScale: startScale,
       });
     }
   }
