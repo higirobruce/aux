@@ -2,7 +2,7 @@
  * aux Pitch worklet — per-channel monophonic pitch corrector.
  *
  * Message protocol (main → worklet):
- *   { type: 'set-params', keyRoot, scaleId, speed, amount, humanize }
+ *   { type: 'set-params', keyRoot, scaleId, speed, amount, humanize, formant }
  *   { type: 'set-bypassed', bypassed }
  *   { type: 'reset' }
  */
@@ -129,9 +129,10 @@ class Pitch {
      * @param {number} speed
      * @param {number} amount
      * @param {number} humanize
+     * @param {number} formant
      */
-    set_params(key_root, scale_id, speed, amount, humanize) {
-        wasm.pitch_set_params(this.__wbg_ptr, key_root, scale_id, speed, amount, humanize);
+    set_params(key_root, scale_id, speed, amount, humanize, formant) {
+        wasm.pitch_set_params(this.__wbg_ptr, key_root, scale_id, speed, amount, humanize, formant);
     }
 }
 if (Symbol.dispose) Pitch.prototype[Symbol.dispose] = Pitch.prototype.free;
@@ -348,7 +349,7 @@ class PitchProcessor extends AudioWorkletProcessor {
     if (!msg || typeof msg !== 'object') return;
     switch (msg.type) {
       case 'set-params':
-        this.pitch.set_params(msg.keyRoot, msg.scaleId, msg.speed, msg.amount, msg.humanize);
+        this.pitch.set_params(msg.keyRoot, msg.scaleId, msg.speed, msg.amount, msg.humanize, msg.formant ?? 0);
         break;
       case 'set-bypassed':
         this._bypassed = !!msg.bypassed;
