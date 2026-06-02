@@ -249,6 +249,17 @@ interface BusInternals {
   outputBusId: string | null;
 }
 
+/**
+ * A post-fader aux send: a level `gain` tapped from the channel fader, then a
+ * `delay` that mirrors the channel's main-path plugin-delay-compensation so the
+ * send arrives at its destination bus aligned with everything else (a pitched
+ * channel's send would otherwise flam ~10 ms early against the other sends).
+ */
+interface ChannelSend {
+  gain: GainNode;
+  delay: DelayNode;
+}
+
 interface ChannelInternals {
   stemId: string;
   buffer: AudioBuffer | null;
@@ -302,11 +313,12 @@ interface ChannelInternals {
    *  reroute(), which disconnects from the prior bus's input and reattaches. */
   outputBusId: string;
   /**
-   * Post-fader aux sends, keyed by destination bus id. Each send is a
-   * GainNode tapped from `gain.output` and routed to the destination bus's
-   * `input`. Live changes to the level write to the node's gain param.
+   * Post-fader aux sends, keyed by destination bus id. Tapped from
+   * `gain.output`, level → PDC delay → destination bus `input`. Live level
+   * changes write to the send's gain param; recomputePdc() keeps its delay
+   * matched to the main path.
    */
-  sends: Map<string, GainNode>;
+  sends: Map<string, ChannelSend>;
   /** Live buffer sources — one per scheduled clip (empty clips ⇒ one
    *  whole-buffer source). Recreated on every play / seek / clip edit. */
   sources: AudioBufferSourceNode[];
@@ -318,6 +330,10 @@ interface ChannelInternals {
  *  Must match `Pitch::latency_samples()` in `@aux/dsp-pitch` (GRAIN/2 = 512).
  *  Used for plugin-delay-compensation across channels. */
 const PITCH_LATENCY_SAMPLES = 512;
+
+/** Half the master-dip duration (s) used to mask the audible delay step when a
+ *  PDC change lands during playback (engaging/disengaging Pitch). */
+const PDC_MASK_FADE = 0.006;
 
 export class AudioHost {
   private ctx: AudioContext | null = null;
@@ -563,7 +579,10 @@ export class AudioHost {
       if (channel.imager) channel.imager.disconnect();
       if (channel.tape) channel.tape.disconnect();
       if (channel.console) channel.console.disconnect();
-      for (const send of channel.sends.values()) send.disconnect();
+      for (const send of channel.sends.values()) {
+        send.gain.disconnect();
+        send.delay.disconnect();
+      }
       channel.sends.clear();
       channel.gain.disconnect();
       channel.panner.disconnect();
@@ -815,21 +834,46 @@ export class AudioHost {
    * to (max latency across channels − its own), so all contributions arrive
    * aligned at their buses regardless of who's running Pitch.
    *
-   * v1 scope: compensates the main channel→bus path. Post-fader aux sends tap
-   * pre-compDelay, so a pitched channel's *sends* aren't delay-matched yet —
-   * rare in practice; deferred.
+   * Both the main channel→bus path (`compDelay`) and every post-fader aux send
+   * (its `delay`) are compensated, so a pitched channel stays aligned with the
+   * mix on both paths.
+   *
+   * When a change lands during playback (toggling Pitch shifts maxLatency, which
+   * steps every channel's delay and would click), `mask` dips the master for a
+   * few ms across the step so the discontinuity is inaudible. Add/remove during
+   * setup pass `mask: false` and apply instantly.
    */
-  private recomputePdc(): void {
+  private recomputePdc(mask = false): void {
     if (!this.ctx) return;
     let maxLatency = 0;
     for (const ch of this.channels.values()) {
       const lat = ch.pitchEngaged ? PITCH_LATENCY_SAMPLES : 0;
       if (lat > maxLatency) maxLatency = lat;
     }
+
+    const t = this.ctx.currentTime;
+    const masking = mask && this.playing && !!this.masterGain;
+    const applyAt = masking ? t + PDC_MASK_FADE : t;
+
+    if (masking && this.masterGain) {
+      // Brief master dip: fade to silence, jump the delays at the bottom, fade
+      // back — turns a mix-wide click into an inaudible ~12 ms duck.
+      const g = this.masterGain.gain;
+      const vol = g.value;
+      g.cancelScheduledValues(t);
+      g.setValueAtTime(vol, t);
+      g.linearRampToValueAtTime(0, applyAt);
+      g.setValueAtTime(0, applyAt);
+      g.linearRampToValueAtTime(vol, applyAt + PDC_MASK_FADE);
+    }
+
     for (const ch of this.channels.values()) {
       const lat = ch.pitchEngaged ? PITCH_LATENCY_SAMPLES : 0;
       const seconds = (maxLatency - lat) / this.ctx.sampleRate;
-      ch.compDelay.delayTime.setValueAtTime(seconds, this.ctx.currentTime);
+      ch.compDelay.delayTime.setValueAtTime(seconds, applyAt);
+      for (const send of ch.sends.values()) {
+        send.delay.delayTime.setValueAtTime(seconds, applyAt);
+      }
     }
   }
 
@@ -955,7 +999,10 @@ export class AudioHost {
     if (channel.imager) channel.imager.disconnect();
     if (channel.tape) channel.tape.disconnect();
     if (channel.console) channel.console.disconnect();
-    for (const send of channel.sends.values()) send.disconnect();
+    for (const send of channel.sends.values()) {
+      send.gain.disconnect();
+      send.delay.disconnect();
+    }
     channel.sends.clear();
     channel.gain.disconnect();
     channel.panner.disconnect();
@@ -1009,7 +1056,7 @@ export class AudioHost {
     const engaged = !bypassed;
     if (engaged !== channel.pitchEngaged) {
       channel.pitchEngaged = engaged;
-      this.recomputePdc();
+      this.recomputePdc(true); // mask the delay step when toggling mid-playback
     }
   }
 
@@ -1333,7 +1380,8 @@ export class AudioHost {
       // Drop any aux sends pointing at this bus.
       const send = channel.sends.get(busId);
       if (send) {
-        send.disconnect();
+        send.gain.disconnect();
+        send.delay.disconnect();
         channel.sends.delete(busId);
       }
     }
@@ -1574,16 +1622,23 @@ export class AudioHost {
     if (!channel || !target || !this.ctx) return;
     let send = channel.sends.get(busId);
     if (!send) {
-      send = this.ctx.createGain();
-      send.gain.value = 0;
-      // Post-fader tap: channel.gain → send → target.input.
-      channel.gain.connect(send);
-      send.connect(target.input);
+      const gainNode = this.ctx.createGain();
+      gainNode.gain.value = 0;
+      // PDC delay mirrors the channel's main path so the send arrives aligned.
+      const delay = new DelayNode(this.ctx, {
+        maxDelayTime: 0.25,
+        delayTime: channel.compDelay.delayTime.value,
+      });
+      // Post-fader tap: channel.gain → sendGain → sendDelay → target.input.
+      channel.gain.connect(gainNode);
+      gainNode.connect(delay);
+      delay.connect(target.input);
+      send = { gain: gainNode, delay };
       channel.sends.set(busId, send);
     }
     const clamped = Math.max(0, Math.min(2, level));
-    send.gain.cancelScheduledValues(this.ctx.currentTime);
-    send.gain.linearRampToValueAtTime(clamped, this.ctx.currentTime + rampSec);
+    send.gain.gain.cancelScheduledValues(this.ctx.currentTime);
+    send.gain.gain.linearRampToValueAtTime(clamped, this.ctx.currentTime + rampSec);
   }
 
   /** Tear down a single send from `stemId` to `busId`. Idempotent. */
@@ -1592,7 +1647,8 @@ export class AudioHost {
     if (!channel) return;
     const send = channel.sends.get(busId);
     if (!send) return;
-    send.disconnect();
+    send.gain.disconnect();
+    send.delay.disconnect();
     channel.sends.delete(busId);
   }
 

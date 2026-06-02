@@ -545,12 +545,15 @@
         <h3 style="margin-top: 0;">Option C — Plugin-delay-compensation polish</h3>
         <p>
           PDC landed with the Pitch corrector (PR #12) for the main channel
-          path; post-fader <em>sends</em> from a pitched channel aren't
-          delay-matched yet, and the bypass↔engage transition could use a
-          short crossfade.
+          path. Now extended: post-fader <em>sends</em> carry a matching delay
+          so a pitched channel's send no longer flams ~10&nbsp;ms early against
+          the others, and toggling Pitch mid-playback dips the master ~12&nbsp;ms
+          across the delay step so the mix-wide latency change is inaudible
+          instead of clicking.
         </p>
         <p class="caption">
-          <strong>Cost:</strong> Small, localized to the engine.
+          <strong>Status:</strong> in review. Small, engine-localized
+          (<code>host.ts</code>).
         </p>
       </div>
       <div>
