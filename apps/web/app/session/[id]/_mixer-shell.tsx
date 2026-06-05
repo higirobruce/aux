@@ -52,6 +52,7 @@ import Link from 'next/link';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { BusStrip } from './_bus-strip';
 import { ChannelStrip } from './_channel-strip';
+import { clipEnd, duplicateClip, materialise, pasteClips, rippleDelete } from './_clip-editing';
 import { type OpenPlugin, type PluginType, PluginWindows } from './_plugin-windows';
 import { StemDropZone } from './_stem-drop-zone';
 import { type StemPeaks, StemTimeline } from './_stem-timeline';
@@ -511,6 +512,14 @@ export function MixerShell({
   useEffect(() => {
     channelStateRef.current = channelState;
   }, [channelState]);
+  // Live playhead (seconds) for paste/duplicate-at-playhead keyboard actions.
+  const positionRef = useRef(position);
+  positionRef.current = position;
+  // Last copied clip(s) + their source stem (Cmd+C → Cmd+V).
+  const clipboardRef = useRef<{ stemId: string; clips: StemClip[] } | null>(null);
+  // Live peaks (per-stem totalSamples + sampleRate) for clip-sample conversions.
+  const peaksRef = useRef(peaks);
+  peaksRef.current = peaks;
   const busStateRef = useRef(busState);
   useEffect(() => {
     busStateRef.current = busState;
@@ -960,7 +969,58 @@ export function MixerShell({
     return () => window.removeEventListener('keydown', onKey);
   }, [undo, redo]);
 
-  // Delete / Backspace removes the selected clip (ignored while typing).
+  // Cmd/Ctrl+C copy · +V paste at playhead · +D duplicate in place.
+  useEffect(() => {
+    function onKey(e: KeyboardEvent) {
+      if (!(e.metaKey || e.ctrlKey)) return;
+      const k = e.key.toLowerCase();
+      if (k !== 'c' && k !== 'v' && k !== 'd') return;
+      const t = e.target as HTMLElement | null;
+      if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable)) return;
+
+      if (k === 'c') {
+        if (!selectedClip) return;
+        const cur = channelStateRef.current[selectedClip.stemId]?.clips ?? [];
+        const clip = cur.find((c) => c.id === selectedClip.clipId);
+        if (!clip) return;
+        e.preventDefault();
+        clipboardRef.current = { stemId: selectedClip.stemId, clips: [clip] };
+        return;
+      }
+
+      if (k === 'v') {
+        const board = clipboardRef.current;
+        if (!board) return;
+        e.preventDefault();
+        const { stemId } = board;
+        const pk = peaksRef.current[stemId];
+        const sr = pk?.sampleRate ?? hostRef.current?.sampleRate ?? 48_000;
+        const added = pasteClips(board.clips, positionRef.current * sr);
+        if (added.length === 0) return;
+        const cur = channelStateRef.current[stemId]?.clips ?? [];
+        // Materialise an unedited stem first so paste adds to (not replaces) it.
+        const base = cur.length > 0 ? cur : pk ? materialise([], pk.totalSamples) : [];
+        setClips(stemId, [...base, ...added]);
+        const first = added[0];
+        if (first) setSelectedClip({ stemId, clipId: first.id });
+        return;
+      }
+
+      // k === 'd' — duplicate the selected clip immediately after itself.
+      if (!selectedClip) return;
+      const cur = channelStateRef.current[selectedClip.stemId]?.clips ?? [];
+      const clip = cur.find((c) => c.id === selectedClip.clipId);
+      if (!clip) return;
+      e.preventDefault();
+      const dup = duplicateClip(clip, clipEnd(clip));
+      setClips(selectedClip.stemId, [...cur, dup]);
+      setSelectedClip({ stemId: selectedClip.stemId, clipId: dup.id });
+    }
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [selectedClip, setClips]);
+
+  // Delete / Backspace removes the selected clip; Shift closes the gap (ripple).
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
       if (e.key !== 'Delete' && e.key !== 'Backspace') return;
@@ -970,10 +1030,7 @@ export function MixerShell({
       e.preventDefault();
       const { stemId, clipId } = selectedClip;
       const cur = channelStateRef.current[stemId]?.clips ?? [];
-      setClips(
-        stemId,
-        cur.filter((c) => c.id !== clipId)
-      );
+      setClips(stemId, e.shiftKey ? rippleDelete(cur, clipId) : cur.filter((c) => c.id !== clipId));
       setSelectedClip(null);
     }
     window.addEventListener('keydown', onKey);

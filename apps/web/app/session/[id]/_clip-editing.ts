@@ -216,3 +216,43 @@ export function setClipGain(clip: StemClip, deltaDb: number): StemClip {
   const gainDb = Math.max(MIN_CLIP_GAIN_DB, Math.min(MAX_CLIP_GAIN_DB, clip.gainDb + deltaDb));
   return { ...clip, gainDb };
 }
+
+/** A copy of `clip` with a fresh id, placed at `atSample` on the timeline.
+ *  Source window + fades + gain are preserved. */
+export function duplicateClip(clip: StemClip, atSample: number): StemClip {
+  return { ...clip, id: newClipId(), timelineStart: Math.max(0, Math.round(atSample)) };
+}
+
+/**
+ * Re-anchor `clipboard` so its earliest `timelineStart` lands on `atSample`,
+ * preserving the clips' relative spacing and giving each a fresh id. Returns
+ * the clips to ADD to a stem (caller appends to the existing array).
+ */
+export function pasteClips(clipboard: readonly StemClip[], atSample: number): StemClip[] {
+  if (clipboard.length === 0) return [];
+  const base = Math.min(...clipboard.map((c) => c.timelineStart));
+  const at = Math.max(0, Math.round(atSample));
+  return clipboard.map((c) => ({
+    ...c,
+    id: newClipId(),
+    timelineStart: Math.max(0, at + (c.timelineStart - base)),
+  }));
+}
+
+/**
+ * Ripple-delete `clipId`: remove it and shift every clip starting at or after
+ * it left by the removed clip's timeline length, so the gap closes.
+ */
+export function rippleDelete(clips: readonly StemClip[], clipId: string): StemClip[] {
+  const target = clips.find((c) => c.id === clipId);
+  if (!target) return clips.map((c) => ({ ...c }));
+  const gap = clipLength(target);
+  const cut = target.timelineStart;
+  return clips
+    .filter((c) => c.id !== clipId)
+    .map((c) =>
+      c.timelineStart >= cut
+        ? { ...c, timelineStart: Math.max(0, c.timelineStart - gap) }
+        : { ...c }
+    );
+}

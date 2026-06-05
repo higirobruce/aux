@@ -323,9 +323,10 @@
           <td class="status"><span class="pill-st pill-shipped">Shipped</span></td>
           <td>
             v1 shipped (PR #7): split / move / trim / delete on the timeline, per-clip scheduling in the
-            engine, undo/redo. v2 (in review) adds per-clip <strong>fades</strong> (corner handles,
-            de-clicks splits) and <strong>clip gain</strong> — per-clip GainNode envelopes (MixState v25),
-            with copy/paste/duplicate + ripple to follow.
+            engine, undo/redo. v2: per-clip <strong>fades</strong> (corner handles, de-click splits) +
+            <strong>clip gain</strong> — per-clip GainNode envelopes, MixState v25 (PR #21, merged); and
+            <strong>copy / paste / duplicate + ripple-delete</strong> (Cmd+C/V/D, Shift+Delete — in
+            review). All through the existing undo/redo + autosave.
           </td>
         </tr>
         <tr>
